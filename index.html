@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Family Coordinator v7</title>
+    <title>Family Coordinator v8</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -21,7 +21,6 @@
         const PICKUP_WINDOW  = { start: "12:30 PM", end: "1:00 PM"  };
         const NAP_WINDOW     = { start: "1:30 PM",  end: "2:00 PM"  };
 
-        // Default categories — user can add custom ones, stored in state
         const DEFAULT_CATEGORIES = [
             { id: 'health',    name: 'Health & Appointments', icon: '🏥', urgent: true  },
             { id: 'school',    name: 'School & Activities',   icon: '🎒', urgent: true  },
@@ -35,22 +34,9 @@
             { id: 'hurricane', name: 'Hurricane Prep',        icon: '🌀', urgent: false },
         ];
 
-        // Grocery trigger phrases
-        const GROCERY_TRIGGERS = /\b(add to grocery|grocery list|we need|we're out|out of|running low|need to buy|pick up|get more)\b/i;
+        const DEFAULT_STORES = ['Publix', 'Whole Foods', 'Costco', 'Target'];
 
-        function isGroceryItem(text) {
-            return GROCERY_TRIGGERS.test(text);
-        }
-
-        // Extract the actual item name from a grocery-triggered capture
-        function extractGroceryItem(text) {
-            return text
-                .replace(/add to grocery list|grocery list|we need|we're out of|out of|running low on|need to buy|pick up|get more/gi, '')
-                .replace(/^\s*[:,-]\s*/, '')
-                .trim();
-        }
-
-        function guessCategory(text, categories) {
+        function guessCategory(text) {
             const t = text.toLowerCase();
             if (/doctor|dentist|appointment|sick|medicine|pharmacy|pediatr|vaccine|fever|health/.test(t)) return 'health';
             if (/school|teacher|homework|leo|pickup|dropoff|daycare|class|activity|sport/.test(t))        return 'school';
@@ -62,6 +48,78 @@
             if (/project|build|create|design|develop|launch|plan/.test(t))                                return 'projects';
             if (/hurricane|storm|prep|supplies|generator|shutter/.test(t))                                return 'hurricane';
             return 'ideas';
+        }
+
+        // ============================================================
+        // CLAUDE API — parse capture for grocery routing
+        // Returns: { isGrocery: bool, items: [string] }
+        // items is always an array — could be 1 or many
+        // ============================================================
+        async function parseGroceryIntent(text) {
+            try {
+                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 300,
+                        messages: [{
+                            role: 'user',
+                            content: `Analyze this voice/text capture from a parent managing their household:
+
+"${text}"
+
+Determine:
+1. Is this a grocery/shopping request? (mentions needing to buy items, running out of things, adding to shopping list, etc.)
+2. If yes, what are the individual items? Split compound requests into separate items. Clean up the item names — remove filler words, just keep the actual product name.
+
+Return ONLY valid JSON, no explanation:
+{"isGrocery": true, "items": ["oregano", "chili powder"]}
+or
+{"isGrocery": false, "items": []}`
+                        }]
+                    })
+                });
+                const data = await res.json();
+                const raw = data.content[0].text.replace(/```json|```/g, '').trim();
+                return JSON.parse(raw);
+            } catch (err) {
+                console.error('Grocery parse error:', err);
+                // Fallback — treat as non-grocery if API fails
+                return { isGrocery: false, items: [] };
+            }
+        }
+
+        // ============================================================
+        // CLAUDE API — parse Organized tab item for grocery splitting
+        // Same logic but for items already in captures
+        // ============================================================
+        async function parseItemsFromText(text) {
+            try {
+                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 300,
+                        messages: [{
+                            role: 'user',
+                            content: `This text may contain one or more grocery items. Extract them as individual clean item names.
+
+"${text}"
+
+Return ONLY valid JSON:
+{"items": ["item 1", "item 2"]}`
+                        }]
+                    })
+                });
+                const data = await res.json();
+                const raw = data.content[0].text.replace(/```json|```/g, '').trim();
+                const parsed = JSON.parse(raw);
+                return parsed.items?.length ? parsed.items : [text];
+            } catch {
+                return [text];
+            }
         }
 
         // ============================================================
@@ -92,30 +150,35 @@
             const [captureParent, setCaptureParent] = useState('Fernando');
             const [isRecording,   setIsRecording]   = useState(false);
             const [dumpError,     setDumpError]     = useState('');
+            const [parsing,       setParsing]       = useState(false); // Claude parsing indicator
             const recognitionRef = useRef(null);
 
             // ── Organized ─────────────────────────────────────────
-            const [expandedCats,  setExpandedCats]  = useState({});
-            const [editingId,     setEditingId]      = useState(null);
-            const [editingText,   setEditingText]    = useState('');
-            const [newCatName,    setNewCatName]     = useState('');
-            const [showNewCat,    setShowNewCat]     = useState(false);
+            const [expandedCats, setExpandedCats] = useState({});
+            const [editingId,    setEditingId]    = useState(null);
+            const [editingText,  setEditingText]  = useState('');
+            const [newCatName,   setNewCatName]   = useState('');
+            const [showNewCat,   setShowNewCat]   = useState(false);
+            const [movingId,     setMovingId]     = useState(null); // loading state for 🛒 button
 
             // ── Grocery ───────────────────────────────────────────
-            const [groceries,     setGroceries]     = useState([]);
-            const [groceryInput,  setGroceryInput]  = useState('');
+            const [groceries,    setGroceries]    = useState([]);
+            const [groceryInput, setGroceryInput] = useState('');
+            const [stores,       setStores]       = useState(DEFAULT_STORES);
+            const [showNewStore, setShowNewStore] = useState(false);
+            const [newStoreName, setNewStoreName] = useState('');
 
             // ============================================================
-            // SYNC
+            // SYNC — now includes stores
             // ============================================================
-            const syncWithGoogle = async (saveWeek, saveDump, saveGroceries, saveCategories) => {
+            const syncWithGoogle = async (saveWeek, saveDump, saveGroceries, saveCategories, saveStores) => {
                 if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'PASTE_YOUR_URL_HERE') {
                     setSyncStatus('setup_needed');
                     return;
                 }
                 try {
                     setSyncStatus('syncing');
-                    const isWrite = saveWeek !== undefined || saveDump !== undefined || saveGroceries !== undefined || saveCategories !== undefined;
+                    const isWrite = [saveWeek, saveDump, saveGroceries, saveCategories, saveStores].some(v => v !== undefined);
                     if (isWrite) {
                         await fetch(GOOGLE_SCRIPT_URL, {
                             method: 'POST',
@@ -125,9 +188,8 @@
                                 captures:   saveDump       !== undefined ? saveDump       : captures,
                                 groceries:  saveGroceries  !== undefined ? saveGroceries  : groceries,
                                 categories: saveCategories !== undefined ? saveCategories : categories,
-                                parent1Name,
-                                parent2Name,
-                                currentWeek,
+                                stores:     saveStores     !== undefined ? saveStores     : stores,
+                                parent1Name, parent2Name, currentWeek,
                             })
                         });
                     } else {
@@ -137,6 +199,7 @@
                         if (data?.captures)    setCaptures(data.captures);
                         if (data?.groceries)   setGroceries(data.groceries);
                         if (data?.categories)  setCategories(data.categories);
+                        if (data?.stores)      setStores(data.stores);
                         if (data?.parent1Name) setParent1Name(data.parent1Name);
                         if (data?.parent2Name) setParent2Name(data.parent2Name);
                         if (data?.currentWeek) setCurrentWeek(data.currentWeek);
@@ -155,57 +218,60 @@
             }, []);
 
             // ============================================================
-            // SCHEDULE
+            // BUILD grocery items array from parsed item names
+            // ============================================================
+            const buildGroceryItems = (itemNames, addedBy) =>
+                itemNames.map((name, i) => ({
+                    id:        Date.now() + i,
+                    name:      name.charAt(0).toUpperCase() + name.slice(1), // capitalize
+                    store:     '',       // blank by default
+                    completed: false,
+                    addedBy,
+                    timestamp: new Date().toISOString(),
+                }));
+
+            // ============================================================
+            // SCHEDULE (unchanged from v7)
             // ============================================================
             const handleImageUpload = (parent, e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onloadend = () => {
-                    if (parent === 1) setParent1Image(reader.result);
-                    else              setParent2Image(reader.result);
-                };
+                reader.onloadend = () => { parent === 1 ? setParent1Image(reader.result) : setParent2Image(reader.result); };
                 reader.readAsDataURL(file);
             };
 
             const analyzeSchedules = async () => {
                 if (!parent1Image || !parent2Image) { setAnalyzeError('Please upload both calendar screenshots first.'); return; }
-                setAnalyzeError('');
-                setAnalyzing('reading');
+                setAnalyzeError(''); setAnalyzing('reading');
                 try {
                     const r1 = await fetch('https://api.anthropic.com/v1/messages', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
                             messages: [{ role: 'user', content: [
                                 { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: parent1Image.split(',')[1] } },
-                                { type: 'text', text: `This is ${parent1Name}'s work calendar. Extract only ${parent1Name}'s own meetings for each weekday.\nRules:\n- 12-hour time format\n- IGNORE PTO/OOO entries for other people\n- IGNORE orange/red highlighted reminders for other people\nFormat: Monday (1/26): [time] Title, [time] Title` }
-                            ]}]
-                        })
+                                { type: 'text', text: `This is ${parent1Name}'s work calendar. Extract only ${parent1Name}'s own meetings.\nRules: 12-hour format. IGNORE PTO/OOO for others. IGNORE orange/red reminders for others.\nFormat: Monday (1/26): [time] Title, [time] Title` }
+                            ]}] })
                     });
                     const schedule1 = (await r1.json()).content[0].text;
 
                     const r2 = await fetch('https://api.anthropic.com/v1/messages', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
                             messages: [{ role: 'user', content: [
                                 { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: parent2Image.split(',')[1] } },
-                                { type: 'text', text: `This is ${parent2Name}'s work calendar. Extract only ${parent2Name}'s own meetings for each weekday.\nRules:\n- 12-hour time format\n- IGNORE items with red box/outline (other people's events)\n- IGNORE PTO/OOO for other people\nFormat: Monday (1/26): [time] Title, [time] Title` }
-                            ]}]
-                        })
+                                { type: 'text', text: `This is ${parent2Name}'s work calendar. Extract only ${parent2Name}'s own meetings.\nRules: 12-hour format. IGNORE red box/outline items (others' events). IGNORE PTO/OOO for others.\nFormat: Monday (1/26): [time] Title, [time] Title` }
+                            ]}] })
                     });
                     const schedule2 = (await r2.json()).content[0].text;
 
                     setAnalyzing('assigning');
                     const r3 = await fetch('https://api.anthropic.com/v1/messages', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'claude-sonnet-4-20250514', max_tokens: 2000,
+                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000,
                             messages: [{ role: 'user', content:
-                                `Assign Leo's daycare duties using both schedules.\n\n${parent1Name}: ${schedule1}\n\n${parent2Name}: ${schedule2}\n\nWindows:\n- Drop-off: ${DROPOFF_WINDOW.start}–${DROPOFF_WINDOW.end}\n- Pick-up: ${PICKUP_WINDOW.start}–${PICKUP_WINDOW.end}\n- Nap: ${NAP_WINDOW.start}–${NAP_WINDOW.end}\n\nRules: overlap = cannot do duty. If both free, alternate (${parent1Name} first). If neither, assign DISCUSS. Nap: prefer parent who didn't do pickup.\n\nReturn ONLY valid JSON:\n{"week":"Jan 26–30, 2026","days":[{"day":"Monday","date":"1/26","hidden":false,"notes":"","fernando_meetings":[{"time":"9:00 AM","title":"Meeting"}],"yenny_meetings":[{"time":"1:00 PM","title":"Meeting"}],"dropoff":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"},"pickup":{"assigned":"${parent2Name}","conflict":false,"reason":"reason"},"nap":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"}}]}`
-                            }]
-                        })
+                                `Assign Leo's daycare duties.\n\n${parent1Name}: ${schedule1}\n\n${parent2Name}: ${schedule2}\n\nWindows:\n- Drop-off: ${DROPOFF_WINDOW.start}–${DROPOFF_WINDOW.end}\n- Pick-up: ${PICKUP_WINDOW.start}–${PICKUP_WINDOW.end}\n- Nap: ${NAP_WINDOW.start}–${NAP_WINDOW.end}\n\nRules: overlap = cannot do duty. Both free = alternate (${parent1Name} first). Neither free = DISCUSS. Nap = prefer parent who didn't do pickup.\n\nReturn ONLY valid JSON:\n{"week":"Jan 26–30","days":[{"day":"Monday","date":"1/26","hidden":false,"notes":"","fernando_meetings":[{"time":"9:00 AM","title":"Meeting"}],"yenny_meetings":[{"time":"1:00 PM","title":"Meeting"}],"dropoff":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"},"pickup":{"assigned":"${parent2Name}","conflict":false,"reason":"reason"},"nap":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"}}]}`
+                            }] })
                     });
                     const raw = (await r3.json()).content[0].text;
                     const match = raw.replace(/```json|```/g,'').trim().match(/\{[\s\S]*\}/);
@@ -219,19 +285,17 @@
                     }))};
                     if (normalized.week) setCurrentWeek(normalized.week);
                     setWeekData(normalized);
-                    syncWithGoogle(normalized, undefined, undefined, undefined);
-                } catch(err) {
-                    console.error(err);
-                    setAnalyzeError('Analysis failed. Check connection and try again.');
+                    syncWithGoogle(normalized, undefined, undefined, undefined, undefined);
+                } catch(err) { console.error(err); setAnalyzeError('Analysis failed. Check connection and try again.');
                 } finally { setAnalyzing(null); }
             };
 
-            const saveSchedule = (nd) => { setWeekData(nd); syncWithGoogle(nd, undefined, undefined, undefined); };
+            const saveSchedule = (nd) => { setWeekData(nd); syncWithGoogle(nd, undefined, undefined, undefined, undefined); };
             const toggleAssignment = (di, type) => {
                 const nd = { ...weekData, days: weekData.days.map((d,i) => {
                     if (i!==di) return d;
                     const cur = d[type].assigned;
-                    return {...d,[type]:{...d[type],assigned: cur===parent1Name?parent2Name:cur===parent2Name?'DISCUSS':parent1Name}};
+                    return {...d,[type]:{...d[type],assigned:cur===parent1Name?parent2Name:cur===parent2Name?'DISCUSS':parent1Name}};
                 })};
                 saveSchedule(nd);
             };
@@ -248,29 +312,36 @@
             };
 
             // ============================================================
-            // MENTAL DUMP — auto-routes grocery items
+            // MENTAL DUMP — Claude parses every capture for grocery intent
             // ============================================================
-            const saveCapture = (content, type) => {
-                if (isGroceryItem(content)) {
-                    const itemName = extractGroceryItem(content) || content;
-                    const newItem = { id: Date.now(), name: itemName, completed: false, addedBy: captureParent, timestamp: new Date().toISOString() };
-                    const updatedGroceries = [newItem, ...groceries];
-                    setGroceries(updatedGroceries);
-                    syncWithGoogle(undefined, undefined, updatedGroceries, undefined);
+            const saveCapture = async (content, type) => {
+                setParsing(true);
+                try {
+                    const result = await parseGroceryIntent(content);
+
+                    if (result.isGrocery && result.items.length > 0) {
+                        // Route to grocery tab as individual items
+                        const newItems = buildGroceryItems(result.items, captureParent);
+                        const updatedGroceries = [...newItems, ...groceries];
+                        setGroceries(updatedGroceries);
+                        syncWithGoogle(undefined, undefined, updatedGroceries, undefined, undefined);
+                    } else {
+                        // Route to organized tab as a single capture
+                        const newCapture = {
+                            id: Date.now(), content,
+                            category: guessCategory(content),
+                            type, parent: captureParent,
+                            timestamp: new Date().toISOString(),
+                            completed: false,
+                        };
+                        const updated = [newCapture, ...captures];
+                        setCaptures(updated);
+                        syncWithGoogle(undefined, updated, undefined, undefined, undefined);
+                    }
+                } finally {
+                    setParsing(false);
                     setDumpError('');
-                    return;
                 }
-                const newCapture = {
-                    id: Date.now(), content,
-                    category: guessCategory(content, categories),
-                    type, parent: captureParent,
-                    timestamp: new Date().toISOString(),
-                    completed: false,
-                };
-                const updated = [newCapture, ...captures];
-                setCaptures(updated);
-                syncWithGoogle(undefined, updated, undefined, undefined);
-                setDumpError('');
             };
 
             const handleTextSubmit = () => { if(!textInput.trim()) return; saveCapture(textInput.trim(),'text'); setTextInput(''); };
@@ -290,33 +361,41 @@
             const stopVoice = () => { recognitionRef.current?.stop(); setIsRecording(false); };
 
             // ============================================================
-            // CAPTURES — edit, recategorize, delete, move to grocery
+            // CAPTURES — edit, recategorize, delete
             // ============================================================
             const toggleDone = (id) => {
                 const updated = captures.map(c=>c.id===id?{...c,completed:!c.completed}:c);
-                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined);
+                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined,undefined);
             };
             const deleteCapture = (id) => {
                 const updated = captures.filter(c=>c.id!==id);
-                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined);
+                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined,undefined);
             };
             const startEdit = (cap) => { setEditingId(cap.id); setEditingText(cap.content); };
             const saveEdit = (id) => {
                 const updated = captures.map(c=>c.id===id?{...c,content:editingText}:c);
-                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined);
+                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined,undefined);
                 setEditingId(null); setEditingText('');
             };
             const changeCategory = (id, catId) => {
                 const updated = captures.map(c=>c.id===id?{...c,category:catId}:c);
-                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined);
+                setCaptures(updated); syncWithGoogle(undefined,updated,undefined,undefined,undefined);
             };
-            const moveToGrocery = (cap) => {
-                const newItem = { id: Date.now(), name: cap.content, completed: false, addedBy: cap.parent, timestamp: new Date().toISOString() };
-                const updatedGroceries = [newItem, ...groceries];
-                const updatedCaptures  = captures.filter(c=>c.id!==cap.id);
-                setGroceries(updatedGroceries);
-                setCaptures(updatedCaptures);
-                syncWithGoogle(undefined, updatedCaptures, updatedGroceries, undefined);
+
+            // Move to grocery — Claude parses and splits the item text
+            const moveToGrocery = async (cap) => {
+                setMovingId(cap.id);
+                try {
+                    const itemNames = await parseItemsFromText(cap.content);
+                    const newItems = buildGroceryItems(itemNames, cap.parent);
+                    const updatedGroceries = [...newItems, ...groceries];
+                    const updatedCaptures  = captures.filter(c=>c.id!==cap.id);
+                    setGroceries(updatedGroceries);
+                    setCaptures(updatedCaptures);
+                    syncWithGoogle(undefined, updatedCaptures, updatedGroceries, undefined, undefined);
+                } finally {
+                    setMovingId(null);
+                }
             };
 
             // ============================================================
@@ -327,7 +406,7 @@
                 const newCat = { id: `custom_${Date.now()}`, name: newCatName.trim(), icon: '📌', urgent: false };
                 const updated = [...categories, newCat];
                 setCategories(updated);
-                syncWithGoogle(undefined, undefined, undefined, updated);
+                syncWithGoogle(undefined, undefined, undefined, updated, undefined);
                 setNewCatName(''); setShowNewCat(false);
             };
 
@@ -336,31 +415,44 @@
             // ============================================================
             const addGroceryItem = () => {
                 if (!groceryInput.trim()) return;
-                const newItem = { id: Date.now(), name: groceryInput.trim(), completed: false, addedBy: captureParent, timestamp: new Date().toISOString() };
+                const newItem = { id: Date.now(), name: groceryInput.trim(), store: '', completed: false, addedBy: captureParent, timestamp: new Date().toISOString() };
                 const updated = [newItem, ...groceries];
-                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined);
+                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined,undefined);
                 setGroceryInput('');
             };
             const toggleGroceryDone = (id) => {
                 const updated = groceries.map(g=>g.id===id?{...g,completed:!g.completed}:g);
-                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined);
+                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined,undefined);
             };
             const deleteGrocery = (id) => {
                 const updated = groceries.filter(g=>g.id!==id);
-                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined);
+                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined,undefined);
+            };
+            const updateGroceryStore = (id, store) => {
+                const updated = groceries.map(g=>g.id===id?{...g,store}:g);
+                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined,undefined);
             };
             const clearCompleted = () => {
                 const updated = groceries.filter(g=>!g.completed);
-                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined);
+                setGroceries(updated); syncWithGoogle(undefined,undefined,updated,undefined,undefined);
+            };
+
+            // ── Custom stores ─────────────────────────────────────
+            const addCustomStore = () => {
+                if (!newStoreName.trim()) return;
+                const updated = [...stores, newStoreName.trim()];
+                setStores(updated);
+                syncWithGoogle(undefined, undefined, undefined, undefined, updated);
+                setNewStoreName(''); setShowNewStore(false);
             };
 
             // ============================================================
             // DERIVED
             // ============================================================
-            const pending     = captures.filter(c=>!c.completed).length;
-            const urgentItems = captures.filter(c=>{ const cat=categories.find(x=>x.id===c.category); return cat?.urgent&&!c.completed; });
-            const byCategory  = (id) => captures.filter(c=>c.category===id&&!c.completed);
-            const visibleDays = weekData?.days?.filter(d=>!d.hidden)||[];
+            const pending        = captures.filter(c=>!c.completed).length;
+            const urgentItems    = captures.filter(c=>{ const cat=categories.find(x=>x.id===c.category); return cat?.urgent&&!c.completed; });
+            const byCategory     = (id) => captures.filter(c=>c.category===id&&!c.completed);
+            const visibleDays    = weekData?.days?.filter(d=>!d.hidden)||[];
             const groceryPending = groceries.filter(g=>!g.completed).length;
 
             const badge = ({
@@ -383,7 +475,7 @@
                         <div>
                             <h1 className="text-2xl font-bold text-indigo-900">
                                 👨‍👩‍👦 Family Coordinator
-                                <span className="text-xs font-normal ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v7</span>
+                                <span className="text-xs font-normal ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v8</span>
                             </h1>
                             {currentWeek && <p className="text-gray-500 text-sm mt-0.5">{currentWeek}</p>}
                             <div className={`flex items-center gap-1.5 mt-1 text-sm ${badge.cls}`}>
@@ -420,7 +512,7 @@
                 </div>
 
                 {/* ══════════════════════════════════════
-                    TAB 1 — SCHEDULE (unchanged from v6)
+                    TAB 1 — SCHEDULE
                 ══════════════════════════════════════ */}
                 {activeTab==='schedule' && (
                     <div className="space-y-4">
@@ -436,7 +528,7 @@
                                             <p className="font-semibold text-gray-700 mb-3">{name}'s Calendar</p>
                                             <input type="file" accept="image/*" onChange={e=>handleImageUpload(n,e)} className="hidden" id={`upload-${n}`}/>
                                             <label htmlFor={`upload-${n}`} className="cursor-pointer block">
-                                                {img ? (<><img src={img} alt="" className="w-full h-36 object-cover rounded-lg mb-2"/><p className="text-green-600 text-sm font-medium">✓ Uploaded — tap to replace</p></>) :
+                                                {img?(<><img src={img} alt="" className="w-full h-36 object-cover rounded-lg mb-2"/><p className="text-green-600 text-sm font-medium">✓ Uploaded — tap to replace</p></>):
                                                 (<div className="py-8"><div className="text-4xl mb-2">📷</div><p className="text-indigo-600 text-sm font-medium">Tap to upload screenshot</p></div>)}
                                             </label>
                                         </div>
@@ -447,13 +539,12 @@
                                 className="w-full py-4 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
                                 {analyzing==='reading'?'🔍 Reading calendars…':analyzing==='assigning'?'🧠 Assigning duties…':'✨ Analyze & Assign Duties'}
                             </button>
-                            {analyzeError && <p className="mt-3 text-sm text-red-600 text-center">{analyzeError}</p>}
+                            {analyzeError&&<p className="mt-3 text-sm text-red-600 text-center">{analyzeError}</p>}
                             <div className="mt-3 p-3 bg-blue-50 rounded-xl text-xs text-gray-600 text-center">
                                 Drop-off {DROPOFF_WINDOW.start}–{DROPOFF_WINDOW.end} · Pick-up {PICKUP_WINDOW.start}–{PICKUP_WINDOW.end} · Nap {NAP_WINDOW.start}–{NAP_WINDOW.end}
                             </div>
                         </div>
-
-                        {weekData && (<>
+                        {weekData&&(<>
                             <button onClick={exportToClipboard} className="w-full py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700">📋 Copy Week to Clipboard</button>
                             <p className="text-xs text-center text-gray-400">Tap any card to cycle: {parent1Name} → {parent2Name} → DISCUSS</p>
                             {weekData.days.map((day,i)=>(
@@ -468,7 +559,7 @@
                                             {expandedDay===i?'▼ Hide':'▶ Meetings'}
                                         </button>
                                     </div>
-                                    {!day.hidden && (<>
+                                    {!day.hidden&&(<>
                                         <div className="px-4 pt-3">
                                             <input type="text" placeholder="Notes…" value={day.notes} onChange={e=>updateNotes(i,e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm"/>
                                         </div>
@@ -482,7 +573,7 @@
                                                 </div>
                                             ))}
                                         </div>
-                                        {expandedDay===i && (
+                                        {expandedDay===i&&(
                                             <div className="px-4 pb-4 pt-3 bg-gray-50 border-t rounded-b-2xl">
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div>
@@ -531,15 +622,28 @@
                             </div>
                         </div>
 
+                        {/* Claude parsing indicator */}
+                        {parsing && (
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex items-center gap-3">
+                                <div className="text-2xl animate-spin">🧠</div>
+                                <div>
+                                    <p className="font-medium text-indigo-800 text-sm">Analyzing your capture…</p>
+                                    <p className="text-xs text-indigo-500">Routing to the right place automatically</p>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="bg-white rounded-2xl shadow p-5">
                             <h2 className="font-bold text-gray-800 mb-3">🎤 Voice Memo</h2>
-                            <button onClick={isRecording?stopVoice:startVoice}
-                                className={`w-full py-5 rounded-xl font-semibold text-lg transition-all ${isRecording?'bg-red-500 text-white animate-pulse':'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
-                                {isRecording?'⏹ Stop Recording':'🎤 Tap to Speak'}
+                            <button onClick={isRecording?stopVoice:startVoice} disabled={parsing}
+                                className={`w-full py-5 rounded-xl font-semibold text-lg transition-all ${isRecording?'bg-red-500 text-white animate-pulse':parsing?'bg-gray-200 text-gray-400 cursor-not-allowed':'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+                                {isRecording?'⏹ Stop Recording':parsing?'Processing…':'🎤 Tap to Speak'}
                             </button>
                             {isRecording&&<p className="text-center text-sm text-red-500 mt-2 animate-pulse">Listening… speak clearly, then tap Stop</p>}
                             {dumpError&&<p className="text-center text-sm text-red-500 mt-2">{dumpError}</p>}
-                            <p className="text-xs text-gray-400 text-center mt-2">Works best in Chrome · Say "we need milk" to auto-add to grocery list</p>
+                            <p className="text-xs text-gray-400 text-center mt-2">
+                                Claude automatically routes grocery items to the 🛒 tab and splits them into individual items
+                            </p>
                         </div>
 
                         <div className="bg-white rounded-2xl shadow p-5">
@@ -547,15 +651,18 @@
                             <div className="flex gap-2">
                                 <input type="text" value={textInput} onChange={e=>setTextInput(e.target.value)}
                                     onKeyDown={e=>e.key==='Enter'&&handleTextSubmit()}
-                                    placeholder='Type anything… or "we need milk" for groceries'
-                                    className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
-                                <button onClick={handleTextSubmit} disabled={!textInput.trim()}
+                                    disabled={parsing}
+                                    placeholder="Type anything… grocery items auto-routed"
+                                    className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-gray-50"/>
+                                <button onClick={handleTextSubmit} disabled={!textInput.trim()||parsing}
                                     className="px-5 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-40 text-xl font-bold">+</button>
                             </div>
-                            <p className="text-xs text-gray-400 mt-2">Grocery triggers: "we need", "out of", "running low", "add to grocery list"</p>
+                            <p className="text-xs text-gray-400 mt-2">
+                                Examples: "add oregano and chili powder to the list" → 2 grocery items · "call the dentist" → Organized
+                            </p>
                         </div>
 
-                        {captures.length>0 && (
+                        {captures.length>0&&(
                             <div className="bg-white rounded-2xl shadow p-5">
                                 <h2 className="font-bold text-gray-800 mb-3">Recent <span className="text-gray-400 font-normal text-sm">({pending} pending)</span></h2>
                                 <div className="space-y-2">
@@ -579,10 +686,10 @@
                                         );
                                     })}
                                 </div>
-                                {captures.length>8&&<p className="text-xs text-center text-gray-400 mt-3">+{captures.length-8} more in 🧠 Organized tab</p>}
+                                {captures.length>8&&<p className="text-xs text-center text-gray-400 mt-3">+{captures.length-8} more in 🧠 Organized</p>}
                             </div>
                         )}
-                        {captures.length===0&&(
+                        {captures.length===0&&!parsing&&(
                             <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
                                 <div className="text-5xl mb-3">💭</div>
                                 <p className="font-medium text-gray-600">Nothing captured yet</p>
@@ -594,12 +701,9 @@
 
                 {/* ══════════════════════════════════════
                     TAB 3 — ORGANIZED
-                    New: inline edit, category dropdown,
-                    custom categories, move to grocery
                 ══════════════════════════════════════ */}
                 {activeTab==='organized' && (
                     <div className="space-y-3">
-
                         {urgentItems.length>0&&(
                             <div className="bg-red-50 border-l-4 border-red-500 rounded-2xl p-4">
                                 <h3 className="font-bold text-red-800 mb-2">⚡ Urgent — Action Needed</h3>
@@ -617,9 +721,9 @@
 
                         <div className="grid grid-cols-3 gap-3">
                             {[
-                                {label:'Pending',    value:pending,                                                             cls:'text-indigo-700'},
-                                {label:'Done',       value:captures.filter(c=>c.completed).length,                             cls:'text-green-600' },
-                                {label:'Categories', value:new Set(captures.filter(c=>!c.completed).map(c=>c.category)).size,  cls:'text-amber-600' },
+                                {label:'Pending',    value:pending,                                                            cls:'text-indigo-700'},
+                                {label:'Done',       value:captures.filter(c=>c.completed).length,                            cls:'text-green-600' },
+                                {label:'Categories', value:new Set(captures.filter(c=>!c.completed).map(c=>c.category)).size, cls:'text-amber-600' },
                             ].map(s=>(
                                 <div key={s.label} className="bg-white rounded-2xl p-3 text-center shadow">
                                     <div className={`text-2xl font-bold ${s.cls}`}>{s.value}</div>
@@ -628,20 +732,17 @@
                             ))}
                         </div>
 
-                        {/* Add custom category */}
                         <div className="bg-white rounded-2xl shadow p-4">
-                            {!showNewCat ? (
-                                <button onClick={()=>setShowNewCat(true)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-                                    + Add custom category
-                                </button>
-                            ) : (
+                            {!showNewCat?(
+                                <button onClick={()=>setShowNewCat(true)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add custom category</button>
+                            ):(
                                 <div className="flex gap-2">
                                     <input type="text" value={newCatName} onChange={e=>setNewCatName(e.target.value)}
                                         onKeyDown={e=>e.key==='Enter'&&addCustomCategory()}
                                         placeholder="Category name…"
                                         className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" autoFocus/>
-                                    <button onClick={addCustomCategory} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700">Add</button>
-                                    <button onClick={()=>{setShowNewCat(false);setNewCatName('');}} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm hover:bg-gray-200">Cancel</button>
+                                    <button onClick={addCustomCategory} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium">Add</button>
+                                    <button onClick={()=>{setShowNewCat(false);setNewCatName('');}} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm">Cancel</button>
                                 </div>
                             )}
                         </div>
@@ -661,8 +762,7 @@
                                         </div>
                                         <span className="text-gray-400 text-sm">{open?'▼':'▶'}</span>
                                     </button>
-
-                                    {open && (
+                                    {open&&(
                                         <div className="px-4 pb-4 space-y-2 border-t pt-3">
                                             {items.map(cap=>(
                                                 <div key={cap.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
@@ -670,48 +770,37 @@
                                                         <div className="w-5 h-5 rounded border-2 border-gray-300 hover:border-green-400 transition-colors"/>
                                                     </button>
                                                     <div className="flex-1 min-w-0">
-                                                        {/* Inline edit */}
-                                                        {editingId===cap.id ? (
+                                                        {editingId===cap.id?(
                                                             <div className="flex gap-2 mb-2">
                                                                 <input type="text" value={editingText}
                                                                     onChange={e=>setEditingText(e.target.value)}
                                                                     onKeyDown={e=>e.key==='Enter'&&saveEdit(cap.id)}
-                                                                    className="flex-1 px-2 py-1 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                                                                    autoFocus/>
+                                                                    className="flex-1 px-2 py-1 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" autoFocus/>
                                                                 <button onClick={()=>saveEdit(cap.id)} className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-xs font-medium">Save</button>
                                                                 <button onClick={()=>{setEditingId(null);setEditingText('');}} className="px-2 py-1 bg-gray-200 text-gray-600 rounded-lg text-xs">Cancel</button>
                                                             </div>
-                                                        ) : (
+                                                        ):(
                                                             <p className="text-sm text-gray-800 mb-1.5">{cap.content}</p>
                                                         )}
-
-                                                        {/* Category dropdown + meta */}
                                                         <div className="flex flex-wrap items-center gap-1.5">
-                                                            <select
-                                                                value={cap.category}
-                                                                onChange={e=>changeCategory(cap.id,e.target.value)}
+                                                            <select value={cap.category} onChange={e=>changeCategory(cap.id,e.target.value)}
                                                                 className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full border-0 focus:ring-1 focus:ring-indigo-400 cursor-pointer">
-                                                                {categories.map(c=>(
-                                                                    <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
-                                                                ))}
+                                                                {categories.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
                                                             </select>
                                                             <span className={`text-xs px-2 py-0.5 rounded-full ${cap.parent===parent1Name?'bg-blue-50 text-blue-700':'bg-pink-50 text-pink-700'}`}>{cap.parent}</span>
                                                             <span className="text-xs text-gray-400">{cap.type==='voice'?'🎤':'⌨️'} {new Date(cap.timestamp).toLocaleDateString()}</span>
                                                         </div>
                                                     </div>
-
-                                                    {/* Action buttons */}
                                                     <div className="flex flex-col gap-1 flex-shrink-0">
-                                                        {editingId!==cap.id && (
-                                                            <button onClick={()=>startEdit(cap)}
-                                                                className="text-xs text-gray-400 hover:text-indigo-600 px-1.5 py-0.5 rounded hover:bg-indigo-50 transition-colors"
-                                                                title="Edit">✏️</button>
+                                                        {editingId!==cap.id&&(
+                                                            <button onClick={()=>startEdit(cap)} className="text-xs text-gray-400 hover:text-indigo-600 px-1.5 py-0.5 rounded hover:bg-indigo-50" title="Edit">✏️</button>
                                                         )}
-                                                        <button onClick={()=>moveToGrocery(cap)}
-                                                            className="text-xs text-gray-400 hover:text-green-600 px-1.5 py-0.5 rounded hover:bg-green-50 transition-colors"
-                                                            title="Move to grocery list">🛒</button>
-                                                        <button onClick={()=>deleteCapture(cap.id)}
-                                                            className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
+                                                        <button onClick={()=>moveToGrocery(cap)} disabled={movingId===cap.id}
+                                                            className="text-xs text-gray-400 hover:text-green-600 px-1.5 py-0.5 rounded hover:bg-green-50 disabled:opacity-40"
+                                                            title="Move to grocery list">
+                                                            {movingId===cap.id?'⏳':'🛒'}
+                                                        </button>
+                                                        <button onClick={()=>deleteCapture(cap.id)} className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -733,14 +822,15 @@
 
                 {/* ══════════════════════════════════════
                     TAB 4 — GROCERY LIST
+                    Store dropdown per item + Add New store
                 ══════════════════════════════════════ */}
                 {activeTab==='grocery' && (
                     <div className="space-y-4">
 
-                        {/* Add item */}
+                        {/* Add item + manage stores */}
                         <div className="bg-white rounded-2xl shadow p-5">
                             <h2 className="font-bold text-gray-800 mb-3">🛒 Grocery List</h2>
-                            <div className="flex gap-2 mb-2">
+                            <div className="flex gap-2 mb-3">
                                 <input type="text" value={groceryInput}
                                     onChange={e=>setGroceryInput(e.target.value)}
                                     onKeyDown={e=>e.key==='Enter'&&addGroceryItem()}
@@ -749,67 +839,110 @@
                                 <button onClick={addGroceryItem} disabled={!groceryInput.trim()}
                                     className="px-5 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-40 text-xl font-bold">+</button>
                             </div>
-                            <p className="text-xs text-gray-400">
-                                Items auto-added from Mental Dump when you say "we need X" or "out of X"
+                            <p className="text-xs text-gray-400 mb-3">
+                                Items auto-routed from Mental Dump · Claude splits multi-item captures into individual rows
                             </p>
+
+                            {/* Store management */}
+                            <div className="border-t pt-3">
+                                <p className="text-xs text-gray-500 font-medium mb-2">Stores: {stores.join(' · ')}</p>
+                                {!showNewStore?(
+                                    <button onClick={()=>setShowNewStore(true)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add new store</button>
+                                ):(
+                                    <div className="flex gap-2">
+                                        <input type="text" value={newStoreName} onChange={e=>setNewStoreName(e.target.value)}
+                                            onKeyDown={e=>e.key==='Enter'&&addCustomStore()}
+                                            placeholder="Store name…"
+                                            className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" autoFocus/>
+                                        <button onClick={addCustomStore} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium">Add</button>
+                                        <button onClick={()=>{setShowNewStore(false);setNewStoreName('');}} className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs">Cancel</button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* List */}
-                        {groceries.length>0 ? (
+                        {groceries.length>0?(
                             <div className="bg-white rounded-2xl shadow p-5">
-                                <div className="flex justify-between items-center mb-3">
+                                <div className="flex justify-between items-center mb-4">
                                     <h3 className="font-bold text-gray-800">
                                         {groceryPending} item{groceryPending!==1?'s':''} to get
                                         {groceries.filter(g=>g.completed).length>0&&(
-                                            <span className="text-gray-400 font-normal text-sm ml-2">· {groceries.filter(g=>g.completed).length} done</span>
+                                            <span className="text-gray-400 font-normal text-sm ml-2">· {groceries.filter(g=>g.completed).length} in cart</span>
                                         )}
                                     </h3>
                                     {groceries.some(g=>g.completed)&&(
-                                        <button onClick={clearCompleted} className="text-xs text-red-400 hover:text-red-600 font-medium">
-                                            Clear done
-                                        </button>
+                                        <button onClick={clearCompleted} className="text-xs text-red-400 hover:text-red-600 font-medium">Clear done</button>
                                     )}
                                 </div>
 
-                                {/* Pending items */}
-                                <div className="space-y-1.5 mb-4">
+                                {/* Column headers */}
+                                <div className="grid gap-2">
+                                    <div className="grid grid-cols-12 gap-2 px-1 mb-1">
+                                        <div className="col-span-1"></div>
+                                        <div className="col-span-5 text-xs text-gray-400 font-medium uppercase tracking-wide">Item</div>
+                                        <div className="col-span-4 text-xs text-gray-400 font-medium uppercase tracking-wide">Store</div>
+                                        <div className="col-span-2 text-xs text-gray-400 font-medium uppercase tracking-wide">By</div>
+                                    </div>
+
+                                    {/* Pending items */}
                                     {groceries.filter(g=>!g.completed).map(item=>(
-                                        <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border bg-white hover:bg-gray-50 transition-colors">
-                                            <button onClick={()=>toggleGroceryDone(item.id)} className="flex-shrink-0">
-                                                <div className="w-6 h-6 rounded-full border-2 border-gray-300 hover:border-green-500 flex items-center justify-center transition-colors"/>
-                                            </button>
-                                            <span className="flex-1 text-sm text-gray-800 font-medium">{item.name}</span>
-                                            <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${item.addedBy===parent1Name?'bg-blue-50 text-blue-600':'bg-pink-50 text-pink-600'}`}>
-                                                {item.addedBy}
-                                            </span>
-                                            <button onClick={()=>deleteGrocery(item.id)} className="text-gray-300 hover:text-red-400 text-xl flex-shrink-0">×</button>
+                                        <div key={item.id} className="grid grid-cols-12 gap-2 items-center p-2.5 rounded-xl border bg-white hover:bg-gray-50 transition-colors">
+                                            <div className="col-span-1">
+                                                <button onClick={()=>toggleGroceryDone(item.id)}>
+                                                    <div className="w-6 h-6 rounded-full border-2 border-gray-300 hover:border-green-500 transition-colors"/>
+                                                </button>
+                                            </div>
+                                            <div className="col-span-5">
+                                                <span className="text-sm text-gray-800 font-medium">{item.name}</span>
+                                            </div>
+                                            <div className="col-span-4">
+                                                <select
+                                                    value={item.store||''}
+                                                    onChange={e=>updateGroceryStore(item.id, e.target.value)}
+                                                    className="w-full text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-green-400 cursor-pointer">
+                                                    <option value="">— store —</option>
+                                                    {stores.map(s=><option key={s} value={s}>{s}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="col-span-2 flex items-center justify-between">
+                                                <span className={`text-xs px-1.5 py-0.5 rounded-full ${item.addedBy===parent1Name?'bg-blue-50 text-blue-600':'bg-pink-50 text-pink-600'}`}>
+                                                    {item.addedBy?.split(' ')[0]}
+                                                </span>
+                                                <button onClick={()=>deleteGrocery(item.id)} className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
+                                            </div>
                                         </div>
                                     ))}
-                                </div>
 
-                                {/* Completed items */}
-                                {groceries.some(g=>g.completed)&&(
-                                    <>
-                                        <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2">In cart</p>
-                                        <div className="space-y-1.5">
-                                            {groceries.filter(g=>g.completed).map(item=>(
-                                                <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border bg-gray-50 opacity-60">
-                                                    <button onClick={()=>toggleGroceryDone(item.id)} className="flex-shrink-0">
+                                    {/* In cart */}
+                                    {groceries.some(g=>g.completed)&&(<>
+                                        <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mt-3 mb-1">In cart</p>
+                                        {groceries.filter(g=>g.completed).map(item=>(
+                                            <div key={item.id} className="grid grid-cols-12 gap-2 items-center p-2.5 rounded-xl border bg-gray-50 opacity-60">
+                                                <div className="col-span-1">
+                                                    <button onClick={()=>toggleGroceryDone(item.id)}>
                                                         <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold">✓</div>
                                                     </button>
-                                                    <span className="flex-1 text-sm text-gray-500 line-through">{item.name}</span>
-                                                    <button onClick={()=>deleteGrocery(item.id)} className="text-gray-300 hover:text-red-400 text-xl flex-shrink-0">×</button>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </>
-                                )}
+                                                <div className="col-span-5">
+                                                    <span className="text-sm text-gray-400 line-through">{item.name}</span>
+                                                </div>
+                                                <div className="col-span-4">
+                                                    {item.store&&<span className="text-xs text-gray-400">{item.store}</span>}
+                                                </div>
+                                                <div className="col-span-2 flex justify-end">
+                                                    <button onClick={()=>deleteGrocery(item.id)} className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>)}
+                                </div>
                             </div>
-                        ) : (
+                        ):(
                             <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
                                 <div className="text-5xl mb-3">🛒</div>
                                 <p className="font-medium text-gray-600">List is empty</p>
-                                <p className="text-sm mt-1">Add items above or say "we need milk" in the Mental Dump</p>
+                                <p className="text-sm mt-1">Add items above, or say "add oregano and chili powder to the list" in Mental Dump</p>
                             </div>
                         )}
                     </div>
@@ -825,9 +958,8 @@
 
     <!--
     ════════════════════════════════════════════════════════════════════
-    GOOGLE APPS SCRIPT — update your existing script with this code.
-    Adds groceries + categories to the sync payload.
-    Same URL, just deploy a new version.
+    GOOGLE APPS SCRIPT — paste this into your project, deploy new version.
+    Adds a Stores sheet to the existing Schedule/MentalDump/Groceries/Categories sheets.
     ════════════════════════════════════════════════════════════════════
 
     function doGet() {
@@ -836,25 +968,29 @@
       var dump       = ss.getSheetByName('MentalDump') || ss.insertSheet('MentalDump');
       var grocSheet  = ss.getSheetByName('Groceries')  || ss.insertSheet('Groceries');
       var catSheet   = ss.getSheetByName('Categories') || ss.insertSheet('Categories');
+      var storeSheet = ss.getSheetByName('Stores')     || ss.insertSheet('Stores');
 
       var weekData   = null;
       var captures   = [];
       var groceries  = [];
       var categories = [];
+      var stores     = [];
       var meta       = {};
 
-      try { weekData   = JSON.parse(sched.getRange('A1').getValue());     } catch(e) {}
-      try { captures   = JSON.parse(dump.getRange('A1').getValue());      } catch(e) {}
-      try { groceries  = JSON.parse(grocSheet.getRange('A1').getValue()); } catch(e) {}
-      try { categories = JSON.parse(catSheet.getRange('A1').getValue());  } catch(e) {}
-      try { meta       = JSON.parse(sched.getRange('B1').getValue());     } catch(e) {}
+      try { weekData   = JSON.parse(sched.getRange('A1').getValue());      } catch(e) {}
+      try { captures   = JSON.parse(dump.getRange('A1').getValue());       } catch(e) {}
+      try { groceries  = JSON.parse(grocSheet.getRange('A1').getValue());  } catch(e) {}
+      try { categories = JSON.parse(catSheet.getRange('A1').getValue());   } catch(e) {}
+      try { stores     = JSON.parse(storeSheet.getRange('A1').getValue()); } catch(e) {}
+      try { meta       = JSON.parse(sched.getRange('B1').getValue());      } catch(e) {}
 
       return ContentService
         .createTextOutput(JSON.stringify({
-          weekData:   weekData,
-          captures:   captures,
-          groceries:  groceries,
-          categories: categories.length ? categories : null,
+          weekData:    weekData,
+          captures:    captures,
+          groceries:   groceries,
+          categories:  categories.length ? categories : null,
+          stores:      stores.length ? stores : null,
           parent1Name: meta.parent1Name || 'Fernando',
           parent2Name: meta.parent2Name || 'Yenny',
           currentWeek: meta.currentWeek || ''
@@ -887,6 +1023,10 @@
         var catSheet = ss.getSheetByName('Categories') || ss.insertSheet('Categories');
         catSheet.getRange('A1').setValue(JSON.stringify(body.categories));
       }
+      if (body.stores !== undefined) {
+        var storeSheet = ss.getSheetByName('Stores') || ss.insertSheet('Stores');
+        storeSheet.getRange('A1').setValue(JSON.stringify(body.stores));
+      }
 
       return ContentService
         .createTextOutput(JSON.stringify({ ok: true }))
@@ -894,12 +1034,11 @@
     }
 
     STEPS:
-    1. script.google.com → open your project
-    2. Select all → delete → paste the script above → Save
-    3. Deploy → Manage Deployments → edit → New version → Deploy
-    4. In your Google Sheet add 2 new tabs named exactly: Groceries, Categories
-       (You already have Schedule and MentalDump from v6)
-    5. Done — same URL, no changes needed in the HTML file
+    1. script.google.com → open your project → select all → delete → paste above → Save
+    2. Deploy → Manage Deployments → edit → New version → Deploy
+    3. In your Google Sheet add 1 new tab named exactly: Stores
+       (You already have: Schedule, MentalDump, Groceries, Categories from v7)
+    4. Done — same URL, no changes needed in the HTML file
     ════════════════════════════════════════════════════════════════════
     -->
 </body>
