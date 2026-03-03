@@ -241,41 +241,54 @@ Return ONLY valid JSON:
                 reader.readAsDataURL(file);
             };
 
+            const callClaude = async (payload) => {
+                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    const errBody = await res.text();
+                    throw new Error(`API HTTP ${res.status}: ${errBody}`);
+                }
+                const data = await res.json();
+                if (data.error) throw new Error(`API error: ${data.error.message}`);
+                if (!data.content?.[0]?.text) throw new Error(`Unexpected API response: ${JSON.stringify(data)}`);
+                return data.content[0].text;
+            };
+
             const analyzeSchedules = async () => {
                 if (!parent1Image || !parent2Image) { setAnalyzeError('Please upload both calendar screenshots first.'); return; }
                 setAnalyzeError(''); setAnalyzing('reading');
                 try {
-                    const r1 = await fetch('https://api.anthropic.com/v1/messages', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
-                            messages: [{ role: 'user', content: [
-                                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: parent1Image.split(',')[1] } },
-                                { type: 'text', text: `This is ${parent1Name}'s work calendar. Extract only ${parent1Name}'s own meetings.\nRules: 12-hour format. IGNORE PTO/OOO for others. IGNORE orange/red reminders for others.\nFormat: Monday (1/26): [time] Title, [time] Title` }
-                            ]}] })
-                    });
-                    const schedule1 = (await r1.json()).content[0].text;
+                    // Detect image type from data URL
+                    const getMediaType = (dataUrl) => {
+                        const mime = dataUrl.split(';')[0].split(':')[1];
+                        return ['image/jpeg','image/png','image/gif','image/webp'].includes(mime) ? mime : 'image/jpeg';
+                    };
 
-                    const r2 = await fetch('https://api.anthropic.com/v1/messages', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
-                            messages: [{ role: 'user', content: [
-                                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: parent2Image.split(',')[1] } },
-                                { type: 'text', text: `This is ${parent2Name}'s work calendar. Extract only ${parent2Name}'s own meetings.\nRules: 12-hour format. IGNORE red box/outline items (others' events). IGNORE PTO/OOO for others.\nFormat: Monday (1/26): [time] Title, [time] Title` }
-                            ]}] })
+                    const schedule1 = await callClaude({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+                        messages: [{ role: 'user', content: [
+                            { type: 'image', source: { type: 'base64', media_type: getMediaType(parent1Image), data: parent1Image.split(',')[1] } },
+                            { type: 'text', text: `This is ${parent1Name}'s work calendar. Extract only ${parent1Name}'s own meetings.\nRules: 12-hour format. IGNORE PTO/OOO for others. IGNORE orange/red reminders for others.\nFormat: Monday (1/26): [time] Title, [time] Title` }
+                        ]}]
                     });
-                    const schedule2 = (await r2.json()).content[0].text;
+
+                    const schedule2 = await callClaude({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+                        messages: [{ role: 'user', content: [
+                            { type: 'image', source: { type: 'base64', media_type: getMediaType(parent2Image), data: parent2Image.split(',')[1] } },
+                            { type: 'text', text: `This is ${parent2Name}'s work calendar. Extract only ${parent2Name}'s own meetings.\nRules: 12-hour format. IGNORE red box/outline items (others' events). IGNORE PTO/OOO for others.\nFormat: Monday (1/26): [time] Title, [time] Title` }
+                        ]}]
+                    });
 
                     setAnalyzing('assigning');
-                    const r3 = await fetch('https://api.anthropic.com/v1/messages', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000,
-                            messages: [{ role: 'user', content:
-                                `Assign Leo's daycare duties.\n\n${parent1Name}: ${schedule1}\n\n${parent2Name}: ${schedule2}\n\nWindows:\n- Drop-off: ${DROPOFF_WINDOW.start}–${DROPOFF_WINDOW.end}\n- Pick-up: ${PICKUP_WINDOW.start}–${PICKUP_WINDOW.end}\n- Nap: ${NAP_WINDOW.start}–${NAP_WINDOW.end}\n\nRules: overlap = cannot do duty. Both free = alternate (${parent1Name} first). Neither free = DISCUSS. Nap = prefer parent who didn't do pickup.\n\nReturn ONLY valid JSON:\n{"week":"Jan 26–30","days":[{"day":"Monday","date":"1/26","hidden":false,"notes":"","fernando_meetings":[{"time":"9:00 AM","title":"Meeting"}],"yenny_meetings":[{"time":"1:00 PM","title":"Meeting"}],"dropoff":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"},"pickup":{"assigned":"${parent2Name}","conflict":false,"reason":"reason"},"nap":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"}}]}`
-                            }] })
+                    const raw = await callClaude({ model: 'claude-sonnet-4-20250514', max_tokens: 2000,
+                        messages: [{ role: 'user', content:
+                            `Assign Leo's daycare duties.\n\n${parent1Name}: ${schedule1}\n\n${parent2Name}: ${schedule2}\n\nWindows:\n- Drop-off: ${DROPOFF_WINDOW.start}–${DROPOFF_WINDOW.end}\n- Pick-up: ${PICKUP_WINDOW.start}–${PICKUP_WINDOW.end}\n- Nap: ${NAP_WINDOW.start}–${NAP_WINDOW.end}\n\nRules: overlap = cannot do duty. Both free = alternate (${parent1Name} first). Neither free = DISCUSS. Nap = prefer parent who didn't do pickup.\n\nReturn ONLY valid JSON:\n{"week":"Jan 26–30","days":[{"day":"Monday","date":"1/26","hidden":false,"notes":"","fernando_meetings":[{"time":"9:00 AM","title":"Meeting"}],"yenny_meetings":[{"time":"1:00 PM","title":"Meeting"}],"dropoff":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"},"pickup":{"assigned":"${parent2Name}","conflict":false,"reason":"reason"},"nap":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"}}]}`
+                        }]
                     });
-                    const raw = (await r3.json()).content[0].text;
                     const match = raw.replace(/```json|```/g,'').trim().match(/\{[\s\S]*\}/);
-                    if (!match) throw new Error('No JSON');
+                    if (!match) throw new Error(`Could not find JSON in response. Got: ${raw.substring(0,200)}`);
                     const parsed = JSON.parse(match[0]);
                     const normalized = { ...parsed, days: parsed.days.map(d => ({
                         hidden:false,notes:'',fernando_meetings:[],yenny_meetings:[],...d,
@@ -286,7 +299,14 @@ Return ONLY valid JSON:
                     if (normalized.week) setCurrentWeek(normalized.week);
                     setWeekData(normalized);
                     syncWithGoogle(normalized, undefined, undefined, undefined, undefined);
-                } catch(err) { console.error(err); setAnalyzeError('Analysis failed. Check connection and try again.');
+                } catch(err) {
+                    console.error('Schedule analysis error:', err);
+                    // Surface the real error so it's debuggable
+                    let msg = 'Analysis failed.';
+                    if (err?.message) msg += ` Detail: ${err.message}`;
+                    // If it's an API response error, try to show it
+                    if (err?.status) msg += ` (HTTP ${err.status})`;
+                    setAnalyzeError(msg);
                 } finally { setAnalyzing(null); }
             };
 
