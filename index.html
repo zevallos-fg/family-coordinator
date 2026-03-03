@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Family Coordinator v8.3</title>
+    <title>Family Coordinator v8.4</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -251,14 +251,14 @@
                     const schedule1 = await callClaude({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
                         messages: [{ role: 'user', content: [
                             { type: 'image', source: { type: 'base64', media_type: getMediaType(parent1Image), data: parent1Image.split(',')[1] } },
-                            { type: 'text', text: `This is ${parent1Name}'s work calendar for the week. Extract ALL meetings shown for every weekday.\nRules:\n- Include every meeting regardless of color EXCEPT items highlighted in RED - ignore red items completely\n- Include blue, teal, green, purple, gray, white, and all other non-red colored items\n- Use 12-hour time format\n- If a day has no meetings write: No meetings\nFormat strictly as:\nMonday (3/2): [time] Title, [time] Title\nTuesday (3/3): [time] Title\nWednesday (3/4): No meetings` }
+                            { type: 'text', text: `This is ${parent1Name}'s work calendar for the week. Extract ALL meetings shown for every weekday.\nRules:\n- Include every meeting regardless of color EXCEPT items highlighted in RED - ignore red items completely\n- Include blue, teal, green, purple, gray, white, and all other non-red colored items\n- Use 12-hour time format with 30-minute precision - read gridlines carefully, meetings can start at :00 or :30\n- Do NOT round to the nearest hour - if a meeting starts between two hour lines it is a :30 start\n- If a day has no meetings write: No meetings\nFormat strictly as:\nMonday (3/2): [time] Title, [time] Title\nTuesday (3/3): 9:30 AM Title\nWednesday (3/4): No meetings` }
                         ]}]
                     });
 
                     const schedule2 = await callClaude({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
                         messages: [{ role: 'user', content: [
                             { type: 'image', source: { type: 'base64', media_type: getMediaType(parent2Image), data: parent2Image.split(',')[1] } },
-                            { type: 'text', text: `This is ${parent2Name}'s work calendar for the week. Extract ALL meetings shown for every weekday.\nRules:\n- Include every meeting regardless of color EXCEPT items highlighted in RED - ignore red items completely\n- Include blue, teal, green, purple, gray, white, and all other non-red colored items\n- Use 12-hour time format\n- If a day has no meetings write: No meetings\nFormat strictly as:\nMonday (3/2): [time] Title, [time] Title\nTuesday (3/3): [time] Title\nWednesday (3/4): No meetings` }
+                            { type: 'text', text: `This is ${parent2Name}'s work calendar for the week. Extract ALL meetings shown for every weekday.\nRules:\n- Include every meeting regardless of color EXCEPT items highlighted in RED - ignore red items completely\n- Include blue, teal, green, purple, gray, white, and all other non-red colored items\n- Use 12-hour time format with 30-minute precision - read gridlines carefully, meetings can start at :00 or :30\n- Do NOT round to the nearest hour - if a meeting starts between two hour lines it is a :30 start\n- If a day has no meetings write: No meetings\nFormat strictly as:\nMonday (3/2): [time] Title, [time] Title\nTuesday (3/3): 9:30 AM Title\nWednesday (3/4): No meetings` }
                         ]}]
                     });
 
@@ -476,7 +476,7 @@
                         <div>
                             <h1 className="text-2xl font-bold text-indigo-900">
                                 👨‍👩‍👦 Family Coordinator
-                                <span className="text-xs font-normal ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v8.3</span>
+                                <span className="text-xs font-normal ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v8.4</span>
                             </h1>
                             {currentWeek && <p className="text-gray-500 text-sm mt-0.5">{currentWeek}</p>}
                             <div className={`flex items-center gap-1.5 mt-1 text-sm ${badge.cls}`}>
