@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Family Coordinator v8</title>
+    <title>Family Coordinator v8.1</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -14,7 +14,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzzq-qyZLWJDIvAg5FaAJYkyqkEM47Zopi9YvafD77HwdqjIQIYceiNpHHB4KxEog2O/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzlQW-fhe_Hl2sxP59kBQg2HWhT2_497B58XbTOaJdAr-pYouEp2foI7lCQOwAK17xnxQ/exec";
         const SYNC_INTERVAL = 5000;
 
         const DROPOFF_WINDOW = { start: "9:00 AM",  end: "9:30 AM"  };
@@ -57,27 +57,18 @@
         // ============================================================
         async function parseGroceryIntent(text) {
             try {
-                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                const res = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'claude-sonnet-4-20250514',
-                        max_tokens: 300,
-                        messages: [{
-                            role: 'user',
-                            content: `Analyze this voice/text capture from a parent managing their household:
-
-"${text}"
-
-Determine:
-1. Is this a grocery/shopping request? (mentions needing to buy items, running out of things, adding to shopping list, etc.)
-2. If yes, what are the individual items? Split compound requests into separate items. Clean up the item names — remove filler words, just keep the actual product name.
-
-Return ONLY valid JSON, no explanation:
-{"isGrocery": true, "items": ["oregano", "chili powder"]}
-or
-{"isGrocery": false, "items": []}`
-                        }]
+                        action: 'anthropic',
+                        payload: {
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 300,
+                            messages: [{
+                                role: 'user',
+                                content: 'Analyze this voice/text capture from a parent: "' + text + '"\n\nIs this a grocery/shopping request? If yes, extract individual item names.\n\nReturn ONLY valid JSON:\n{"isGrocery": true, "items": ["oregano", "chili powder"]}\nor\n{"isGrocery": false, "items": []}'
+                            }]
+                        }
                     })
                 });
                 const data = await res.json();
@@ -85,32 +76,24 @@ or
                 return JSON.parse(raw);
             } catch (err) {
                 console.error('Grocery parse error:', err);
-                // Fallback — treat as non-grocery if API fails
                 return { isGrocery: false, items: [] };
             }
         }
 
-        // ============================================================
-        // CLAUDE API — parse Organized tab item for grocery splitting
-        // Same logic but for items already in captures
-        // ============================================================
         async function parseItemsFromText(text) {
             try {
-                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                const res = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'claude-sonnet-4-20250514',
-                        max_tokens: 300,
-                        messages: [{
-                            role: 'user',
-                            content: `This text may contain one or more grocery items. Extract them as individual clean item names.
-
-"${text}"
-
-Return ONLY valid JSON:
-{"items": ["item 1", "item 2"]}`
-                        }]
+                        action: 'anthropic',
+                        payload: {
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 300,
+                            messages: [{
+                                role: 'user',
+                                content: 'Extract individual grocery item names from this text: "' + text + '"\n\nReturn ONLY valid JSON:\n{"items": ["item 1", "item 2"]}'
+                            }]
+                        }
                     })
                 });
                 const data = await res.json();
@@ -241,19 +224,19 @@ Return ONLY valid JSON:
                 reader.readAsDataURL(file);
             };
 
+            // All Claude calls go through Apps Script proxy to avoid CORS
             const callClaude = async (payload) => {
-                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                const res = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({ action: 'anthropic', payload })
                 });
                 if (!res.ok) {
                     const errBody = await res.text();
-                    throw new Error(`API HTTP ${res.status}: ${errBody}`);
+                    throw new Error(`Proxy HTTP ${res.status}: ${errBody}`);
                 }
                 const data = await res.json();
                 if (data.error) throw new Error(`API error: ${data.error.message}`);
-                if (!data.content?.[0]?.text) throw new Error(`Unexpected API response: ${JSON.stringify(data)}`);
+                if (!data.content?.[0]?.text) throw new Error(`Unexpected response: ${JSON.stringify(data)}`);
                 return data.content[0].text;
             };
 
@@ -495,7 +478,7 @@ Return ONLY valid JSON:
                         <div>
                             <h1 className="text-2xl font-bold text-indigo-900">
                                 👨‍👩‍👦 Family Coordinator
-                                <span className="text-xs font-normal ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v8</span>
+                                <span className="text-xs font-normal ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v8.1</span>
                             </h1>
                             {currentWeek && <p className="text-gray-500 text-sm mt-0.5">{currentWeek}</p>}
                             <div className={`flex items-center gap-1.5 mt-1 text-sm ${badge.cls}`}>
