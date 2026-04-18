@@ -2223,13 +2223,35 @@
       );
     }
 
-    // ── Grocery Tab stub (full implementation in commit 8) ────────────────────
+    // ── Grocery Tab — extended v20 ────────────────────────────────────────────
     function GroceryTab({ groceries, setGroceries, stores, setStores, categories, parent1Name, parent2Name, captureParent, syncWithGoogle, mealPlanSlots, ingredients, pantry, setPantry }) {
-      const [groceryInput, setGroceryInput] = useState('');
-      const [showNewStore, setShowNewStore] = useState(false);
-      const [newStoreName, setNewStoreName] = useState('');
+      const [groceryInput,  setGroceryInput]  = useState('');
+      const [showNewStore,  setShowNewStore]  = useState(false);
+      const [newStoreName,  setNewStoreName]  = useState('');
+      const [promoteModal,  setPromoteModal]  = useState(null); // grocery item being promoted
+      const [promoteIng,    setPromoteIng]    = useState('');
+      const [promoteQty,    setPromoteQty]    = useState('');
+      const [promoteUnit,   setPromoteUnit]   = useState('piece');
+      const [showSuppressed,setShowSuppressed]= useState(false);
 
       const groceryPending = groceries.filter(g=>!g.completed).length;
+
+      // Determine pantry-backed status for items with ingredientId
+      const isPantryBacked = (item) => {
+        if (!item.ingredientId) return false;
+        const rows  = pantry.filter(p=>p.ingredientId===item.ingredientId);
+        const total = rows.reduce((s,p)=>s+parseFloat(p.quantity||0),0);
+        const needed= parseFloat(item.quantity||1);
+        return total >= needed;
+      };
+
+      // Split items: pantry-backed (suppressed) vs needed
+      const pendingItems    = groceries.filter(g=>!g.completed && !isPantryBacked(g));
+      const suppressedItems = groceries.filter(g=>!g.completed &&  isPantryBacked(g));
+      const completedItems  = groceries.filter(g=>g.completed);
+
+      // Is this item a legacy row (no ingredientId)?
+      const isLegacy = (item) => !item.ingredientId;
 
       const addItem = () => {
         if (!groceryInput.trim()) return;
@@ -2238,9 +2260,30 @@
         setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
         setGroceryInput('');
       };
-      const toggleDone = id => {
+      const toggleDone = (id) => {
         const u = groceries.map(g=>g.id===id?{...g,completed:!g.completed}:g);
         setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+        // §16c: on completion → add to Pantry if ingredientId present
+        const item = groceries.find(g=>g.id===id);
+        if (item && item.ingredientId && !item.completed) {
+          const pantryRow = {
+            pantryId:uuid(), ingredientId:item.ingredientId,
+            quantity:parseFloat(item.quantity||1), unit:item.unit||'piece',
+            addedAt:nowISO(), addedVia:'grocery_completion', expiryDate:null,
+          };
+          setPantry(ps=>[...ps,pantryRow]);
+          appendRow('Pantry', pantryRow);
+          // §16c: preferredStore learning — 3 consecutive same-store → set preferredStore
+          if (item.store && item.ingredientId) {
+            const ing = ingredients.find(i=>i.ingredientId===item.ingredientId);
+            if (ing) {
+              const recentSameStore = completedItems.filter(g=>g.ingredientId===item.ingredientId&&g.store===item.store).length;
+              if (recentSameStore >= 2) { // this is the 3rd
+                updateRow('Ingredients', item.ingredientId, { preferredStore: item.store });
+              }
+            }
+          }
+        }
       };
       const deleteItem = id => {
         const u = groceries.filter(g=>g.id!==id);
@@ -2260,17 +2303,62 @@
         setStores(u); syncWithGoogle(undefined,undefined,undefined,undefined,u);
         setNewStoreName(''); setShowNewStore(false);
       };
+      const buyAnyway = (id) => {
+        const u = groceries.map(g=>g.id===id?{...g,pantryBacked:false,ingredientId:null}:g);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+      };
+      // §16d: promote legacy row to v20 ingredient
+      const openPromote = (item) => {
+        setPromoteModal(item); setPromoteIng(item.name); setPromoteQty('1'); setPromoteUnit('piece');
+      };
+      const confirmPromote = () => {
+        if (!promoteModal || !promoteIng.trim()) return;
+        const ingId = uuid();
+        const newIng = { ingredientId:ingId, canonicalName:promoteIng.trim(), lastUpdated:nowISO(), nutritionPer100g:'{}', needsReview:false };
+        appendRow('Ingredients', newIng);
+        const u = groceries.map(g=>g.id===promoteModal.id?{...g,name:promoteIng.trim(),ingredientId:ingId,quantity:promoteQty,unit:promoteUnit}:g);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+        setPromoteModal(null);
+      };
+
+      const GroceryRow = ({ item, showPromote }) => (
+        <div key={item.id} className={`flex items-center gap-2 p-2.5 rounded-xl border mb-2 transition-colors ${item.completed?'bg-gray-50 opacity-60':'bg-white hover:bg-gray-50'} ${isLegacy(item)&&showPromote?'border-dashed border-gray-300':''}`}>
+          <button onClick={()=>toggleDone(item.id)} className="flex-shrink-0">
+            {item.completed ? (
+              <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold">✓</div>
+            ) : (
+              <div className="w-6 h-6 rounded-full border-2 border-gray-300 hover:border-green-500 transition-colors"/>
+            )}
+          </button>
+          <div className="flex-1 min-w-0">
+            <span className={`text-sm font-medium ${item.completed?'line-through text-gray-400':'text-gray-800'}`}>{item.name}</span>
+            {item.quantity && <span className="text-xs text-gray-400 ml-1.5">{item.quantity} {item.unit}</span>}
+            {isLegacy(item) && showPromote && (
+              <button onClick={()=>openPromote(item)} className="ml-2 text-xs text-indigo-500 hover:underline">promote</button>
+            )}
+          </div>
+          {!item.completed && (
+            <select value={item.store||''} onChange={e=>updateStore(item.id,e.target.value)}
+              className="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none flex-shrink-0 max-w-[90px]">
+              <option value="">— store —</option>
+              {stores.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          <button onClick={()=>deleteItem(item.id)} className="text-gray-300 hover:text-red-400 text-lg flex-shrink-0">×</button>
+        </div>
+      );
 
       return (
         <div className="space-y-4">
+          {/* Add item + store management */}
           <div className="bg-white rounded-2xl shadow p-5">
             <h2 className="font-bold text-gray-800 mb-3">🛒 Grocery List</h2>
-            <div className="flex gap-2 mb-3">
+            <div className="flex gap-2 mb-2">
               <input value={groceryInput} onChange={e=>setGroceryInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addItem()}
                 placeholder="Add an item…" className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-400"/>
               <button onClick={addItem} disabled={!groceryInput.trim()} className="px-5 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-40 text-xl font-bold">+</button>
             </div>
-            <p className="text-xs text-gray-400 mb-3">Items auto-routed from Mental Dump · Grocery projection from Meal Plan coming in commit 8</p>
+            <p className="text-xs text-gray-400 mb-3">Auto-routed from Mental Dump · Meal Plan projects ingredients here</p>
             <div className="border-t pt-3">
               <p className="text-xs text-gray-500 font-medium mb-2">Stores: {stores.join(' · ')}</p>
               {!showNewStore ? (
@@ -2285,46 +2373,76 @@
               )}
             </div>
           </div>
-          {groceries.length > 0 ? (
+
+          {/* Main list */}
+          {(pendingItems.length > 0 || suppressedItems.length > 0 || completedItems.length > 0) ? (
             <div className="bg-white rounded-2xl shadow p-5">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800">{groceryPending} item{groceryPending!==1?'s':''} to get</h3>
-                {groceries.some(g=>g.completed) && <button onClick={clearCompleted} className="text-xs text-red-400 hover:text-red-600 font-medium">Clear done</button>}
+                <h3 className="font-bold text-gray-800">{pendingItems.length} item{pendingItems.length!==1?'s':''} to get</h3>
+                {completedItems.length > 0 && <button onClick={clearCompleted} className="text-xs text-red-400 hover:text-red-600 font-medium">Clear done</button>}
               </div>
-              {groceries.filter(g=>!g.completed).map(item => (
-                <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-xl border mb-2 bg-white hover:bg-gray-50">
-                  <button onClick={()=>toggleDone(item.id)}>
-                    <div className="w-6 h-6 rounded-full border-2 border-gray-300 hover:border-green-500 transition-colors"/>
+
+              {/* Pending items */}
+              {pendingItems.map(item => <GroceryRow key={item.id} item={item} showPromote={true}/>)}
+
+              {/* Pantry-suppressed section */}
+              {suppressedItems.length > 0 && (
+                <div className="border-t mt-3 pt-3">
+                  <button onClick={()=>setShowSuppressed(s=>!s)} className="w-full flex items-center justify-between text-xs text-gray-500 font-medium mb-2 hover:text-gray-700">
+                    <span>✅ You're good on: {suppressedItems.map(i=>i.name).slice(0,3).join(', ')}{suppressedItems.length>3?` +${suppressedItems.length-3}`:''}</span>
+                    <span>{showSuppressed?'▼':'▶'}</span>
                   </button>
-                  <span className="flex-1 text-sm text-gray-800 font-medium">{item.name}</span>
-                  <select value={item.store||''} onChange={e=>updateStore(item.id,e.target.value)}
-                    className="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none">
-                    <option value="">— store —</option>
-                    {stores.map(s=><option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <button onClick={()=>deleteItem(item.id)} className="text-gray-300 hover:text-red-400 text-lg">×</button>
-                </div>
-              ))}
-              {groceries.some(g=>g.completed) && (
-                <>
-                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mt-3 mb-1">In cart</p>
-                  {groceries.filter(g=>g.completed).map(item => (
-                    <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-xl border mb-2 bg-gray-50 opacity-60">
-                      <button onClick={()=>toggleDone(item.id)}>
-                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold">✓</div>
-                      </button>
-                      <span className="flex-1 text-sm text-gray-400 line-through">{item.name}</span>
+                  {showSuppressed && suppressedItems.map(item => (
+                    <div key={item.id} className="flex items-center gap-2 p-2.5 rounded-xl border mb-1.5 bg-green-50 border-green-100">
+                      <span className="text-green-500 text-sm">✓</span>
+                      <span className="flex-1 text-sm text-gray-600 line-through">{item.name}</span>
+                      <button onClick={()=>buyAnyway(item.id)} className="text-xs text-indigo-500 hover:underline flex-shrink-0">buy anyway</button>
                       <button onClick={()=>deleteItem(item.id)} className="text-gray-300 hover:text-red-400 text-lg">×</button>
                     </div>
                   ))}
-                </>
+                </div>
+              )}
+
+              {/* In cart */}
+              {completedItems.length > 0 && (
+                <div className="border-t mt-3 pt-3">
+                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2">In cart</p>
+                  {completedItems.map(item => <GroceryRow key={item.id} item={item} showPromote={false}/>)}
+                </div>
+              )}
+
+              {pendingItems.length === 0 && suppressedItems.length === 0 && completedItems.length > 0 && (
+                <p className="text-center text-sm text-green-600 font-medium py-4">🎉 All items in cart!</p>
               )}
             </div>
           ) : (
             <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
               <div className="text-5xl mb-3">🛒</div>
               <p className="font-medium text-gray-600">List is empty</p>
-              <p className="text-sm mt-1">Add items above or say "add milk and eggs" in Mental Dump</p>
+              <p className="text-sm mt-1">Add items above · say "add milk and eggs" in Dump · assign meals in Meal Plan</p>
+            </div>
+          )}
+
+          {/* Promote legacy row modal */}
+          {promoteModal && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setPromoteModal(null)}>
+              <div className="bg-white rounded-t-3xl w-full p-5 space-y-3" onClick={e=>e.stopPropagation()}>
+                <h3 className="font-bold text-gray-800">Promote to v20 ingredient</h3>
+                <p className="text-xs text-gray-500">Adds to Ingredients table so Pantry tracking and nutrition work.</p>
+                <input value={promoteIng} onChange={e=>setPromoteIng(e.target.value)} placeholder="Canonical ingredient name"
+                  className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                <div className="flex gap-2">
+                  <input type="number" value={promoteQty} onChange={e=>setPromoteQty(e.target.value)} placeholder="Qty"
+                    className="w-20 px-3 py-2 border rounded-xl text-sm focus:outline-none text-center"/>
+                  <select value={promoteUnit} onChange={e=>setPromoteUnit(e.target.value)} className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none">
+                    {['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch'].map(u=><option key={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setPromoteModal(null)} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Cancel</button>
+                  <button onClick={confirmPromote} disabled={!promoteIng.trim()} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40">Promote</button>
+                </div>
+              </div>
             </div>
           )}
         </div>
