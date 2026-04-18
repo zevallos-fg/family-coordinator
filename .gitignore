@@ -20,3 +20,11 @@ Thumbs.db
 # Secrets — never commit these
 *.env
 .env*
+# Next.js
+/.next/
+/out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel
+.vercel
