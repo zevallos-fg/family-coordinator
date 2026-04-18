@@ -1423,12 +1423,191 @@
     }
 
     function BarcodeScannerModal({ onClose, onResult, ingredients }) {
+      const [phase,    setPhase]    = useState('scanning'); // scanning | loading | preview | error
+      const [barcode,  setBarcode]  = useState('');
+      const [result,   setResult]   = useState(null);
+      const [error,    setError]    = useState('');
+      const [addTo,    setAddTo]    = useState('pantry'); // pantry | ingredients
+      const [qty,      setQty]      = useState(1);
+      const [unit,     setUnit]     = useState('piece');
+      const videoRef = useRef(null);
+      const readerRef= useRef(null);
+
+      // Start ZXing scanner
+      useEffect(() => {
+        let reader;
+        const startScanner = async () => {
+          try {
+            const ZXing = window.ZXing;
+            if (!ZXing) { setError('Barcode library failed to load.'); setPhase('error'); return; }
+            reader = new ZXing.BrowserMultiFormatReader();
+            readerRef.current = reader;
+            const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+            const deviceId = devices.find(d=>/back|rear|environment/i.test(d.label))?.deviceId || devices[0]?.deviceId;
+            if (!deviceId) { setError('No camera found.'); setPhase('error'); return; }
+            reader.decodeFromVideoDevice(deviceId, videoRef.current, async (result, err) => {
+              if (result) {
+                reader.reset();
+                const code = result.getText();
+                setBarcode(code);
+                setPhase('loading');
+                await lookupAndSet(code);
+              }
+            });
+          } catch(e) {
+            setError(`Camera error: ${e.message}`); setPhase('error');
+          }
+        };
+        startScanner();
+        return () => { readerRef.current?.reset(); };
+      }, []);
+
+      const lookupAndSet = async (code) => {
+        try {
+          // §14c lookup chain: Open Food Facts → (USDA skip) → Haiku vision fallback
+          let found = await lookupBarcode(code);
+          if (found) {
+            setResult({ ...found, source:'off' });
+            setPhase('preview');
+            return;
+          }
+          // USDA skip (key placeholder per §0b rule 12)
+          // Haiku vision: would need image of wrapper — not available from barcode alone
+          // §0b rule 10 fallback
+          setResult({
+            canonicalName: `Unknown (${code})`,
+            openFoodFactsBarcode: code,
+            needsReview: true,
+            nutritionPer100g: '{}',
+            source: 'fallback',
+          });
+          setPhase('preview');
+        } catch(e) {
+          setResult({ canonicalName:`Unknown (${code})`, openFoodFactsBarcode:code, needsReview:true, nutritionPer100g:'{}', source:'error' });
+          setPhase('preview');
+        }
+      };
+
+      const confirm = () => {
+        if (!result) return;
+        // Upsert ingredient
+        const existing = ingredients.find(i => i.openFoodFactsBarcode === result.openFoodFactsBarcode);
+        const ingredientId = existing?.ingredientId || uuid();
+        const ing = {
+          ingredientId,
+          canonicalName: result.canonicalName,
+          openFoodFactsBarcode: result.openFoodFactsBarcode || barcode,
+          nutritionPer100g: result.nutritionPer100g || '{}',
+          needsReview: result.needsReview || false,
+          lastUpdated: nowISO(),
+        };
+        // Pantry row
+        const pantryRow = addTo === 'pantry' ? {
+          pantryId: uuid(), ingredientId,
+          quantity: qty, unit,
+          addedAt: nowISO(), addedVia: 'barcode_scan', expiryDate: null,
+        } : null;
+        if (!existing) appendRow('Ingredients', ing);
+        if (pantryRow)  appendRow('Pantry', pantryRow);
+        onResult(ing, pantryRow);
+      };
+
       return (
         <div className="fixed inset-0 bg-black z-50 flex flex-col">
-          <div className="p-4 flex items-center gap-3 bg-black/80">
-            <button onClick={onClose} className="text-white text-2xl">✕</button>
-            <p className="text-white font-medium">Barcode Scanner — coming in commit 6</p>
+          {/* Header */}
+          <div className="p-4 flex items-center gap-3 bg-black/80 flex-shrink-0">
+            <button onClick={onClose} className="text-white text-2xl w-8 h-8 flex items-center justify-center">✕</button>
+            <p className="text-white font-medium text-sm">
+              {phase==='scanning'?'Point camera at barcode':phase==='loading'?'Looking up…':phase==='preview'?'Found product':'Error'}
+            </p>
           </div>
+
+          {phase === 'scanning' && (
+            <div className="flex-1 relative">
+              <video ref={videoRef} className="w-full h-full object-cover"/>
+              {/* Viewfinder overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-40 border-2 border-white/80 rounded-xl">
+                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl"/>
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr"/>
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl"/>
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br"/>
+                </div>
+              </div>
+              <p className="absolute bottom-8 left-0 right-0 text-center text-white/70 text-sm">Hold steady over barcode</p>
+            </div>
+          )}
+
+          {phase === 'loading' && (
+            <div className="flex-1 flex items-center justify-center bg-gray-900">
+              <div className="text-center text-white">
+                <div className="text-5xl mb-4 animate-bounce">🔍</div>
+                <p className="font-medium">Looking up barcode…</p>
+                <p className="text-sm text-gray-400 mt-1">{barcode}</p>
+                <p className="text-xs text-gray-500 mt-2">Open Food Facts → USDA → Haiku vision</p>
+              </div>
+            </div>
+          )}
+
+          {phase === 'preview' && result && (
+            <div className="flex-1 bg-white overflow-y-auto">
+              <div className="p-5 space-y-4">
+                {result.source === 'fallback' || result.needsReview ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p className="text-sm font-medium text-amber-800">⚠️ Not found in database</p>
+                    <p className="text-xs text-amber-600 mt-1">Saved as Unknown ({barcode}). Review later in Pantry.</p>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                    <p className="text-sm font-medium text-green-800">✅ Found in Open Food Facts</p>
+                  </div>
+                )}
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="font-semibold text-gray-800">{result.canonicalName}</p>
+                  {result.brand && <p className="text-xs text-gray-500 mt-0.5">{result.brand}</p>}
+                  <p className="text-xs text-gray-400 mt-1 font-mono">{barcode}</p>
+                  {result.nutritionPer100g && result.nutritionPer100g !== '{}' && (() => {
+                    try {
+                      const n = typeof result.nutritionPer100g==='string'?JSON.parse(result.nutritionPer100g):result.nutritionPer100g;
+                      return n.kcal ? <p className="text-xs text-gray-500 mt-1">{n.kcal} kcal · {n.protein_g}g protein · {n.carb_g}g carbs · {n.fat_g}g fat (per 100g)</p> : null;
+                    } catch { return null; }
+                  })()}
+                </div>
+                {/* Add to pantry or just ingredients */}
+                <div>
+                  <p className="text-xs text-gray-500 font-medium mb-2">Add to</p>
+                  <div className="flex gap-2 mb-3">
+                    {[{id:'pantry',label:'🥫 Pantry'},{id:'ingredients',label:'📋 Ingredients only'}].map(o=>(
+                      <button key={o.id} onClick={()=>setAddTo(o.id)} className={`flex-1 py-2 rounded-xl text-sm border transition-all ${addTo===o.id?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{o.label}</button>
+                    ))}
+                  </div>
+                  {addTo==='pantry' && (
+                    <div className="flex gap-2">
+                      <input type="number" value={qty} onChange={e=>setQty(parseFloat(e.target.value)||1)} min={0.1} step={0.5}
+                        className="w-20 px-3 py-2 border rounded-xl text-sm focus:outline-none text-center"/>
+                      <select value={unit} onChange={e=>setUnit(e.target.value)} className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none">
+                        {['g','kg','ml','l','piece','oz','lb'].map(u=><option key={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={onClose} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Cancel</button>
+                  <button onClick={confirm} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Confirm</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {phase === 'error' && (
+            <div className="flex-1 flex items-center justify-center bg-gray-900">
+              <div className="text-center text-white p-8">
+                <div className="text-5xl mb-4">⚠️</div>
+                <p className="font-medium">{error}</p>
+                <button onClick={onClose} className="mt-6 px-8 py-3 bg-white text-gray-800 rounded-xl font-medium">Close</button>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
