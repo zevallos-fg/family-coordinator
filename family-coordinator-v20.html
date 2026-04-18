@@ -754,12 +754,185 @@
     }
 
     function PantryTab({ pantry, setPantry, ingredients, setIngredients, onBarcodeOpen, onReceiptOpen }) {
+      const [query,       setQuery]       = useState('');
+      const [sortBy,      setSortBy]      = useState('added'); // added | expiry
+      const [editingRow,  setEditingRow]  = useState(null);
+      const [manualModal, setManualModal] = useState(false);
+      const [manualForm,  setManualForm]  = useState({ ingredientName:'', quantity:'', unit:'piece', expiryDate:'' });
+
+      const ingName = (ingredientId) => {
+        const ing = ingredients.find(i=>i.ingredientId===ingredientId);
+        return ing?.canonicalName || ingredientId;
+      };
+
+      const rows = pantry
+        .filter(p => ingName(p.ingredientId).toLowerCase().includes(query.toLowerCase()))
+        .sort((a,b) => {
+          if (sortBy === 'expiry') {
+            if (!a.expiryDate && !b.expiryDate) return 0;
+            if (!a.expiryDate) return 1;
+            if (!b.expiryDate) return -1;
+            return new Date(a.expiryDate) - new Date(b.expiryDate);
+          }
+          return new Date(b.addedAt||0) - new Date(a.addedAt||0);
+        });
+
+      const expiryClass = (expiryDate) => {
+        if (!expiryDate) return '';
+        const days = (new Date(expiryDate) - Date.now()) / 86400000;
+        if (days <= 3)  return 'text-red-600 font-semibold';
+        if (days <= 7)  return 'text-orange-500';
+        return 'text-gray-500';
+      };
+
+      const ADDED_VIA_LABEL = {
+        manual:           '✏️ Manual',
+        barcode_scan:     '📱 Scan',
+        receipt_photo:    '📷 Receipt',
+        receipt_digital:  '📧 Email',
+        grocery_completion:'🛒 Grocery',
+      };
+
+      const updateQty = (pantryId, quantity) => {
+        setPantry(ps=>ps.map(p=>p.pantryId===pantryId?{...p,quantity}:p));
+        updateRow('Pantry', pantryId, { quantity });
+      };
+
+      const deleteEntry = (pantryId) => {
+        setPantry(ps=>ps.filter(p=>p.pantryId!==pantryId));
+        deleteRow('Pantry', pantryId);
+      };
+
+      const addManual = () => {
+        if (!manualForm.ingredientName.trim()) return;
+        // Fuzzy-find or create ingredient
+        const existing = ingredients.find(i => fuzzyScore(i.canonicalName||'',manualForm.ingredientName.trim()) >= 0.8);
+        let ingredientId;
+        if (existing) {
+          ingredientId = existing.ingredientId;
+        } else {
+          ingredientId = uuid();
+          const newIng = { ingredientId, canonicalName:manualForm.ingredientName.trim(), lastUpdated:nowISO(), nutritionPer100g:'{}', needsReview:false };
+          setIngredients(is=>[...is,newIng]);
+          appendRow('Ingredients', newIng);
+        }
+        const pantryRow = {
+          pantryId: uuid(), ingredientId,
+          quantity: parseFloat(manualForm.quantity)||1,
+          unit: manualForm.unit,
+          addedAt: nowISO(), addedVia:'manual',
+          expiryDate: manualForm.expiryDate||null,
+        };
+        setPantry(ps=>[pantryRow,...ps]);
+        appendRow('Pantry', pantryRow);
+        setManualModal(false);
+        setManualForm({ ingredientName:'', quantity:'', unit:'piece', expiryDate:'' });
+      };
+
+      const needsReviewItems = ingredients.filter(i=>i.needsReview==='true'||i.needsReview===true);
+
       return (
         <div className="space-y-4">
-          <div className="bg-white rounded-2xl shadow p-6 text-center">
-            <div className="text-4xl mb-2">🥫</div>
-            <p className="font-semibold text-gray-700">Pantry loading…</p>
+          {/* Needs-review banner */}
+          {needsReviewItems.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2">
+              <span className="text-amber-500 text-lg">⚠️</span>
+              <div>
+                <p className="text-sm font-medium text-amber-800">{needsReviewItems.length} ingredient{needsReviewItems.length!==1?'s':''} need review</p>
+                <p className="text-xs text-amber-600">Tap items below with ⚠️ to edit name/nutrition</p>
+              </div>
+            </div>
+          )}
+
+          {/* Search + sort bar */}
+          <div className="flex gap-2">
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search pantry…"
+              className="flex-1 px-4 py-3 bg-white rounded-2xl shadow text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 border-0"/>
+            <button onClick={()=>setSortBy(s=>s==='added'?'expiry':'added')}
+              className="bg-white rounded-2xl shadow px-4 py-3 text-xs text-gray-600 font-medium flex-shrink-0">
+              {sortBy==='added'?'By date':'By expiry'}
+            </button>
           </div>
+
+          {/* Pantry list */}
+          {rows.length > 0 ? (
+            <div className="bg-white rounded-2xl shadow divide-y">
+              {rows.map(p => {
+                const name = ingName(p.ingredientId);
+                const ing  = ingredients.find(i=>i.ingredientId===p.ingredientId);
+                const isReview = ing?.needsReview==='true'||ing?.needsReview===true;
+                return (
+                  <div key={p.pantryId} className="px-4 py-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium text-gray-800 truncate">{name}</p>
+                        {isReview && <span title="Needs review" className="text-amber-500 text-xs">⚠️</span>}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-gray-400">{ADDED_VIA_LABEL[p.addedVia]||p.addedVia}</span>
+                        {p.expiryDate && <span className={`text-xs ${expiryClass(p.expiryDate)}`}>exp {p.expiryDate}</span>}
+                      </div>
+                    </div>
+                    {/* Qty editor */}
+                    {editingRow === p.pantryId ? (
+                      <div className="flex items-center gap-1">
+                        <input type="number" defaultValue={p.quantity} id={`qty-${p.pantryId}`}
+                          className="w-16 px-2 py-1 border rounded-lg text-sm text-center focus:outline-none" step="0.5"/>
+                        <span className="text-xs text-gray-400">{p.unit}</span>
+                        <button onClick={()=>{updateQty(p.pantryId,parseFloat(document.getElementById(`qty-${p.pantryId}`).value)||0);setEditingRow(null);}}
+                          className="text-green-600 text-xs px-2 py-1 rounded bg-green-50">✓</button>
+                      </div>
+                    ) : (
+                      <button onClick={()=>setEditingRow(p.pantryId)}
+                        className="text-sm font-semibold text-gray-700 hover:text-indigo-600 flex-shrink-0">
+                        {p.quantity} <span className="text-xs font-normal text-gray-400">{p.unit}</span>
+                      </button>
+                    )}
+                    <button onClick={()=>deleteEntry(p.pantryId)} className="text-gray-300 hover:text-red-400 text-lg flex-shrink-0">×</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
+              <div className="text-5xl mb-3">🥫</div>
+              <p className="font-medium text-gray-600">{query?'No matches':'Pantry is empty'}</p>
+              {!query && <p className="text-sm mt-1">Add items with the + button below</p>}
+            </div>
+          )}
+
+          {/* FAB + 4 add methods */}
+          <div className="fixed bottom-20 right-5 md:bottom-6 flex flex-col gap-2 z-30">
+            <button onClick={()=>onReceiptOpen('email')} className="w-12 h-12 bg-white border border-gray-200 shadow rounded-full flex items-center justify-center text-xl hover:bg-gray-50" title="Paste email receipt">📧</button>
+            <button onClick={()=>onReceiptOpen('photo')} className="w-12 h-12 bg-white border border-gray-200 shadow rounded-full flex items-center justify-center text-xl hover:bg-gray-50" title="Photo receipt">📷</button>
+            <button onClick={onBarcodeOpen} className="w-12 h-12 bg-white border border-gray-200 shadow rounded-full flex items-center justify-center text-xl hover:bg-gray-50" title="Barcode scan">📱</button>
+            <button onClick={()=>setManualModal(true)} className="w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-indigo-700" title="Add manually">+</button>
+          </div>
+
+          {/* Manual add modal */}
+          {manualModal && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setManualModal(false)}>
+              <div className="bg-white rounded-t-3xl w-full p-5 space-y-3" onClick={e=>e.stopPropagation()}>
+                <h3 className="font-bold text-gray-800">Add to Pantry</h3>
+                <input value={manualForm.ingredientName} onChange={e=>setManualForm(f=>({...f,ingredientName:e.target.value}))}
+                  placeholder="Ingredient name *" className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                <div className="flex gap-2">
+                  <input type="number" value={manualForm.quantity} onChange={e=>setManualForm(f=>({...f,quantity:e.target.value}))}
+                    placeholder="Qty" className="w-24 px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                  <select value={manualForm.unit} onChange={e=>setManualForm(f=>({...f,unit:e.target.value}))}
+                    className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none">
+                    {['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch'].map(u=><option key={u}>{u}</option>)}
+                  </select>
+                  <input type="date" value={manualForm.expiryDate} onChange={e=>setManualForm(f=>({...f,expiryDate:e.target.value}))}
+                    className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none" title="Expiry date (optional)"/>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setManualModal(false)} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Cancel</button>
+                  <button onClick={addManual} disabled={!manualForm.ingredientName.trim()} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40">Add</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
