@@ -910,15 +910,339 @@
     }
 
     function AddRecipeModal({ onClose, onSave, ingredients, setIngredients }) {
+      const [mode,       setMode]       = useState('url'); // url | image | manual
+      const [urlInput,   setUrlInput]   = useState('');
+      const [loading,    setLoading]    = useState(false);
+      const [error,      setError]      = useState('');
+      const [preview,    setPreview]    = useState(null);  // parsed recipe object
+      const [addedBy,    setAddedBy]    = useState('Fernando');
+
+      // Manual entry form state
+      const [manualName,    setManualName]    = useState('');
+      const [manualServings,setManualServings]= useState(4);
+      const [manualTime,    setManualTime]    = useState('');
+      const [manualCuisine, setManualCuisine] = useState('');
+      const [manualMethod,  setManualMethod]  = useState('');
+      const [manualTags,    setManualTags]    = useState([]);
+      const [manualIngRows, setManualIngRows] = useState([{ name:'',qty:'',unit:'piece',prep:'',optional:false }]);
+
+      const fileInputRef = useRef(null);
+
+      // §12a — URL paste: try JSON-LD first (free), then Haiku
+      const handleUrlAdd = async () => {
+        const url = urlInput.trim();
+        if (!url) return;
+        setLoading(true); setError('');
+        try {
+          // Step 1: try client-side fetch
+          let html = null;
+          try {
+            const res = await fetch(url, { mode:'cors' });
+            html = await res.text();
+          } catch {
+            // CORS block → /fetch-html proxy
+            try {
+              const proxy = await callWorker('/fetch-html', { url });
+              html = proxy.html;
+            } catch (e) {
+              throw new Error('Could not fetch page. Try image upload instead.');
+            }
+          }
+
+          // Step 2: parse Schema.org/Recipe JSON-LD (free path — no Claude call)
+          let extracted = null;
+          try {
+            const ldMatches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+            for (const m of ldMatches) {
+              try {
+                const json = JSON.parse(m[1].trim());
+                const schemas = Array.isArray(json) ? json : (json['@graph'] || [json]);
+                const recipe  = schemas.find(s => s['@type'] === 'Recipe' || (Array.isArray(s['@type'])&&s['@type'].includes('Recipe')));
+                if (recipe) {
+                  extracted = {
+                    name:         recipe.name || '',
+                    baseServings: parseInt(recipe.recipeYield)||4,
+                    totalTimeMin: parseDuration(recipe.totalTime||recipe.cookTime),
+                    cuisine:      Array.isArray(recipe.recipeCuisine)?recipe.recipeCuisine[0]:recipe.recipeCuisine||null,
+                    dietaryTags:  (recipe.suitableForDiet||[]).map(d=>d.replace('https://schema.org/','').replace('Diet','')).join('|'),
+                    methodSteps:  Array.isArray(recipe.recipeInstructions)?recipe.recipeInstructions.map(i=>typeof i==='string'?i:i.text||'').join('\n'):String(recipe.recipeInstructions||''),
+                    ingredients:  (recipe.recipeIngredient||[]).map(s=>parseIngredientString(s)),
+                    rawSource:    JSON.stringify({ url, parsed: recipe }),
+                    parseStatus:  'ok',
+                  };
+                  break;
+                }
+              } catch {}
+            }
+          } catch {}
+
+          // Step 3: if no JSON-LD, use Haiku via Worker
+          if (!extracted) {
+            const result = await callWorker('/extract-recipe-url', { html });
+            if (result.parseStatus === 'needs_review') {
+              setPreview({ ...result, rawSource: JSON.stringify({ url, raw: result.raw }), parseStatus:'needs_review' });
+            } else {
+              extracted = { ...result, rawSource: JSON.stringify({ url }), parseStatus:'ok' };
+            }
+          }
+
+          if (extracted) setPreview({ ...extracted, sourceUrl: url });
+
+        } catch(e) {
+          setError(e.message || 'Extraction failed.');
+        } finally { setLoading(false); }
+      };
+
+      // §12b — Image upload
+      const handleImageUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLoading(true); setError('');
+        try {
+          const base64 = await fileToBase64(file);
+          // Upload to Drive for dragnet storage
+          // (Apps Script call — fire and forget, get file ID back if possible)
+          const result = await callWorker('/extract-recipe-image', { imageBase64: base64.split(',')[1], mimeType: file.type });
+          if (result.parseStatus === 'needs_review') {
+            setPreview({ name:'Unreviewed Recipe', parseStatus:'needs_review', rawSource: JSON.stringify({ image: file.name, raw: result.raw }) });
+          } else {
+            setPreview({ ...result, parseStatus: result.parseStatus||'ok' });
+          }
+        } catch(e) {
+          setError(e.message || 'Image extraction failed.');
+        } finally { setLoading(false); }
+      };
+
+      const fileToBase64 = (file) => new Promise((res,rej) => {
+        const r = new FileReader();
+        r.onloadend = () => res(r.result);
+        r.onerror   = rej;
+        r.readAsDataURL(file);
+      });
+
+      function parseDuration(iso) {
+        if (!iso) return null;
+        const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+        return m ? (parseInt(m[1]||0)*60 + parseInt(m[2]||0)) || null : null;
+      }
+
+      function parseIngredientString(s) {
+        // Simple heuristic: first token(s) = quantity, next = unit, rest = name
+        const UNITS = ['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch'];
+        const parts = s.trim().split(/\s+/);
+        const qty  = parseFloat(parts[0]) || 1;
+        const unit = UNITS.includes(parts[1]?.toLowerCase()) ? parts[1] : 'piece';
+        const name = UNITS.includes(parts[1]?.toLowerCase()) ? parts.slice(2).join(' ') : parts.slice(1).join(' ');
+        return { name, quantity: qty, unit, preparation: null, isOptional: false };
+      }
+
+      // Save from preview
+      const savePreview = () => {
+        if (!preview) return;
+        commitRecipe(preview);
+      };
+
+      // Save manual entry
+      const saveManual = () => {
+        if (!manualName.trim()) return;
+        commitRecipe({
+          name:         manualName.trim(),
+          baseServings: manualServings,
+          totalTimeMin: parseInt(manualTime)||null,
+          cuisine:      manualCuisine||null,
+          dietaryTags:  manualTags.join('|'),
+          methodSteps:  manualMethod,
+          ingredients:  manualIngRows.filter(r=>r.name.trim()),
+          parseStatus:  'ok',
+          rawSource:    null,
+          sourceUrl:    null,
+        });
+      };
+
+      const commitRecipe = (data) => {
+        const recipeId = uuid();
+        const now = nowISO();
+        const recipe = {
+          recipeId, name:data.name, sourceUrl:data.sourceUrl||null, sourceImage:null,
+          baseServings:data.baseServings||4, methodSteps:data.methodSteps||'',
+          totalTimeMin:data.totalTimeMin||null, dietaryTags:data.dietaryTags||'',
+          cuisine:data.cuisine||null, createdBy:addedBy, createdAt:now,
+          timesCooked:0, lastCookedAt:null, notes:'',
+          parseStatus:data.parseStatus||'ok', rawSource:data.rawSource||null,
+        };
+
+        // Resolve ingredients — fuzzy match existing, create new if <80% match
+        const newIngredients = [];
+        const ris = (data.ingredients||[]).map((ing, idx) => {
+          const ingName = ing.name?.trim() || '';
+          let match = ingredients.find(i => fuzzyScore(i.canonicalName||'', ingName) >= 0.8);
+          if (!match) {
+            // Check newly added ones too
+            match = newIngredients.find(i => fuzzyScore(i.canonicalName||'', ingName) >= 0.8);
+          }
+          let ingredientId;
+          if (match) {
+            ingredientId = match.ingredientId;
+          } else {
+            ingredientId = uuid();
+            newIngredients.push({
+              ingredientId, canonicalName:ingName, lastUpdated:now,
+              nutritionPer100g:'{}', needsReview:false,
+            });
+          }
+          return {
+            recipeIngredientId: uuid(), recipeId, ingredientId,
+            quantity: ing.quantity||1, unit: ing.unit||'piece',
+            preparation: ing.preparation||null, isOptional: ing.isOptional||false,
+          };
+        });
+
+        appendRow('Recipes', recipe);
+        newIngredients.forEach(i => appendRow('Ingredients', i));
+        ris.forEach(ri => appendRow('RecipeIngredients', ri));
+
+        onSave(recipe, newIngredients, ris);
+      };
+
       return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-5 border-b flex items-center justify-between">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10">
               <h2 className="text-lg font-bold text-gray-800">Add Recipe</h2>
               <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200">✕</button>
             </div>
-            <div className="p-5">
-              <p className="text-gray-500 text-sm">Add recipe flow — coming in commit 4</p>
+            <div className="p-5 space-y-4">
+              {/* Added-by */}
+              <div className="flex gap-2">
+                {['Fernando','Yenny'].map(p=>(
+                  <button key={p} onClick={()=>setAddedBy(p)} className={`flex-1 py-2 rounded-xl text-sm border transition-all ${addedBy===p?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{p}</button>
+                ))}
+              </div>
+
+              {/* Mode tabs */}
+              <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                {[{id:'url',label:'🔗 URL'},{id:'image',label:'📷 Photo'},{id:'manual',label:'✏️ Manual'}].map(m=>(
+                  <button key={m.id} onClick={()=>{setMode(m.id);setPreview(null);setError('');}}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode===m.id?'bg-white shadow text-indigo-700':'text-gray-500'}`}>{m.label}</button>
+                ))}
+              </div>
+
+              {error && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>}
+
+              {/* ── URL mode ── */}
+              {mode === 'url' && !preview && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Paste a recipe URL from any cooking site. Structured data (JSON-LD) is extracted for free — Haiku is used only as fallback.</p>
+                  <div className="flex gap-2">
+                    <input value={urlInput} onChange={e=>setUrlInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleUrlAdd()}
+                      placeholder="https://cooking.nytimes.com/recipes/…" type="url"
+                      className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                    <button onClick={handleUrlAdd} disabled={!urlInput.trim()||loading}
+                      className="px-5 py-3 bg-indigo-600 text-white rounded-xl disabled:opacity-40 font-medium">{loading?'…':'Fetch'}</button>
+                  </div>
+                  {loading && <p className="text-sm text-indigo-600 text-center animate-pulse">🔍 Extracting recipe…</p>}
+                </div>
+              )}
+
+              {/* ── Image mode ── */}
+              {mode === 'image' && !preview && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Take a photo of a cookbook page, recipe card, or screenshot. Haiku vision extracts it.</p>
+                  <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload}/>
+                  <button onClick={()=>fileInputRef.current?.click()} disabled={loading}
+                    className="w-full py-10 border-2 border-dashed border-indigo-300 rounded-2xl flex flex-col items-center gap-2 hover:bg-indigo-50 disabled:opacity-40">
+                    <span className="text-4xl">📷</span>
+                    <span className="text-sm font-medium text-indigo-600">{loading?'Extracting…':'Tap to take photo or upload image'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* ── Preview ── */}
+              {preview && mode !== 'manual' && (
+                <div className="space-y-3">
+                  {preview.parseStatus === 'needs_review' ? (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <p className="text-sm font-medium text-amber-800">⚠️ Extraction needs review</p>
+                      <p className="text-xs text-amber-600 mt-1">Recipe will be saved with parseStatus=needs_review. You can edit it later.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                      <p className="text-sm font-medium text-green-800">✅ Recipe extracted</p>
+                    </div>
+                  )}
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                    <p className="font-semibold text-gray-800">{preview.name || 'Unnamed recipe'}</p>
+                    {preview.cuisine && <p className="text-xs text-gray-500">{preview.cuisine}</p>}
+                    {preview.totalTimeMin && <p className="text-xs text-gray-500">⏱ {preview.totalTimeMin} min</p>}
+                    <p className="text-xs text-gray-500">{(preview.ingredients||[]).length} ingredients</p>
+                    <p className="text-xs text-gray-400 line-clamp-3">{preview.methodSteps}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={()=>{setPreview(null);setUrlInput('');}} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Try again</button>
+                    <button onClick={savePreview} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Save Recipe</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Manual mode ── */}
+              {mode === 'manual' && (
+                <div className="space-y-3">
+                  <input value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Recipe name *"
+                    className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Servings</label>
+                      <input type="number" value={manualServings} onChange={e=>setManualServings(parseInt(e.target.value)||4)} min={1} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Time (min)</label>
+                      <input type="number" value={manualTime} onChange={e=>setManualTime(e.target.value)} placeholder="30" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Cuisine</label>
+                      <input value={manualCuisine} onChange={e=>setManualCuisine(e.target.value)} placeholder="Italian" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                    </div>
+                  </div>
+                  {/* Dietary tags */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Dietary tags</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DIETARY_TAGS.map(t=>(
+                        <button key={t} onClick={()=>setManualTags(p=>p.includes(t)?p.filter(x=>x!==t):[...p,t])}
+                          className={`text-xs px-2 py-1 rounded-full border transition-all ${manualTags.includes(t)?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{t}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Ingredients */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Ingredients</p>
+                    {manualIngRows.map((row,i)=>(
+                      <div key={i} className="flex gap-1.5 mb-1.5">
+                        <input value={row.name} onChange={e=>setManualIngRows(r=>r.map((x,j)=>j===i?{...x,name:e.target.value}:x))}
+                          placeholder="Ingredient" className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                        <input type="number" value={row.qty} onChange={e=>setManualIngRows(r=>r.map((x,j)=>j===i?{...x,qty:e.target.value}:x))}
+                          placeholder="Qty" className="w-16 px-2 py-2 border rounded-xl text-sm focus:outline-none text-center"/>
+                        <select value={row.unit} onChange={e=>setManualIngRows(r=>r.map((x,j)=>j===i?{...x,unit:e.target.value}:x))}
+                          className="px-2 py-2 border rounded-xl text-sm focus:outline-none">
+                          {['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch','to_taste'].map(u=><option key={u}>{u}</option>)}
+                        </select>
+                        <button onClick={()=>setManualIngRows(r=>r.filter((_,j)=>j!==i))} className="text-gray-300 hover:text-red-400 text-xl px-1">×</button>
+                      </div>
+                    ))}
+                    <button onClick={()=>setManualIngRows(r=>[...r,{name:'',qty:'',unit:'piece',prep:'',optional:false}])}
+                      className="text-sm text-indigo-600 font-medium mt-1">+ Add ingredient</button>
+                  </div>
+                  {/* Method */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Method</p>
+                    <textarea value={manualMethod} onChange={e=>setManualMethod(e.target.value)} rows={5}
+                      placeholder="1. Preheat oven to 375°F. 2. Mix ingredients…"
+                      className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"/>
+                  </div>
+                  <button onClick={saveManual} disabled={!manualName.trim()}
+                    className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold disabled:opacity-40">Save Recipe</button>
+                </div>
+              )}
             </div>
           </div>
         </div>
