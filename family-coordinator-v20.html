@@ -509,13 +509,246 @@
     }
 
     function MealPlanTab({ week, onWeekChange, recipes, mealPlanSlots, setMealPlanSlots, ingredients, recipeIngredients, pantry, groceries, setGroceries, onAddRecipe, onViewRecipe }) {
+      const [slotPicker,  setSlotPicker]  = useState(null); // {dayIdx, slot}
+      const [pickerQuery, setPickerQuery] = useState('');
+      const [cookByParent,setCookByParent]= useState('Fernando');
+
+      // §17 rotation engine — top-3 suggested (due oldest → active oldest → new newest)
+      const suggested = useMemo(() => {
+        const withStatus = recipes.map(r => ({ r, status: rotationStatus(r) }));
+        const due     = withStatus.filter(x=>x.status==='due')    .sort((a,b)=>daysSince(b.r.lastCookedAt)-daysSince(a.r.lastCookedAt));
+        const active  = withStatus.filter(x=>x.status==='active') .sort((a,b)=>daysSince(b.r.lastCookedAt)-daysSince(a.r.lastCookedAt));
+        const newRec  = withStatus.filter(x=>x.status==='new')    .sort((a,b)=>new Date(b.r.createdAt)-new Date(a.r.createdAt));
+        return [...due,...active,...newRec].slice(0,3).map(x=>x.r);
+      }, [recipes]);
+
+      const slotFor = (dayIdx, slot) => mealPlanSlots.find(s => s.weekOf===week && s.dayOfWeek===DAYS[dayIdx] && s.slot===slot);
+
+      const getSlotLabel = (dayIdx, slot) => {
+        const s = slotFor(dayIdx, slot);
+        if (!s) return null;
+        if (s.noteFreeText) return { label: s.noteFreeText, isNote: true, slotId: s.slotId, status: s.cookedStatus };
+        const r = recipes.find(r=>r.recipeId===s.recipeId);
+        return r ? { label: r.name, isNote: false, slotId: s.slotId, recipeId: r.recipeId, status: s.cookedStatus } : null;
+      };
+
+      const assignSlot = (recipeId, noteText) => {
+        if (!slotPicker) return;
+        const { dayIdx, slot } = slotPicker;
+        const dayName = DAYS[dayIdx];
+        const existing = slotFor(dayIdx, slot);
+        const newSlot = {
+          slotId: existing?.slotId || uuid(),
+          weekOf: week, dayOfWeek: dayName, slot,
+          recipeId: recipeId || '', servingsPlanned: 1,
+          noteFreeText: noteText || '', cookBy: cookByParent,
+          cookedStatus: 'planned',
+        };
+        const updated = existing
+          ? mealPlanSlots.map(s=>s.slotId===existing.slotId?newSlot:s)
+          : [...mealPlanSlots, newSlot];
+        setMealPlanSlots(updated);
+        if (existing) updateRow('MealPlanSlots', newSlot.slotId, newSlot);
+        else appendRow('MealPlanSlots', newSlot);
+
+        // Project recipe ingredients to grocery list
+        if (recipeId && !noteText) projectToGrocery(recipeId, dayName);
+
+        setSlotPicker(null); setPickerQuery('');
+      };
+
+      const projectToGrocery = (recipeId, dayLabel) => {
+        const ris = recipeIngredients.filter(ri => ri.recipeId === recipeId);
+        if (!ris.length) return;
+        const newItems = ris.map(ri => {
+          const ing = ingredients.find(i=>i.ingredientId===ri.ingredientId);
+          return {
+            id: Date.now() + Math.random(),
+            name: ing?.canonicalName || ri.ingredientId,
+            store: ing?.preferredStore || '',
+            completed: false,
+            addedBy: 'Meal Plan',
+            timestamp: nowISO(),
+            ingredientId: ri.ingredientId || '',
+            quantity: ri.quantity || '',
+            unit: ri.unit || '',
+            pantryBacked: false,
+          };
+        });
+        setGroceries(g => [...g, ...newItems]);
+      };
+
+      const markCooked = (slotId) => {
+        const s = mealPlanSlots.find(x=>x.slotId===slotId);
+        if (!s) return;
+        const updated = mealPlanSlots.map(x=>x.slotId===slotId?{...x,cookedStatus:'cooked'}:x);
+        setMealPlanSlots(updated);
+        updateRow('MealPlanSlots', slotId, { cookedStatus:'cooked' });
+        // Increment timesCooked + lastCookedAt on recipe
+        if (s.recipeId) {
+          const r = recipes.find(x=>x.recipeId===s.recipeId);
+          if (r) {
+            const patch = { timesCooked: (parseInt(r.timesCooked||0)+1), lastCookedAt: nowISO() };
+            updateRow('Recipes', s.recipeId, patch);
+          }
+        }
+      };
+
+      const markSkipped = (slotId) => {
+        const updated = mealPlanSlots.map(s=>s.slotId===slotId?{...s,cookedStatus:'skipped'}:s);
+        setMealPlanSlots(updated);
+        updateRow('MealPlanSlots', slotId, { cookedStatus:'skipped' });
+      };
+
+      const clearSlot = (slotId) => {
+        setMealPlanSlots(p=>p.filter(s=>s.slotId!==slotId));
+        deleteRow('MealPlanSlots', slotId);
+      };
+
+      const filteredRecipes = pickerQuery
+        ? recipes.filter(r => r.name?.toLowerCase().includes(pickerQuery.toLowerCase()))
+        : recipes;
+
+      const statusBadge = (status) => {
+        if (status === 'cooked')  return 'bg-green-100 text-green-700';
+        if (status === 'skipped') return 'bg-gray-100 text-gray-400';
+        return 'bg-indigo-50 text-indigo-700';
+      };
+
       return (
         <div className="space-y-4">
           <WeekNavigator week={week} onChange={onWeekChange} label="Meal Plan" />
-          <div className="bg-white rounded-2xl shadow p-6 text-center">
-            <div className="text-4xl mb-2">🍽️</div>
-            <p className="font-semibold text-gray-700">Meal Plan loading…</p>
+
+          {/* Rotation suggestion strip */}
+          {suggested.length > 0 && (
+            <div className="bg-white rounded-2xl shadow p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">💡 Suggested from rotation</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {suggested.map(r => {
+                  const st = rotationStatus(r);
+                  return (
+                    <button key={r.recipeId} onClick={()=>onViewRecipe(r.recipeId)}
+                      className="flex-shrink-0 text-left bg-indigo-50 hover:bg-indigo-100 rounded-xl px-3 py-2 min-w-[120px] transition-colors">
+                      <p className="text-xs font-semibold text-indigo-800 truncate">{r.name}</p>
+                      <p className="text-xs text-indigo-500 mt-0.5">{st==='due'?'⏰ Due':st==='active'?'✅ Active':'🆕 New'}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 4×7 grid */}
+          <div className="bg-white rounded-2xl shadow overflow-hidden">
+            {/* Header row */}
+            <div className="grid grid-cols-8 border-b">
+              <div className="p-2 text-xs text-gray-400" />
+              {DAYS.map((d,i) => {
+                const date = weekDates(week)[i];
+                const isToday = date.toDateString()===new Date().toDateString();
+                return (
+                  <div key={d} className={`p-2 text-center border-l ${isToday?'bg-indigo-50':''}`}>
+                    <p className={`text-xs font-bold ${isToday?'text-indigo-600':'text-gray-500'}`}>{d}</p>
+                    <p className={`text-xs ${isToday?'text-indigo-400':'text-gray-300'}`}>{date.getDate()}</p>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Slot rows */}
+            {SLOTS.map(slot => (
+              <div key={slot} className="grid grid-cols-8 border-b last:border-b-0">
+                <div className="p-2 flex items-center bg-gray-50 border-r">
+                  <span className="text-xs font-medium text-gray-500 leading-tight">{slot[0]}</span>
+                </div>
+                {DAYS.map((day, dayIdx) => {
+                  const entry = getSlotLabel(dayIdx, slot);
+                  return (
+                    <div key={day} className="border-l min-h-[52px] relative group">
+                      {entry ? (
+                        <div className={`h-full p-1 flex flex-col justify-between ${statusBadge(entry.status)} cursor-pointer`}
+                          onClick={()=>entry.recipeId&&onViewRecipe(entry.recipeId)}>
+                          <p className="text-xs leading-tight font-medium truncate">{entry.label}</p>
+                          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {entry.status==='planned'&&(
+                              <button onClick={e=>{e.stopPropagation();markCooked(entry.slotId);}} className="text-green-600 hover:bg-green-100 rounded px-1 text-xs" title="Mark cooked">✓</button>
+                            )}
+                            <button onClick={e=>{e.stopPropagation();clearSlot(entry.slotId);}} className="text-red-400 hover:bg-red-50 rounded px-1 text-xs" title="Clear">×</button>
+                          </div>
+                          {entry.status==='cooked' && <span className="text-xs">✅</span>}
+                          {entry.status==='skipped'&& <span className="text-xs">⏭️</span>}
+                        </div>
+                      ) : (
+                        <button onClick={()=>{setSlotPicker({dayIdx,slot});setPickerQuery('');}}
+                          className="w-full h-full flex items-center justify-center text-gray-200 hover:text-indigo-400 hover:bg-indigo-50 transition-colors text-lg">
+                          +
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
+
+          {/* Add recipe FAB */}
+          <button onClick={onAddRecipe}
+            className="fixed bottom-20 right-5 md:bottom-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-indigo-700 z-30">
+            +
+          </button>
+
+          {/* Slot picker bottom sheet */}
+          {slotPicker && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setSlotPicker(null)}>
+              <div className="bg-white rounded-t-3xl w-full max-h-[75vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+                <div className="p-4 border-b flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-800">{DAYS[slotPicker.dayIdx]} — {slotPicker.slot}</h3>
+                  <button onClick={()=>setSlotPicker(null)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+                </div>
+                <div className="p-4 space-y-3">
+                  {/* Cook-by */}
+                  <div className="flex gap-2">
+                    {['Fernando','Yenny','Both'].map(p => (
+                      <button key={p} onClick={()=>setCookByParent(p)}
+                        className={`flex-1 py-1.5 rounded-xl text-sm border transition-all ${cookByParent===p?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{p}</button>
+                    ))}
+                  </div>
+                  {/* Free-text note */}
+                  <div className="flex gap-2">
+                    <input placeholder="Free note (e.g. ordered pizza)…" id="slotNote"
+                      className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                    <button onClick={()=>assignSlot(null, document.getElementById('slotNote').value.trim()||null)}
+                      className="px-4 py-2 bg-gray-700 text-white rounded-xl text-sm font-medium">Add note</button>
+                  </div>
+                  {/* Rotation suggestions */}
+                  {suggested.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Suggested</p>
+                      {suggested.map(r => (
+                        <button key={r.recipeId} onClick={()=>assignSlot(r.recipeId, null)}
+                          className="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl hover:bg-indigo-50 mb-1">
+                          <span className="text-sm font-medium text-gray-800">{r.name}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${rotationStatus(r)==='due'?'bg-orange-100 text-orange-700':rotationStatus(r)==='active'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>
+                            {rotationStatus(r)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Search all recipes */}
+                  <input value={pickerQuery} onChange={e=>setPickerQuery(e.target.value)}
+                    placeholder="Search all recipes…" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  {filteredRecipes.map(r => (
+                    <button key={r.recipeId} onClick={()=>assignSlot(r.recipeId, null)}
+                      className="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl hover:bg-gray-50">
+                      <span className="text-sm text-gray-800">{r.name}</span>
+                      <span className="text-xs text-gray-400">{r.cuisine||''}</span>
+                    </button>
+                  ))}
+                  {filteredRecipes.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No recipes yet — add one with the + button</p>}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -532,18 +765,144 @@
     }
 
     function RecipeDetailModal({ recipeId, recipes, recipeIngredients, ingredients, pantry, mealPlanSlots, onClose, onUpdateRecipe, onUpdateMealPlanSlots, onUpdatePantry }) {
-      if (!recipeId) return null;
+      const [displayServings, setDisplayServings] = useState(null);
+      const [noteInput,       setNoteInput]       = useState('');
+      const [noteBy,          setNoteBy]          = useState('Fernando');
+
       const recipe = recipes.find(r => r.recipeId === recipeId);
-      if (!recipe) return null;
+      useEffect(() => { if (recipe) setDisplayServings(parseInt(recipe.baseServings)||4); }, [recipeId]);
+
+      if (!recipeId || !recipe) return null;
+
+      const base     = parseInt(recipe.baseServings) || 4;
+      const scale    = (displayServings||base) / base;
+      const ris      = recipeIngredients.filter(ri => ri.recipeId === recipeId);
+      const tags     = recipe.dietaryTags ? String(recipe.dietaryTags).split('|').filter(Boolean) : [];
+      const status   = rotationStatus(recipe);
+      const notes    = recipe.notes ? String(recipe.notes).split('\n').filter(Boolean) : [];
+
+      // Pantry status for a given ingredient
+      const pantryStatus = (ingredientId, neededQty) => {
+        const rows  = pantry.filter(p => p.ingredientId === ingredientId);
+        const total = rows.reduce((s,p) => s + parseFloat(p.quantity||0), 0);
+        if (total === 0)          return { icon:'✗', cls:'text-red-400' };
+        if (total >= neededQty)   return { icon:'✓', cls:'text-green-500' };
+        return                           { icon:'△', cls:'text-amber-400' };
+      };
+
+      const scaleQty = (qty, unit) => {
+        if (!qty) return '';
+        const q = parseFloat(qty) * scale;
+        if (['to_taste','pinch'].includes(unit)) return qty; // BRD §5.3 — pass through
+        return q % 1 === 0 ? q : q.toFixed(1);
+      };
+
+      const appendNote = () => {
+        if (!noteInput.trim()) return;
+        const entry = `${new Date().toISOString().slice(0,10)} (${noteBy}): ${noteInput.trim()}`;
+        const existing = recipe.notes ? recipe.notes + '\n' + entry : entry;
+        onUpdateRecipe(recipeId, { notes: existing });
+        setNoteInput('');
+      };
+
+      const statusChip = {
+        new:     { label:'🆕 New',     cls:'bg-blue-100 text-blue-700'   },
+        active:  { label:'✅ Active',  cls:'bg-green-100 text-green-700'  },
+        due:     { label:'⏰ Due',     cls:'bg-orange-100 text-orange-700'},
+        dormant: { label:'💤 Dormant', cls:'bg-gray-100 text-gray-500'   },
+      }[status] || { label:'', cls:'' };
+
       return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-5 border-b flex items-center justify-between">
-              <h2 className="text-lg font-bold text-gray-800">{recipe.name}</h2>
-              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200">✕</button>
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-5 border-b flex items-start justify-between sticky top-0 bg-white z-10">
+              <div className="flex-1 min-w-0 pr-3">
+                <h2 className="text-lg font-bold text-gray-800 leading-tight">{recipe.name}</h2>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {recipe.cuisine && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{recipe.cuisine}</span>}
+                  {recipe.totalTimeMin && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">⏱ {recipe.totalTimeMin}min</span>}
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${statusChip.cls}`}>{statusChip.label}</span>
+                  {tags.map(t => <span key={t} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">{t}</span>)}
+                </div>
+              </div>
+              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 flex-shrink-0">✕</button>
             </div>
-            <div className="p-5">
-              <p className="text-gray-500 text-sm">Recipe detail modal — coming in commit 3</p>
+
+            <div className="p-5 space-y-5">
+              {/* Servings stepper */}
+              <div className="flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3">
+                <span className="text-sm font-medium text-gray-700">Servings</span>
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>setDisplayServings(s=>Math.max(1,s-1))} className="w-8 h-8 flex items-center justify-center rounded-full bg-white border text-gray-600 hover:bg-gray-100 font-bold">−</button>
+                  <span className="text-lg font-bold text-indigo-700 w-8 text-center">{displayServings}</span>
+                  <button onClick={()=>setDisplayServings(s=>s+1)} className="w-8 h-8 flex items-center justify-center rounded-full bg-white border text-gray-600 hover:bg-gray-100 font-bold">+</button>
+                </div>
+                {scale !== 1 && <span className="text-xs text-indigo-500 ml-2">({scale>1?'+':''}{ ((scale-1)*100).toFixed(0)}%)</span>}
+              </div>
+
+              {/* Ingredients */}
+              {ris.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-2">Ingredients</h3>
+                  <div className="space-y-1.5">
+                    {ris.map(ri => {
+                      const ing = ingredients.find(i=>i.ingredientId===ri.ingredientId);
+                      const ps  = pantryStatus(ri.ingredientId, parseFloat(ri.quantity||0)*scale);
+                      const scaledQ = scaleQty(ri.quantity, ri.unit);
+                      return (
+                        <div key={ri.recipeIngredientId} className={`flex items-center gap-3 px-3 py-2 rounded-xl ${ri.isOptional==='true'||ri.isOptional===true?'opacity-60 border border-dashed border-gray-200':'bg-gray-50'}`}>
+                          <span className={`font-bold text-sm flex-shrink-0 ${ps.cls}`}>{ps.icon}</span>
+                          <span className="text-sm text-gray-800 flex-1">
+                            {ing?.canonicalName || ri.ingredientId}
+                            {ri.preparation && <span className="text-gray-400 text-xs ml-1">({ri.preparation})</span>}
+                            {(ri.isOptional==='true'||ri.isOptional===true) && <span className="text-xs text-gray-400 ml-1">optional</span>}
+                          </span>
+                          <span className="text-sm text-gray-600 flex-shrink-0 font-medium">
+                            {scaledQ} {['to_taste','pinch'].includes(ri.unit)?ri.unit:ri.unit}
+                            {['to_taste','pinch'].includes(ri.unit)===false && scale!==1 && parseFloat(ri.quantity||0)>0 && !(['to_taste','pinch'].includes(ri.unit)) && (
+                              <span className="text-xs text-gray-400 ml-1">
+                                {!ing?.density_g_per_ml && !['g','kg','ml','l'].includes(ri.unit) && <span title="Weight unavailable">~</span>}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">✓ have enough · △ partial · ✗ none (from pantry)</p>
+                </div>
+              )}
+
+              {/* Method */}
+              {recipe.methodSteps && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-2">Method</h3>
+                  <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl p-4">{recipe.methodSteps}</div>
+                </div>
+              )}
+
+              {/* Notes log */}
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-2">Notes {notes.length>0&&<span className="text-gray-400 font-normal">({notes.length})</span>}</h3>
+                {notes.map((n,i) => <p key={i} className="text-xs text-gray-600 bg-yellow-50 rounded-lg px-3 py-2 mb-1.5 font-mono">{n}</p>)}
+                <div className="flex gap-2 mt-2">
+                  <select value={noteBy} onChange={e=>setNoteBy(e.target.value)} className="text-xs px-2 py-2 border rounded-xl focus:outline-none flex-shrink-0">
+                    {['Fernando','Yenny','Both'].map(p=><option key={p}>{p}</option>)}
+                  </select>
+                  <input value={noteInput} onChange={e=>setNoteInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&appendNote()}
+                    placeholder="Add a note… (e.g. doubled garlic)" className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  <button onClick={appendNote} disabled={!noteInput.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm disabled:opacity-40">Add</button>
+                </div>
+              </div>
+
+              {/* Meta */}
+              <div className="text-xs text-gray-400 border-t pt-3 flex gap-4 flex-wrap">
+                <span>Added by {recipe.createdBy||'—'}</span>
+                {recipe.timesCooked>0 && <span>Cooked {recipe.timesCooked}×</span>}
+                {recipe.lastCookedAt && <span>Last: {recipe.lastCookedAt.slice(0,10)}</span>}
+                {recipe.sourceUrl && <a href={recipe.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">Source ↗</a>}
+              </div>
             </div>
           </div>
         </div>
