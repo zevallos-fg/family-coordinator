@@ -87,7 +87,7 @@ export default async function MealsPage() {
             </div>
             {currentPlan && (
               <Link
-                href={`/meals/plan/${currentPlan.id}`}
+                href={`/meals/plan?week=${weekOf}`}
                 className="text-sm font-medium text-orange-600 hover:text-orange-800"
               >
                 View plan →
@@ -98,7 +98,7 @@ export default async function MealsPage() {
           {currentPlan ? (
             <div className="rounded-xl bg-green-50 border border-green-100 p-4">
               <p className="text-sm text-green-700 font-medium">Meal plan generated for this week.</p>
-              <Link href={`/meals/plan/${currentPlan.id}`} className="text-sm text-green-600 hover:underline">
+              <Link href={`/meals/plan?week=${weekOf}`} className="text-sm text-green-600 hover:underline">
                 View 7-day grid →
               </Link>
             </div>
