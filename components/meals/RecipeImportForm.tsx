@@ -4,16 +4,13 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import {
-  importRecipeAction,
-  importRecipeFromPhotoAction,
-} from "@/app/(app)/meals/actions";
+import { importRecipeAction } from "@/app/(app)/meals/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 type Mode = "url" | "photo";
 
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 4MB
 const SUPPORTED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 export function RecipeImportForm() {
@@ -84,7 +81,7 @@ export function RecipeImportForm() {
     }
 
     if (file.size > MAX_PHOTO_BYTES) {
-      setError("Photo is larger than 5MB. Try a smaller image.");
+      setError("Photo is larger than 4MB. Try a smaller image.");
       setPhotoFile(null);
       setPhotoPreview(null);
       return;
@@ -102,7 +99,7 @@ export function RecipeImportForm() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function handlePhotoSubmit(e: React.FormEvent) {
+async function handlePhotoSubmit(e: React.FormEvent) {
     e.preventDefault();
     resetErrors();
     if (!photoFile) return;
@@ -112,9 +109,27 @@ export function RecipeImportForm() {
 
     setLoading(true);
     try {
-      const result = await importRecipeFromPhotoAction(formData);
-      if (result.error) setError(result.error);
-      else if (result.recipeId) router.push(`/meals/recipes/${result.recipeId}`);
+      const res = await fetch("/api/recipes/import-from-photo", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? `Server returned ${res.status}`);
+        return;
+      }
+      if (data.recipeId) {
+        router.push(`/meals/recipes/${data.recipeId}`);
+      } else {
+        setError("Server returned an empty response");
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Upload failed: ${err.message}`
+          : "Upload failed with an unknown error"
+      );
     } finally {
       setLoading(false);
     }
@@ -231,7 +246,7 @@ export function RecipeImportForm() {
             />
 
             <p className="mt-1.5 text-xs text-gray-500">
-              JPEG, PNG, or WEBP — max 5MB. On mobile, you can snap a photo directly. Legible
+              JPEG, PNG, or WEBP — max 4MB. On mobile, you can snap a photo directly. Legible
               ingredient and step text works best.
             </p>
           </div>
