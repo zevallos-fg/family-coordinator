@@ -15,8 +15,11 @@ interface Ingredient {
 interface RecipeDetailProps {
   id: string;
   title: string;
+  description: string | null;
   servings: number | null;
+  prepTimeMin: number | null;
   cookTimeMin: number | null;
+  tags: string[] | null;
   sourceUrl: string | null;
   instructions: string[];
   ingredients: Ingredient[];
@@ -29,7 +32,17 @@ function formatAmount(amount: number | null, unit: string | null): string {
   return unit ? `${qty} ${unit}` : qty;
 }
 
-export function RecipeDetail({ id, title, servings, cookTimeMin, sourceUrl, instructions, ingredients }: RecipeDetailProps) {
+function timeLine(prepTimeMin: number | null, cookTimeMin: number | null, servings: number | null): string | null {
+  const parts: string[] = [];
+  if (prepTimeMin) parts.push(`${prepTimeMin} min prep`);
+  if (cookTimeMin) parts.push(`${cookTimeMin} min cook`);
+  if (servings) parts.push(`Serves ${servings}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+export function RecipeDetail({
+  id, title, description, servings, prepTimeMin, cookTimeMin, tags, sourceUrl, instructions, ingredients,
+}: RecipeDetailProps) {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
 
@@ -45,27 +58,40 @@ export function RecipeDetail({ id, title, servings, cookTimeMin, sourceUrl, inst
     }
   }
 
+  const metaLine = timeLine(prepTimeMin, cookTimeMin, servings);
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
       <div>
         <Link href="/meal-plans/recipes" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
-          ← Back to recipes
+          ← Meal Plans
         </Link>
         <h1 className="mt-3 text-3xl font-bold text-gray-900">{title}</h1>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          {servings && (
-            <span className="inline-flex items-center gap-1 text-sm bg-orange-50 text-orange-700 rounded-full px-3 py-1 font-medium">
-              👥 {servings} servings
-            </span>
-          )}
-          {cookTimeMin && (
-            <span className="inline-flex items-center gap-1 text-sm bg-amber-50 text-amber-700 rounded-full px-3 py-1 font-medium">
-              ⏱ {cookTimeMin} min
-            </span>
-          )}
-        </div>
+        {/* Tags */}
+        {tags && tags.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-block text-xs bg-slate-100 text-slate-600 rounded-full px-2.5 py-0.5 font-medium"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Meta line: prep · cook · serves */}
+        {metaLine && (
+          <p className="mt-3 text-sm text-gray-500">{metaLine}</p>
+        )}
+
+        {/* Description */}
+        {description && (
+          <p className="mt-3 text-gray-600 leading-relaxed">{description}</p>
+        )}
 
         {sourceUrl && (
           <a
@@ -103,16 +129,20 @@ export function RecipeDetail({ id, title, servings, cookTimeMin, sourceUrl, inst
       {/* Instructions */}
       <section>
         <h2 className="text-xl font-semibold text-gray-800 mb-3">Instructions</h2>
-        <ol className="space-y-4">
-          {instructions.map((step, i) => (
-            <li key={i} className="flex gap-4">
-              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-orange-500 text-white text-sm font-bold flex items-center justify-center">
-                {i + 1}
-              </span>
-              <p className="text-gray-700 leading-relaxed pt-0.5">{step}</p>
-            </li>
-          ))}
-        </ol>
+        {instructions.length > 0 ? (
+          <ol className="space-y-4">
+            {instructions.map((step, i) => (
+              <li key={i} className="flex gap-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-orange-500 text-white text-sm font-bold flex items-center justify-center">
+                  {i + 1}
+                </span>
+                <p className="text-gray-700 leading-relaxed pt-0.5">{step}</p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-sm text-gray-400 italic">No instructions yet. Edit to add them.</p>
+        )}
       </section>
 
       {/* Actions */}

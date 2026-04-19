@@ -18,7 +18,7 @@ export default async function RecipesPage() {
 
   const { data: recipes } = await supabase
     .from("recipes")
-    .select("id, title, servings, cook_time_min, source_url, recipe_ingredients(ingredient_id)")
+    .select("id, title, description, servings, prep_time_min, cook_time_min, tags, source_url, recipe_ingredients(ingredient_id)")
     .eq("family_id", membership.family_id)
     .order("created_at", { ascending: false });
 
@@ -61,8 +61,11 @@ export default async function RecipesPage() {
                 key={r.id}
                 id={r.id}
                 title={r.title}
+                description={r.description}
                 servings={r.servings}
+                prepTimeMin={r.prep_time_min}
                 cookTimeMin={r.cook_time_min}
+                tags={r.tags}
                 sourceUrl={r.source_url}
                 ingredientCount={r.recipe_ingredients?.length ?? 0}
               />
