@@ -1,0 +1,2652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Family Coordinator v20</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ZXing barcode library — jsdelivr fallback handled in JS -->
+  <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"
+          onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/@zxing/library@latest/umd/index.min.js'"></script>
+  <style>
+    body { background: #EEF2FF; }
+    .tab-content { padding-bottom: 5rem; }
+    @media(min-width:768px){ .tab-content { padding-bottom: 1rem; } }
+    .bottom-nav { position:fixed; bottom:0; left:0; right:0; z-index:50; }
+    @media(min-width:768px){ .bottom-nav { display:none; } }
+    .top-tabs { display:none; }
+    @media(min-width:768px){ .top-tabs { display:flex; } }
+    .skeleton { animation: pulse 1.5s ease-in-out infinite; background:#E5E7EB; border-radius:0.5rem; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    /* Ensure cameras/images don't overflow on mobile */
+    video, img { max-width:100%; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ── Constants ──────────────────────────────────────────────────────────────
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyzgoNn0WDXRCAyRXlXEDcjzVEM6r7AQ4k3htOKo8s1aKZ86xYP7rN0DVJVvgr3W7WD/exec";
+    const WORKER_URL        = "https://aged-dust-551a.zevallos-fg.workers.dev";
+    const SYNC_INTERVAL     = 5000;
+    const V20_POLL_INTERVAL = 30000;
+
+    const DROPOFF_WINDOW = { start:"9:00 AM",  end:"9:30 AM"  };
+    const PICKUP_WINDOW  = { start:"12:30 PM", end:"1:00 PM"  };
+    const NAP_WINDOW     = { start:"1:30 PM",  end:"2:00 PM"  };
+
+    const DEFAULT_CATEGORIES = [
+      { id:'health',    name:'Health & Appointments', icon:'🏥', urgent:true  },
+      { id:'school',    name:'School & Activities',   icon:'🎒', urgent:true  },
+      { id:'home',      name:'Home Maintenance',      icon:'🔧', urgent:false },
+      { id:'financial', name:'Financial',             icon:'💰', urgent:false },
+      { id:'social',    name:'Social / Family',       icon:'👨‍👩‍👧', urgent:false },
+      { id:'travel',    name:'Travel & Events',       icon:'✈️',  urgent:false },
+      { id:'parenting', name:'Parenting / Private',   icon:'🔒', urgent:false },
+      { id:'projects',  name:'Projects',              icon:'📋', urgent:false },
+      { id:'ideas',     name:'Ideas / Someday',       icon:'💡', urgent:false },
+      { id:'hurricane', name:'Hurricane Prep',        icon:'🌀', urgent:false },
+    ];
+    const DEFAULT_STORES = ['Publix','Whole Foods','Costco','Target'];
+
+    const DAYS  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const SLOTS = ['Breakfast','Lunch','Dinner','Snack'];
+
+    const DIETARY_TAGS = [
+      'pregnancy-safe','iron-rich','folate-rich','high-protein','postpartum-comfort',
+      'toddler-friendly','vegetarian','gluten-free','dairy-free','quick-30min',
+      'batch-friendly','nut-free','spicy',
+    ];
+
+    const TABS = [
+      { id:'overview',  label:'Overview',   icon:'🏠' },
+      { id:'mealplan',  label:'Meal Plan',  icon:'🍽️' },
+      { id:'schedule',  label:'Schedule',   icon:'📅' },
+      { id:'dump',      label:'Dump',       icon:'🎤' },
+      { id:'organized', label:'Organized',  icon:'🧠' },
+      { id:'grocery',   label:'Grocery',    icon:'🛒' },
+      { id:'pantry',    label:'Pantry',     icon:'🥫' },
+    ];
+
+    // ── Utilities ──────────────────────────────────────────────────────────────
+    function uuid() {
+      if (crypto?.randomUUID) return crypto.randomUUID();
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random()*16|0;
+        return (c==='x'?r:(r&0x3|0x8)).toString(16);
+      });
+    }
+
+    function nowISO() { return new Date().toISOString(); }
+
+    // Returns Monday of the week containing `date`
+    function getMonday(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    // YYYY-Www from a Monday Date
+    function toISOWeek(monday) {
+      const year = monday.getFullYear();
+      const start = new Date(year, 0, 4);          // Jan 4 is always in week 1
+      const w1mon = new Date(start);
+      w1mon.setDate(start.getDate() - (start.getDay() || 7) + 1);
+      const weekNum = Math.round((monday - w1mon) / 604800000) + 1;
+      return `${year}-W${String(weekNum).padStart(2,'0')}`;
+    }
+
+    // Monday Date from YYYY-Www
+    function fromISOWeek(isoWeek) {
+      const [y, w] = isoWeek.replace('W','').split('-').map(Number);
+      const jan4 = new Date(y, 0, 4);
+      const w1mon = new Date(jan4);
+      w1mon.setDate(jan4.getDate() - (jan4.getDay() || 7) + 1);
+      const d = new Date(w1mon);
+      d.setDate(w1mon.getDate() + (w - 1) * 7);
+      return d;
+    }
+
+    function offsetWeek(isoWeek, delta) {
+      const mon = fromISOWeek(isoWeek);
+      mon.setDate(mon.getDate() + delta * 7);
+      return toISOWeek(mon);
+    }
+
+    function formatWeekLabel(isoWeek) {
+      const mon = fromISOWeek(isoWeek);
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      const fmt = d => d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+      return `${fmt(mon)} – ${fmt(sun)}`;
+    }
+
+    // Return array of 7 Date objects (Mon–Sun) for an ISO week
+    function weekDates(isoWeek) {
+      const mon = fromISOWeek(isoWeek);
+      return Array.from({length:7}, (_,i) => { const d=new Date(mon); d.setDate(mon.getDate()+i); return d; });
+    }
+
+    // Days since an ISO date string
+    function daysSince(isoDate) {
+      if (!isoDate) return Infinity;
+      return (Date.now() - new Date(isoDate).getTime()) / 86400000;
+    }
+
+    // BRD §5.7 rotation engine — pure function
+    function rotationStatus(recipe) {
+      if (!recipe) return 'new';
+      const cooked = parseInt(recipe.timesCooked || 0);
+      if (cooked < 3) return 'new';
+      const ds = daysSince(recipe.lastCookedAt);
+      if (ds > 90) return 'dormant';
+      if (ds > 21) return 'due';
+      return 'active';
+    }
+
+    // Fuzzy match score (0–1) — Levenshtein ratio
+    function fuzzyScore(a, b) {
+      a = a.toLowerCase().trim(); b = b.toLowerCase().trim();
+      if (a === b) return 1;
+      const len = Math.max(a.length, b.length);
+      if (!len) return 1;
+      let matches = 0;
+      for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        if (a[i] === b[i]) matches++;
+      }
+      return matches / len;
+    }
+
+    function capitalize(s) {
+      if (!s) return '';
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    // ── Category / grocery helpers (preserved from v8.4) ──────────────────────
+    function guessCategory(text) {
+      const t = text.toLowerCase();
+      if (/doctor|dentist|appointment|sick|medicine|pharmacy|pediatr|vaccine|fever|health/.test(t)) return 'health';
+      if (/school|teacher|homework|leo|pickup|dropoff|daycare|class|activity|sport/.test(t))        return 'school';
+      if (/fix|repair|plumber|ac|roof|paint|clean|leak|handyman|maintenance/.test(t))               return 'home';
+      if (/pay|bill|insurance|tax|budget|bank|money|credit|expense|invoice/.test(t))                return 'financial';
+      if (/birthday|party|dinner|friend|family|visit|invite|event|celebration/.test(t))             return 'social';
+      if (/trip|flight|hotel|vacation|travel|pack|passport|book/.test(t))                           return 'travel';
+      if (/private|personal|parenting|discipline|behavior|routine/.test(t))                         return 'parenting';
+      if (/project|build|create|design|develop|launch|plan/.test(t))                                return 'projects';
+      if (/hurricane|storm|prep|supplies|generator|shutter/.test(t))                                return 'hurricane';
+      return 'ideas';
+    }
+
+    // ── API layer ──────────────────────────────────────────────────────────────
+
+    // Legacy passthrough to Anthropic (v8.4 schedule analysis + grocery parsing)
+    async function callClaude(payload) {
+      const res = await fetch(WORKER_URL, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(`Worker HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+      if (!data.content?.[0]?.text) throw new Error('Unexpected response shape');
+      return data.content[0].text;
+    }
+
+    // v20 named endpoints
+    async function callWorker(path, body) {
+      const res = await fetch(`${WORKER_URL}${path}`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`Worker ${path} HTTP ${res.status}`);
+      return res.json();
+    }
+
+    // Grocery intent — uses Sonnet (per §2b eval, 16/20 fail on Haiku)
+    async function parseGroceryIntent(text) {
+      try {
+        const data = await callClaude({
+          model:'claude-sonnet-4-20250514', max_tokens:300,
+          messages:[{ role:'user', content:
+            `Analyze this voice/text capture from a parent: "${text}"\n\nIs this a grocery/shopping request? If yes, extract individual item names.\n\nReturn ONLY valid JSON:\n{"isGrocery": true, "items": ["oregano", "chili powder"]}\nor\n{"isGrocery": false, "items": []}`
+          }]
+        });
+        const raw = data.replace(/```json|```/g,'').trim();
+        const match = raw.match(/\{[\s\S]*\}/);
+        return match ? JSON.parse(match[0]) : { isGrocery:false, items:[] };
+      } catch { return { isGrocery:false, items:[] }; }
+    }
+
+    async function parseItemsFromText(text) {
+      try {
+        const data = await callClaude({
+          model:'claude-sonnet-4-20250514', max_tokens:300,
+          messages:[{ role:'user', content:
+            `Extract individual grocery item names from this text: "${text}"\n\nReturn ONLY valid JSON:\n{"items": ["item 1", "item 2"]}`
+          }]
+        });
+        const raw = data.replace(/```json|```/g,'').trim();
+        const match = raw.match(/\{[\s\S]*\}/);
+        const parsed = match ? JSON.parse(match[0]) : null;
+        return parsed?.items?.length ? parsed.items : [text];
+      } catch { return [text]; }
+    }
+
+    // Apps Script GET — returns rows as array of objects
+    async function loadSheet(name) {
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?sheet=${encodeURIComponent(name)}`);
+      if (!res.ok) throw new Error(`loadSheet ${name} HTTP ${res.status}`);
+      return res.json();
+    }
+
+    // Apps Script POST — no-cors (can't read response, optimistic writes)
+    function sheetWrite(body) {
+      return fetch(GOOGLE_SCRIPT_URL, {
+        method:'POST', mode:'no-cors',
+        body: JSON.stringify(body)
+      });
+    }
+
+    function appendRow(sheet, row)           { return sheetWrite({ action:'append', sheet, row }); }
+    function updateRow(sheet, rowId, row)    { return sheetWrite({ action:'update', sheet, rowId, row }); }
+    function deleteRow(sheet, rowId)         { return sheetWrite({ action:'delete', sheet, rowId }); }
+
+    // Open Food Facts barcode lookup (public API, no key)
+    async function lookupBarcode(barcode) {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.status !== 1 || !data.product) return null;
+      const p = data.product;
+      const n = p.nutriments || {};
+      return {
+        canonicalName: p.product_name || p.product_name_en || '',
+        brand: p.brands || null,
+        openFoodFactsBarcode: barcode,
+        nutritionPer100g: JSON.stringify({
+          kcal:      n['energy-kcal_100g'] || 0,
+          protein_g: n['proteins_100g']    || 0,
+          carb_g:    n['carbohydrates_100g']|| 0,
+          fat_g:     n['fat_100g']          || 0,
+          fiber_g:   n['fiber_100g']        || 0,
+          sodium_mg: (n['sodium_100g']||0)*1000,
+          iron_mg:   n['iron_100g']         || 0,
+          folate_ug: n['folate_100g']       || 0,
+          calcium_mg:(n['calcium_100g']||0)*1000,
+        }),
+      };
+    }
+
+    // ── WeekNavigator component ────────────────────────────────────────────────
+    function WeekNavigator({ week, onChange, label }) {
+      return (
+        <div className="flex items-center justify-between bg-white rounded-2xl shadow px-4 py-3 mb-4">
+          <button onClick={() => onChange(offsetWeek(week, -1))}
+            className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-gray-100 text-gray-500 text-xl font-bold">‹</button>
+          <div className="text-center">
+            {label && <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>}
+            <p className="font-semibold text-gray-800 text-sm">{formatWeekLabel(week)}</p>
+            <p className="text-xs text-indigo-500">{week}</p>
+          </div>
+          <button onClick={() => onChange(offsetWeek(week, +1))}
+            className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-gray-100 text-gray-500 text-xl font-bold">›</button>
+        </div>
+      );
+    }
+
+    // ── Skeleton loading placeholder ───────────────────────────────────────────
+    function LoadingSkeleton({ rows = 3 }) {
+      return (
+        <div className="space-y-3">
+          {Array.from({length:rows}).map((_,i) => (
+            <div key={i} className="bg-white rounded-2xl shadow p-4">
+              <div className="skeleton h-4 w-2/3 mb-2" />
+              <div className="skeleton h-3 w-1/2" />
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ── Tab stub components (filled in later commits) ──────────────────────────
+    function OverviewTab({ week, onWeekChange, mealPlanSlots, recipes, weekData, captures, categories, groceries, parent1Name, parent2Name }) {
+      const [expandedDay, setExpandedDay] = useState(null);
+
+      const dates   = weekDates(week);
+      const urgentItems = captures.filter(c => { const cat = categories.find(x=>x.id===c.category); return cat?.urgent && !c.completed; });
+      const unfiledItems= captures.filter(c => !c.completed);
+      const groceryPending = groceries.filter(g=>!g.completed).length;
+
+      // Store counts from grocery list
+      const storeMap = {};
+      groceries.filter(g=>!g.completed).forEach(g => {
+        const s = g.store || 'Unassigned';
+        storeMap[s] = (storeMap[s]||0) + 1;
+      });
+      const storeSummary = Object.entries(storeMap).map(([s,n]) => `${n} @ ${s}`).join(' · ');
+
+      // Get meal slots for a day
+      const slotsForDay = (dayIdx) => {
+        const d = dates[dayIdx];
+        const dayName = DAYS[dayIdx];
+        return mealPlanSlots.filter(s => s.weekOf === week && s.dayOfWeek === dayName);
+      };
+
+      // Leo duty icons from v8.4 weekData
+      const leoForDay = (dayIdx) => {
+        if (!weekData?.days?.[dayIdx]) return null;
+        const d = weekData.days[dayIdx];
+        if (d.hidden) return null;
+        return {
+          dropoff: d.dropoff?.assigned,
+          pickup:  d.pickup?.assigned,
+          nap:     d.nap?.assigned,
+          conflict: d.dropoff?.conflict || d.pickup?.conflict || d.nap?.conflict,
+        };
+      };
+
+      const dinnerForDay = (dayIdx) => {
+        const dayName = DAYS[dayIdx];
+        const slot = mealPlanSlots.find(s => s.weekOf === week && s.dayOfWeek === dayName && s.slot === 'Dinner');
+        if (!slot) return null;
+        if (slot.noteFreeText) return slot.noteFreeText;
+        const recipe = recipes.find(r => r.recipeId === slot.recipeId);
+        return recipe?.name || null;
+      };
+
+      return (
+        <div className="space-y-4">
+          <WeekNavigator week={week} onChange={onWeekChange} label="Week at a Glance" />
+
+          {/* Grocery summary bar */}
+          {groceryPending > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-2xl px-4 py-3 flex items-center justify-between">
+              <span className="text-sm font-medium text-green-800">🛒 {groceryPending} item{groceryPending!==1?'s':''} to get</span>
+              <span className="text-xs text-green-600">{storeSummary || 'No store assigned'}</span>
+            </div>
+          )}
+
+          {/* Urgent alert */}
+          {urgentItems.length > 0 && (
+            <div className="bg-red-50 border-l-4 border-red-500 rounded-2xl px-4 py-3">
+              <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-1">⚡ {urgentItems.length} Urgent item{urgentItems.length!==1?'s':''}</p>
+              {urgentItems.slice(0,3).map(c => (
+                <p key={c.id} className="text-sm text-red-700 truncate">• {c.content}</p>
+              ))}
+              {urgentItems.length > 3 && <p className="text-xs text-red-400 mt-1">+{urgentItems.length-3} more in Organized</p>}
+            </div>
+          )}
+
+          {/* 7 day cards */}
+          <div className="space-y-2">
+            {dates.map((date, dayIdx) => {
+              const dayName    = DAYS[dayIdx];
+              const leo        = leoForDay(dayIdx);
+              const dinner     = dinnerForDay(dayIdx);
+              const daySlots   = slotsForDay(dayIdx);
+              const mealCount  = daySlots.filter(s => s.recipeId || s.noteFreeText).length;
+              const isToday    = date.toDateString() === new Date().toDateString();
+              const isExpanded = expandedDay === dayIdx;
+
+              return (
+                <div key={dayIdx} className={`bg-white rounded-2xl shadow-sm overflow-hidden border-l-4 ${isToday?'border-indigo-500':'border-transparent'}`}>
+                  {/* Collapsed row */}
+                  <button className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-50" onClick={()=>setExpandedDay(isExpanded?null:dayIdx)}>
+                    {/* Day label */}
+                    <div className={`w-12 text-center flex-shrink-0 rounded-xl py-1 ${isToday?'bg-indigo-100':'bg-gray-50'}`}>
+                      <p className={`text-xs font-bold ${isToday?'text-indigo-700':'text-gray-500'}`}>{dayName}</p>
+                      <p className={`text-lg font-bold leading-tight ${isToday?'text-indigo-800':'text-gray-700'}`}>{date.getDate()}</p>
+                    </div>
+
+                    {/* Leo duty icons */}
+                    <div className="flex gap-1 flex-shrink-0">
+                      {leo ? (
+                        <>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${leo.dropoff==='DISCUSS'?'bg-red-100 text-red-600':'bg-blue-50 text-blue-600'}`} title="Drop-off">🚗</span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${leo.pickup==='DISCUSS'?'bg-red-100 text-red-600':'bg-green-50 text-green-600'}`} title="Pick-up">🏠</span>
+                          {leo.conflict && <span className="text-xs text-red-500" title="Conflict">⚠️</span>}
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
+                    </div>
+
+                    {/* Dinner slot */}
+                    <div className="flex-1 min-w-0">
+                      {dinner ? (
+                        <p className="text-sm text-gray-800 truncate">🍽️ {dinner}</p>
+                      ) : (
+                        <p className="text-sm text-gray-300 italic">No dinner planned</p>
+                      )}
+                    </div>
+
+                    {/* Counts + chevron */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {mealCount > 0 && <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">{mealCount} meals</span>}
+                      <span className="text-gray-400 text-sm">{isExpanded?'▼':'▶'}</span>
+                    </div>
+                  </button>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div className="border-t px-4 pb-4 pt-3 bg-gray-50 space-y-3">
+                      {/* Leo duties */}
+                      {leo && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Leo duties</p>
+                          <div className="flex gap-2 flex-wrap">
+                            {[{k:'dropoff',icon:'🚗',label:'Drop-off'},{k:'pickup',icon:'🏠',label:'Pick-up'},{k:'nap',icon:'😴',label:'Nap'}].map(({k,icon,label}) => (
+                              <span key={k} className={`text-xs px-2 py-1 rounded-lg ${weekData.days[dayIdx][k]?.assigned==='DISCUSS'?'bg-red-100 text-red-700':'bg-white border text-gray-700'}`}>
+                                {icon} {label}: <strong>{weekData.days[dayIdx][k]?.assigned}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* All meal slots */}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Meals</p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {SLOTS.map(slot => {
+                            const s = mealPlanSlots.find(x => x.weekOf===week && x.dayOfWeek===dayName && x.slot===slot);
+                            const recipe = s?.recipeId ? recipes.find(r=>r.recipeId===s.recipeId) : null;
+                            const label  = s?.noteFreeText || recipe?.name;
+                            return (
+                              <div key={slot} className={`text-xs rounded-lg px-2 py-1.5 ${label?'bg-indigo-50 text-indigo-800':'bg-white border text-gray-300 italic'}`}>
+                                <span className="font-medium text-gray-400">{slot[0]}: </span>
+                                {label || '—'}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Urgent items for this day (any — overview doesn't filter by day) */}
+                      {dayIdx === 0 && urgentItems.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Urgent</p>
+                          {urgentItems.map(c => (
+                            <p key={c.id} className="text-xs text-red-700 bg-red-50 rounded px-2 py-1 mb-1 truncate">• {c.content}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Unfiled captures summary */}
+          {unfiledItems.length > 0 && (
+            <div className="bg-white rounded-2xl shadow p-4">
+              <p className="text-sm font-semibold text-gray-700 mb-2">🧠 {unfiledItems.length} pending capture{unfiledItems.length!==1?'s':''}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {unfiledItems.slice(0,5).map(c => {
+                  const cat = categories.find(x=>x.id===c.category);
+                  return <span key={c.id} className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{cat?.icon} {c.content.slice(0,30)}{c.content.length>30?'…':''}</span>;
+                })}
+                {unfiledItems.length > 5 && <span className="text-xs text-gray-400 px-2 py-0.5">+{unfiledItems.length-5} more</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!weekData && mealPlanSlots.length === 0 && captures.length === 0 && groceries.length === 0 && (
+            <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
+              <div className="text-5xl mb-3">🏠</div>
+              <p className="font-medium text-gray-600">Nothing here yet</p>
+              <p className="text-sm mt-1">Add meals in Meal Plan, captures in Dump, or upload your schedule</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function MealPlanTab({ week, onWeekChange, recipes, mealPlanSlots, setMealPlanSlots, ingredients, recipeIngredients, pantry, groceries, setGroceries, onAddRecipe, onViewRecipe }) {
+      const [slotPicker,  setSlotPicker]  = useState(null); // {dayIdx, slot}
+      const [pickerQuery, setPickerQuery] = useState('');
+      const [cookByParent,setCookByParent]= useState('Fernando');
+
+      // §17 rotation engine — top-3 suggested (due oldest → active oldest → new newest)
+      const suggested = useMemo(() => {
+        const withStatus = recipes.map(r => ({ r, status: rotationStatus(r) }));
+        const due     = withStatus.filter(x=>x.status==='due')    .sort((a,b)=>daysSince(b.r.lastCookedAt)-daysSince(a.r.lastCookedAt));
+        const active  = withStatus.filter(x=>x.status==='active') .sort((a,b)=>daysSince(b.r.lastCookedAt)-daysSince(a.r.lastCookedAt));
+        const newRec  = withStatus.filter(x=>x.status==='new')    .sort((a,b)=>new Date(b.r.createdAt)-new Date(a.r.createdAt));
+        return [...due,...active,...newRec].slice(0,3).map(x=>x.r);
+      }, [recipes]);
+
+      const slotFor = (dayIdx, slot) => mealPlanSlots.find(s => s.weekOf===week && s.dayOfWeek===DAYS[dayIdx] && s.slot===slot);
+
+      const getSlotLabel = (dayIdx, slot) => {
+        const s = slotFor(dayIdx, slot);
+        if (!s) return null;
+        if (s.noteFreeText) return { label: s.noteFreeText, isNote: true, slotId: s.slotId, status: s.cookedStatus };
+        const r = recipes.find(r=>r.recipeId===s.recipeId);
+        return r ? { label: r.name, isNote: false, slotId: s.slotId, recipeId: r.recipeId, status: s.cookedStatus } : null;
+      };
+
+      const assignSlot = (recipeId, noteText) => {
+        if (!slotPicker) return;
+        const { dayIdx, slot } = slotPicker;
+        const dayName = DAYS[dayIdx];
+        const existing = slotFor(dayIdx, slot);
+        const newSlot = {
+          slotId: existing?.slotId || uuid(),
+          weekOf: week, dayOfWeek: dayName, slot,
+          recipeId: recipeId || '', servingsPlanned: 1,
+          noteFreeText: noteText || '', cookBy: cookByParent,
+          cookedStatus: 'planned',
+        };
+        const updated = existing
+          ? mealPlanSlots.map(s=>s.slotId===existing.slotId?newSlot:s)
+          : [...mealPlanSlots, newSlot];
+        setMealPlanSlots(updated);
+        if (existing) updateRow('MealPlanSlots', newSlot.slotId, newSlot);
+        else appendRow('MealPlanSlots', newSlot);
+
+        // Project recipe ingredients to grocery list
+        if (recipeId && !noteText) projectToGrocery(recipeId, dayName);
+
+        setSlotPicker(null); setPickerQuery('');
+      };
+
+      const projectToGrocery = (recipeId, dayLabel) => {
+        const ris = recipeIngredients.filter(ri => ri.recipeId === recipeId);
+        if (!ris.length) return;
+        const newItems = ris.map(ri => {
+          const ing = ingredients.find(i=>i.ingredientId===ri.ingredientId);
+          return {
+            id: Date.now() + Math.random(),
+            name: ing?.canonicalName || ri.ingredientId,
+            store: ing?.preferredStore || '',
+            completed: false,
+            addedBy: 'Meal Plan',
+            timestamp: nowISO(),
+            ingredientId: ri.ingredientId || '',
+            quantity: ri.quantity || '',
+            unit: ri.unit || '',
+            pantryBacked: false,
+          };
+        });
+        setGroceries(g => [...g, ...newItems]);
+      };
+
+      const markCooked = (slotId) => {
+        const s = mealPlanSlots.find(x=>x.slotId===slotId);
+        if (!s) return;
+        const updated = mealPlanSlots.map(x=>x.slotId===slotId?{...x,cookedStatus:'cooked'}:x);
+        setMealPlanSlots(updated);
+        updateRow('MealPlanSlots', slotId, { cookedStatus:'cooked' });
+        // Increment timesCooked + lastCookedAt on recipe
+        if (s.recipeId) {
+          const r = recipes.find(x=>x.recipeId===s.recipeId);
+          if (r) {
+            const patch = { timesCooked: (parseInt(r.timesCooked||0)+1), lastCookedAt: nowISO() };
+            updateRow('Recipes', s.recipeId, patch);
+          }
+        }
+      };
+
+      const markSkipped = (slotId) => {
+        const updated = mealPlanSlots.map(s=>s.slotId===slotId?{...s,cookedStatus:'skipped'}:s);
+        setMealPlanSlots(updated);
+        updateRow('MealPlanSlots', slotId, { cookedStatus:'skipped' });
+      };
+
+      const clearSlot = (slotId) => {
+        setMealPlanSlots(p=>p.filter(s=>s.slotId!==slotId));
+        deleteRow('MealPlanSlots', slotId);
+      };
+
+      const filteredRecipes = pickerQuery
+        ? recipes.filter(r => r.name?.toLowerCase().includes(pickerQuery.toLowerCase()))
+        : recipes;
+
+      const statusBadge = (status) => {
+        if (status === 'cooked')  return 'bg-green-100 text-green-700';
+        if (status === 'skipped') return 'bg-gray-100 text-gray-400';
+        return 'bg-indigo-50 text-indigo-700';
+      };
+
+      return (
+        <div className="space-y-4">
+          <WeekNavigator week={week} onChange={onWeekChange} label="Meal Plan" />
+
+          {/* Rotation suggestion strip */}
+          {suggested.length > 0 && (
+            <div className="bg-white rounded-2xl shadow p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">💡 Suggested from rotation</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {suggested.map(r => {
+                  const st = rotationStatus(r);
+                  return (
+                    <button key={r.recipeId} onClick={()=>onViewRecipe(r.recipeId)}
+                      className="flex-shrink-0 text-left bg-indigo-50 hover:bg-indigo-100 rounded-xl px-3 py-2 min-w-[120px] transition-colors">
+                      <p className="text-xs font-semibold text-indigo-800 truncate">{r.name}</p>
+                      <p className="text-xs text-indigo-500 mt-0.5">{st==='due'?'⏰ Due':st==='active'?'✅ Active':'🆕 New'}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 4×7 grid */}
+          <div className="bg-white rounded-2xl shadow overflow-hidden">
+            {/* Header row */}
+            <div className="grid grid-cols-8 border-b">
+              <div className="p-2 text-xs text-gray-400" />
+              {DAYS.map((d,i) => {
+                const date = weekDates(week)[i];
+                const isToday = date.toDateString()===new Date().toDateString();
+                return (
+                  <div key={d} className={`p-2 text-center border-l ${isToday?'bg-indigo-50':''}`}>
+                    <p className={`text-xs font-bold ${isToday?'text-indigo-600':'text-gray-500'}`}>{d}</p>
+                    <p className={`text-xs ${isToday?'text-indigo-400':'text-gray-300'}`}>{date.getDate()}</p>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Slot rows */}
+            {SLOTS.map(slot => (
+              <div key={slot} className="grid grid-cols-8 border-b last:border-b-0">
+                <div className="p-2 flex items-center bg-gray-50 border-r">
+                  <span className="text-xs font-medium text-gray-500 leading-tight">{slot[0]}</span>
+                </div>
+                {DAYS.map((day, dayIdx) => {
+                  const entry = getSlotLabel(dayIdx, slot);
+                  return (
+                    <div key={day} className="border-l min-h-[52px] relative group">
+                      {entry ? (
+                        <div className={`h-full p-1 flex flex-col justify-between ${statusBadge(entry.status)} cursor-pointer`}
+                          onClick={()=>entry.recipeId&&onViewRecipe(entry.recipeId)}>
+                          <p className="text-xs leading-tight font-medium truncate">{entry.label}</p>
+                          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {entry.status==='planned'&&(
+                              <button onClick={e=>{e.stopPropagation();markCooked(entry.slotId);}} className="text-green-600 hover:bg-green-100 rounded px-1 text-xs" title="Mark cooked">✓</button>
+                            )}
+                            <button onClick={e=>{e.stopPropagation();clearSlot(entry.slotId);}} className="text-red-400 hover:bg-red-50 rounded px-1 text-xs" title="Clear">×</button>
+                          </div>
+                          {entry.status==='cooked' && <span className="text-xs">✅</span>}
+                          {entry.status==='skipped'&& <span className="text-xs">⏭️</span>}
+                        </div>
+                      ) : (
+                        <button onClick={()=>{setSlotPicker({dayIdx,slot});setPickerQuery('');}}
+                          className="w-full h-full flex items-center justify-center text-gray-200 hover:text-indigo-400 hover:bg-indigo-50 transition-colors text-lg">
+                          +
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          {/* Add recipe FAB */}
+          <button onClick={onAddRecipe}
+            className="fixed bottom-20 right-5 md:bottom-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-indigo-700 z-30">
+            +
+          </button>
+
+          {/* Slot picker bottom sheet */}
+          {slotPicker && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setSlotPicker(null)}>
+              <div className="bg-white rounded-t-3xl w-full max-h-[75vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+                <div className="p-4 border-b flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-800">{DAYS[slotPicker.dayIdx]} — {slotPicker.slot}</h3>
+                  <button onClick={()=>setSlotPicker(null)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+                </div>
+                <div className="p-4 space-y-3">
+                  {/* Cook-by */}
+                  <div className="flex gap-2">
+                    {['Fernando','Yenny','Both'].map(p => (
+                      <button key={p} onClick={()=>setCookByParent(p)}
+                        className={`flex-1 py-1.5 rounded-xl text-sm border transition-all ${cookByParent===p?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{p}</button>
+                    ))}
+                  </div>
+                  {/* Free-text note */}
+                  <div className="flex gap-2">
+                    <input placeholder="Free note (e.g. ordered pizza)…" id="slotNote"
+                      className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                    <button onClick={()=>assignSlot(null, document.getElementById('slotNote').value.trim()||null)}
+                      className="px-4 py-2 bg-gray-700 text-white rounded-xl text-sm font-medium">Add note</button>
+                  </div>
+                  {/* Rotation suggestions */}
+                  {suggested.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Suggested</p>
+                      {suggested.map(r => (
+                        <button key={r.recipeId} onClick={()=>assignSlot(r.recipeId, null)}
+                          className="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl hover:bg-indigo-50 mb-1">
+                          <span className="text-sm font-medium text-gray-800">{r.name}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${rotationStatus(r)==='due'?'bg-orange-100 text-orange-700':rotationStatus(r)==='active'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>
+                            {rotationStatus(r)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Search all recipes */}
+                  <input value={pickerQuery} onChange={e=>setPickerQuery(e.target.value)}
+                    placeholder="Search all recipes…" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  {filteredRecipes.map(r => (
+                    <button key={r.recipeId} onClick={()=>assignSlot(r.recipeId, null)}
+                      className="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl hover:bg-gray-50">
+                      <span className="text-sm text-gray-800">{r.name}</span>
+                      <span className="text-xs text-gray-400">{r.cuisine||''}</span>
+                    </button>
+                  ))}
+                  {filteredRecipes.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No recipes yet — add one with the + button</p>}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function PantryTab({ pantry, setPantry, ingredients, setIngredients, onBarcodeOpen, onReceiptOpen }) {
+      const [query,       setQuery]       = useState('');
+      const [sortBy,      setSortBy]      = useState('added'); // added | expiry
+      const [editingRow,  setEditingRow]  = useState(null);
+      const [manualModal, setManualModal] = useState(false);
+      const [manualForm,  setManualForm]  = useState({ ingredientName:'', quantity:'', unit:'piece', expiryDate:'' });
+
+      const ingName = (ingredientId) => {
+        const ing = ingredients.find(i=>i.ingredientId===ingredientId);
+        return ing?.canonicalName || ingredientId;
+      };
+
+      const rows = pantry
+        .filter(p => ingName(p.ingredientId).toLowerCase().includes(query.toLowerCase()))
+        .sort((a,b) => {
+          if (sortBy === 'expiry') {
+            if (!a.expiryDate && !b.expiryDate) return 0;
+            if (!a.expiryDate) return 1;
+            if (!b.expiryDate) return -1;
+            return new Date(a.expiryDate) - new Date(b.expiryDate);
+          }
+          return new Date(b.addedAt||0) - new Date(a.addedAt||0);
+        });
+
+      const expiryClass = (expiryDate) => {
+        if (!expiryDate) return '';
+        const days = (new Date(expiryDate) - Date.now()) / 86400000;
+        if (days <= 3)  return 'text-red-600 font-semibold';
+        if (days <= 7)  return 'text-orange-500';
+        return 'text-gray-500';
+      };
+
+      const ADDED_VIA_LABEL = {
+        manual:           '✏️ Manual',
+        barcode_scan:     '📱 Scan',
+        receipt_photo:    '📷 Receipt',
+        receipt_digital:  '📧 Email',
+        grocery_completion:'🛒 Grocery',
+      };
+
+      const updateQty = (pantryId, quantity) => {
+        setPantry(ps=>ps.map(p=>p.pantryId===pantryId?{...p,quantity}:p));
+        updateRow('Pantry', pantryId, { quantity });
+      };
+
+      const deleteEntry = (pantryId) => {
+        setPantry(ps=>ps.filter(p=>p.pantryId!==pantryId));
+        deleteRow('Pantry', pantryId);
+      };
+
+      const addManual = () => {
+        if (!manualForm.ingredientName.trim()) return;
+        // Fuzzy-find or create ingredient
+        const existing = ingredients.find(i => fuzzyScore(i.canonicalName||'',manualForm.ingredientName.trim()) >= 0.8);
+        let ingredientId;
+        if (existing) {
+          ingredientId = existing.ingredientId;
+        } else {
+          ingredientId = uuid();
+          const newIng = { ingredientId, canonicalName:manualForm.ingredientName.trim(), lastUpdated:nowISO(), nutritionPer100g:'{}', needsReview:false };
+          setIngredients(is=>[...is,newIng]);
+          appendRow('Ingredients', newIng);
+        }
+        const pantryRow = {
+          pantryId: uuid(), ingredientId,
+          quantity: parseFloat(manualForm.quantity)||1,
+          unit: manualForm.unit,
+          addedAt: nowISO(), addedVia:'manual',
+          expiryDate: manualForm.expiryDate||null,
+        };
+        setPantry(ps=>[pantryRow,...ps]);
+        appendRow('Pantry', pantryRow);
+        setManualModal(false);
+        setManualForm({ ingredientName:'', quantity:'', unit:'piece', expiryDate:'' });
+      };
+
+      const needsReviewItems = ingredients.filter(i=>i.needsReview==='true'||i.needsReview===true);
+
+      return (
+        <div className="space-y-4">
+          {/* Needs-review banner */}
+          {needsReviewItems.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2">
+              <span className="text-amber-500 text-lg">⚠️</span>
+              <div>
+                <p className="text-sm font-medium text-amber-800">{needsReviewItems.length} ingredient{needsReviewItems.length!==1?'s':''} need review</p>
+                <p className="text-xs text-amber-600">Tap items below with ⚠️ to edit name/nutrition</p>
+              </div>
+            </div>
+          )}
+
+          {/* Search + sort bar */}
+          <div className="flex gap-2">
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search pantry…"
+              className="flex-1 px-4 py-3 bg-white rounded-2xl shadow text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 border-0"/>
+            <button onClick={()=>setSortBy(s=>s==='added'?'expiry':'added')}
+              className="bg-white rounded-2xl shadow px-4 py-3 text-xs text-gray-600 font-medium flex-shrink-0">
+              {sortBy==='added'?'By date':'By expiry'}
+            </button>
+          </div>
+
+          {/* Pantry list */}
+          {rows.length > 0 ? (
+            <div className="bg-white rounded-2xl shadow divide-y">
+              {rows.map(p => {
+                const name = ingName(p.ingredientId);
+                const ing  = ingredients.find(i=>i.ingredientId===p.ingredientId);
+                const isReview = ing?.needsReview==='true'||ing?.needsReview===true;
+                return (
+                  <div key={p.pantryId} className="px-4 py-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium text-gray-800 truncate">{name}</p>
+                        {isReview && <span title="Needs review" className="text-amber-500 text-xs">⚠️</span>}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-gray-400">{ADDED_VIA_LABEL[p.addedVia]||p.addedVia}</span>
+                        {p.expiryDate && <span className={`text-xs ${expiryClass(p.expiryDate)}`}>exp {p.expiryDate}</span>}
+                      </div>
+                    </div>
+                    {/* Qty editor */}
+                    {editingRow === p.pantryId ? (
+                      <div className="flex items-center gap-1">
+                        <input type="number" defaultValue={p.quantity} id={`qty-${p.pantryId}`}
+                          className="w-16 px-2 py-1 border rounded-lg text-sm text-center focus:outline-none" step="0.5"/>
+                        <span className="text-xs text-gray-400">{p.unit}</span>
+                        <button onClick={()=>{updateQty(p.pantryId,parseFloat(document.getElementById(`qty-${p.pantryId}`).value)||0);setEditingRow(null);}}
+                          className="text-green-600 text-xs px-2 py-1 rounded bg-green-50">✓</button>
+                      </div>
+                    ) : (
+                      <button onClick={()=>setEditingRow(p.pantryId)}
+                        className="text-sm font-semibold text-gray-700 hover:text-indigo-600 flex-shrink-0">
+                        {p.quantity} <span className="text-xs font-normal text-gray-400">{p.unit}</span>
+                      </button>
+                    )}
+                    <button onClick={()=>deleteEntry(p.pantryId)} className="text-gray-300 hover:text-red-400 text-lg flex-shrink-0">×</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
+              <div className="text-5xl mb-3">🥫</div>
+              <p className="font-medium text-gray-600">{query?'No matches':'Pantry is empty'}</p>
+              {!query && <p className="text-sm mt-1">Add items with the + button below</p>}
+            </div>
+          )}
+
+          {/* FAB + 4 add methods */}
+          <div className="fixed bottom-20 right-5 md:bottom-6 flex flex-col gap-2 z-30">
+            <button onClick={()=>onReceiptOpen('email')} className="w-12 h-12 bg-white border border-gray-200 shadow rounded-full flex items-center justify-center text-xl hover:bg-gray-50" title="Paste email receipt">📧</button>
+            <button onClick={()=>onReceiptOpen('photo')} className="w-12 h-12 bg-white border border-gray-200 shadow rounded-full flex items-center justify-center text-xl hover:bg-gray-50" title="Photo receipt">📷</button>
+            <button onClick={onBarcodeOpen} className="w-12 h-12 bg-white border border-gray-200 shadow rounded-full flex items-center justify-center text-xl hover:bg-gray-50" title="Barcode scan">📱</button>
+            <button onClick={()=>setManualModal(true)} className="w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-indigo-700" title="Add manually">+</button>
+          </div>
+
+          {/* Manual add modal */}
+          {manualModal && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setManualModal(false)}>
+              <div className="bg-white rounded-t-3xl w-full p-5 space-y-3" onClick={e=>e.stopPropagation()}>
+                <h3 className="font-bold text-gray-800">Add to Pantry</h3>
+                <input value={manualForm.ingredientName} onChange={e=>setManualForm(f=>({...f,ingredientName:e.target.value}))}
+                  placeholder="Ingredient name *" className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                <div className="flex gap-2">
+                  <input type="number" value={manualForm.quantity} onChange={e=>setManualForm(f=>({...f,quantity:e.target.value}))}
+                    placeholder="Qty" className="w-24 px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                  <select value={manualForm.unit} onChange={e=>setManualForm(f=>({...f,unit:e.target.value}))}
+                    className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none">
+                    {['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch'].map(u=><option key={u}>{u}</option>)}
+                  </select>
+                  <input type="date" value={manualForm.expiryDate} onChange={e=>setManualForm(f=>({...f,expiryDate:e.target.value}))}
+                    className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none" title="Expiry date (optional)"/>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setManualModal(false)} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Cancel</button>
+                  <button onClick={addManual} disabled={!manualForm.ingredientName.trim()} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40">Add</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function RecipeDetailModal({ recipeId, recipes, recipeIngredients, ingredients, pantry, mealPlanSlots, onClose, onUpdateRecipe, onUpdateMealPlanSlots, onUpdatePantry }) {
+      const [displayServings, setDisplayServings] = useState(null);
+      const [noteInput,       setNoteInput]       = useState('');
+      const [noteBy,          setNoteBy]          = useState('Fernando');
+
+      const recipe = recipes.find(r => r.recipeId === recipeId);
+      useEffect(() => { if (recipe) setDisplayServings(parseInt(recipe.baseServings)||4); }, [recipeId]);
+
+      if (!recipeId || !recipe) return null;
+
+      const base     = parseInt(recipe.baseServings) || 4;
+      const scale    = (displayServings||base) / base;
+      const ris      = recipeIngredients.filter(ri => ri.recipeId === recipeId);
+      const tags     = recipe.dietaryTags ? String(recipe.dietaryTags).split('|').filter(Boolean) : [];
+      const status   = rotationStatus(recipe);
+      const notes    = recipe.notes ? String(recipe.notes).split('\n').filter(Boolean) : [];
+
+      // Pantry status for a given ingredient
+      const pantryStatus = (ingredientId, neededQty) => {
+        const rows  = pantry.filter(p => p.ingredientId === ingredientId);
+        const total = rows.reduce((s,p) => s + parseFloat(p.quantity||0), 0);
+        if (total === 0)          return { icon:'✗', cls:'text-red-400' };
+        if (total >= neededQty)   return { icon:'✓', cls:'text-green-500' };
+        return                           { icon:'△', cls:'text-amber-400' };
+      };
+
+      const scaleQty = (qty, unit) => {
+        if (!qty) return '';
+        const q = parseFloat(qty) * scale;
+        if (['to_taste','pinch'].includes(unit)) return qty; // BRD §5.3 — pass through
+        return q % 1 === 0 ? q : q.toFixed(1);
+      };
+
+      const appendNote = () => {
+        if (!noteInput.trim()) return;
+        const entry = `${new Date().toISOString().slice(0,10)} (${noteBy}): ${noteInput.trim()}`;
+        const existing = recipe.notes ? recipe.notes + '\n' + entry : entry;
+        onUpdateRecipe(recipeId, { notes: existing });
+        setNoteInput('');
+      };
+
+      const statusChip = {
+        new:     { label:'🆕 New',     cls:'bg-blue-100 text-blue-700'   },
+        active:  { label:'✅ Active',  cls:'bg-green-100 text-green-700'  },
+        due:     { label:'⏰ Due',     cls:'bg-orange-100 text-orange-700'},
+        dormant: { label:'💤 Dormant', cls:'bg-gray-100 text-gray-500'   },
+      }[status] || { label:'', cls:'' };
+
+      return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-5 border-b flex items-start justify-between sticky top-0 bg-white z-10">
+              <div className="flex-1 min-w-0 pr-3">
+                <h2 className="text-lg font-bold text-gray-800 leading-tight">{recipe.name}</h2>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {recipe.cuisine && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{recipe.cuisine}</span>}
+                  {recipe.totalTimeMin && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">⏱ {recipe.totalTimeMin}min</span>}
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${statusChip.cls}`}>{statusChip.label}</span>
+                  {tags.map(t => <span key={t} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">{t}</span>)}
+                </div>
+              </div>
+              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 flex-shrink-0">✕</button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* Servings stepper */}
+              <div className="flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3">
+                <span className="text-sm font-medium text-gray-700">Servings</span>
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>setDisplayServings(s=>Math.max(1,s-1))} className="w-8 h-8 flex items-center justify-center rounded-full bg-white border text-gray-600 hover:bg-gray-100 font-bold">−</button>
+                  <span className="text-lg font-bold text-indigo-700 w-8 text-center">{displayServings}</span>
+                  <button onClick={()=>setDisplayServings(s=>s+1)} className="w-8 h-8 flex items-center justify-center rounded-full bg-white border text-gray-600 hover:bg-gray-100 font-bold">+</button>
+                </div>
+                {scale !== 1 && <span className="text-xs text-indigo-500 ml-2">({scale>1?'+':''}{ ((scale-1)*100).toFixed(0)}%)</span>}
+              </div>
+
+              {/* Ingredients */}
+              {ris.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-2">Ingredients</h3>
+                  <div className="space-y-1.5">
+                    {ris.map(ri => {
+                      const ing = ingredients.find(i=>i.ingredientId===ri.ingredientId);
+                      const ps  = pantryStatus(ri.ingredientId, parseFloat(ri.quantity||0)*scale);
+                      const scaledQ = scaleQty(ri.quantity, ri.unit);
+                      return (
+                        <div key={ri.recipeIngredientId} className={`flex items-center gap-3 px-3 py-2 rounded-xl ${ri.isOptional==='true'||ri.isOptional===true?'opacity-60 border border-dashed border-gray-200':'bg-gray-50'}`}>
+                          <span className={`font-bold text-sm flex-shrink-0 ${ps.cls}`}>{ps.icon}</span>
+                          <span className="text-sm text-gray-800 flex-1">
+                            {ing?.canonicalName || ri.ingredientId}
+                            {ri.preparation && <span className="text-gray-400 text-xs ml-1">({ri.preparation})</span>}
+                            {(ri.isOptional==='true'||ri.isOptional===true) && <span className="text-xs text-gray-400 ml-1">optional</span>}
+                          </span>
+                          <span className="text-sm text-gray-600 flex-shrink-0 font-medium">
+                            {scaledQ} {['to_taste','pinch'].includes(ri.unit)?ri.unit:ri.unit}
+                            {['to_taste','pinch'].includes(ri.unit)===false && scale!==1 && parseFloat(ri.quantity||0)>0 && !(['to_taste','pinch'].includes(ri.unit)) && (
+                              <span className="text-xs text-gray-400 ml-1">
+                                {!ing?.density_g_per_ml && !['g','kg','ml','l'].includes(ri.unit) && <span title="Weight unavailable">~</span>}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">✓ have enough · △ partial · ✗ none (from pantry)</p>
+                </div>
+              )}
+
+              {/* Method */}
+              {recipe.methodSteps && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-2">Method</h3>
+                  <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl p-4">{recipe.methodSteps}</div>
+                </div>
+              )}
+
+              {/* Notes log */}
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-2">Notes {notes.length>0&&<span className="text-gray-400 font-normal">({notes.length})</span>}</h3>
+                {notes.map((n,i) => <p key={i} className="text-xs text-gray-600 bg-yellow-50 rounded-lg px-3 py-2 mb-1.5 font-mono">{n}</p>)}
+                <div className="flex gap-2 mt-2">
+                  <select value={noteBy} onChange={e=>setNoteBy(e.target.value)} className="text-xs px-2 py-2 border rounded-xl focus:outline-none flex-shrink-0">
+                    {['Fernando','Yenny','Both'].map(p=><option key={p}>{p}</option>)}
+                  </select>
+                  <input value={noteInput} onChange={e=>setNoteInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&appendNote()}
+                    placeholder="Add a note… (e.g. doubled garlic)" className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  <button onClick={appendNote} disabled={!noteInput.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm disabled:opacity-40">Add</button>
+                </div>
+              </div>
+
+              {/* Meta */}
+              <div className="text-xs text-gray-400 border-t pt-3 flex gap-4 flex-wrap">
+                <span>Added by {recipe.createdBy||'—'}</span>
+                {recipe.timesCooked>0 && <span>Cooked {recipe.timesCooked}×</span>}
+                {recipe.lastCookedAt && <span>Last: {recipe.lastCookedAt.slice(0,10)}</span>}
+                {recipe.sourceUrl && <a href={recipe.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">Source ↗</a>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function AddRecipeModal({ onClose, onSave, ingredients, setIngredients }) {
+      const [mode,       setMode]       = useState('url'); // url | image | manual
+      const [urlInput,   setUrlInput]   = useState('');
+      const [loading,    setLoading]    = useState(false);
+      const [error,      setError]      = useState('');
+      const [preview,    setPreview]    = useState(null);  // parsed recipe object
+      const [addedBy,    setAddedBy]    = useState('Fernando');
+
+      // Manual entry form state
+      const [manualName,    setManualName]    = useState('');
+      const [manualServings,setManualServings]= useState(4);
+      const [manualTime,    setManualTime]    = useState('');
+      const [manualCuisine, setManualCuisine] = useState('');
+      const [manualMethod,  setManualMethod]  = useState('');
+      const [manualTags,    setManualTags]    = useState([]);
+      const [manualIngRows, setManualIngRows] = useState([{ name:'',qty:'',unit:'piece',prep:'',optional:false }]);
+
+      const fileInputRef = useRef(null);
+
+      // §12a — URL paste: try JSON-LD first (free), then Haiku
+      const handleUrlAdd = async () => {
+        const url = urlInput.trim();
+        if (!url) return;
+        setLoading(true); setError('');
+        try {
+          // Step 1: try client-side fetch
+          let html = null;
+          try {
+            const res = await fetch(url, { mode:'cors' });
+            html = await res.text();
+          } catch {
+            // CORS block → /fetch-html proxy
+            try {
+              const proxy = await callWorker('/fetch-html', { url });
+              html = proxy.html;
+            } catch (e) {
+              throw new Error('Could not fetch page. Try image upload instead.');
+            }
+          }
+
+          // Step 2: parse Schema.org/Recipe JSON-LD (free path — no Claude call)
+          let extracted = null;
+          try {
+            const ldMatches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+            for (const m of ldMatches) {
+              try {
+                const json = JSON.parse(m[1].trim());
+                const schemas = Array.isArray(json) ? json : (json['@graph'] || [json]);
+                const recipe  = schemas.find(s => s['@type'] === 'Recipe' || (Array.isArray(s['@type'])&&s['@type'].includes('Recipe')));
+                if (recipe) {
+                  extracted = {
+                    name:         recipe.name || '',
+                    baseServings: parseInt(recipe.recipeYield)||4,
+                    totalTimeMin: parseDuration(recipe.totalTime||recipe.cookTime),
+                    cuisine:      Array.isArray(recipe.recipeCuisine)?recipe.recipeCuisine[0]:recipe.recipeCuisine||null,
+                    dietaryTags:  (recipe.suitableForDiet||[]).map(d=>d.replace('https://schema.org/','').replace('Diet','')).join('|'),
+                    methodSteps:  Array.isArray(recipe.recipeInstructions)?recipe.recipeInstructions.map(i=>typeof i==='string'?i:i.text||'').join('\n'):String(recipe.recipeInstructions||''),
+                    ingredients:  (recipe.recipeIngredient||[]).map(s=>parseIngredientString(s)),
+                    rawSource:    JSON.stringify({ url, parsed: recipe }),
+                    parseStatus:  'ok',
+                  };
+                  break;
+                }
+              } catch {}
+            }
+          } catch {}
+
+          // Step 3: if no JSON-LD, use Haiku via Worker
+          if (!extracted) {
+            const result = await callWorker('/extract-recipe-url', { html });
+            if (result.parseStatus === 'needs_review') {
+              setPreview({ ...result, rawSource: JSON.stringify({ url, raw: result.raw }), parseStatus:'needs_review' });
+            } else {
+              extracted = { ...result, rawSource: JSON.stringify({ url }), parseStatus:'ok' };
+            }
+          }
+
+          if (extracted) setPreview({ ...extracted, sourceUrl: url });
+
+        } catch(e) {
+          setError(e.message || 'Extraction failed.');
+        } finally { setLoading(false); }
+      };
+
+      // §12b — Image upload
+      const handleImageUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLoading(true); setError('');
+        try {
+          const base64 = await fileToBase64(file);
+          // Upload to Drive for dragnet storage
+          // (Apps Script call — fire and forget, get file ID back if possible)
+          const result = await callWorker('/extract-recipe-image', { imageBase64: base64.split(',')[1], mimeType: file.type });
+          if (result.parseStatus === 'needs_review') {
+            setPreview({ name:'Unreviewed Recipe', parseStatus:'needs_review', rawSource: JSON.stringify({ image: file.name, raw: result.raw }) });
+          } else {
+            setPreview({ ...result, parseStatus: result.parseStatus||'ok' });
+          }
+        } catch(e) {
+          setError(e.message || 'Image extraction failed.');
+        } finally { setLoading(false); }
+      };
+
+      const fileToBase64 = (file) => new Promise((res,rej) => {
+        const r = new FileReader();
+        r.onloadend = () => res(r.result);
+        r.onerror   = rej;
+        r.readAsDataURL(file);
+      });
+
+      function parseDuration(iso) {
+        if (!iso) return null;
+        const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+        return m ? (parseInt(m[1]||0)*60 + parseInt(m[2]||0)) || null : null;
+      }
+
+      function parseIngredientString(s) {
+        // Simple heuristic: first token(s) = quantity, next = unit, rest = name
+        const UNITS = ['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch'];
+        const parts = s.trim().split(/\s+/);
+        const qty  = parseFloat(parts[0]) || 1;
+        const unit = UNITS.includes(parts[1]?.toLowerCase()) ? parts[1] : 'piece';
+        const name = UNITS.includes(parts[1]?.toLowerCase()) ? parts.slice(2).join(' ') : parts.slice(1).join(' ');
+        return { name, quantity: qty, unit, preparation: null, isOptional: false };
+      }
+
+      // Save from preview
+      const savePreview = () => {
+        if (!preview) return;
+        commitRecipe(preview);
+      };
+
+      // Save manual entry
+      const saveManual = () => {
+        if (!manualName.trim()) return;
+        commitRecipe({
+          name:         manualName.trim(),
+          baseServings: manualServings,
+          totalTimeMin: parseInt(manualTime)||null,
+          cuisine:      manualCuisine||null,
+          dietaryTags:  manualTags.join('|'),
+          methodSteps:  manualMethod,
+          ingredients:  manualIngRows.filter(r=>r.name.trim()),
+          parseStatus:  'ok',
+          rawSource:    null,
+          sourceUrl:    null,
+        });
+      };
+
+      const commitRecipe = (data) => {
+        const recipeId = uuid();
+        const now = nowISO();
+        const recipe = {
+          recipeId, name:data.name, sourceUrl:data.sourceUrl||null, sourceImage:null,
+          baseServings:data.baseServings||4, methodSteps:data.methodSteps||'',
+          totalTimeMin:data.totalTimeMin||null, dietaryTags:data.dietaryTags||'',
+          cuisine:data.cuisine||null, createdBy:addedBy, createdAt:now,
+          timesCooked:0, lastCookedAt:null, notes:'',
+          parseStatus:data.parseStatus||'ok', rawSource:data.rawSource||null,
+        };
+
+        // Resolve ingredients — fuzzy match existing, create new if <80% match
+        const newIngredients = [];
+        const ris = (data.ingredients||[]).map((ing, idx) => {
+          const ingName = ing.name?.trim() || '';
+          let match = ingredients.find(i => fuzzyScore(i.canonicalName||'', ingName) >= 0.8);
+          if (!match) {
+            // Check newly added ones too
+            match = newIngredients.find(i => fuzzyScore(i.canonicalName||'', ingName) >= 0.8);
+          }
+          let ingredientId;
+          if (match) {
+            ingredientId = match.ingredientId;
+          } else {
+            ingredientId = uuid();
+            newIngredients.push({
+              ingredientId, canonicalName:ingName, lastUpdated:now,
+              nutritionPer100g:'{}', needsReview:false,
+            });
+          }
+          return {
+            recipeIngredientId: uuid(), recipeId, ingredientId,
+            quantity: ing.quantity||1, unit: ing.unit||'piece',
+            preparation: ing.preparation||null, isOptional: ing.isOptional||false,
+          };
+        });
+
+        appendRow('Recipes', recipe);
+        newIngredients.forEach(i => appendRow('Ingredients', i));
+        ris.forEach(ri => appendRow('RecipeIngredients', ri));
+
+        onSave(recipe, newIngredients, ris);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+              <h2 className="text-lg font-bold text-gray-800">Add Recipe</h2>
+              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Added-by */}
+              <div className="flex gap-2">
+                {['Fernando','Yenny'].map(p=>(
+                  <button key={p} onClick={()=>setAddedBy(p)} className={`flex-1 py-2 rounded-xl text-sm border transition-all ${addedBy===p?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{p}</button>
+                ))}
+              </div>
+
+              {/* Mode tabs */}
+              <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                {[{id:'url',label:'🔗 URL'},{id:'image',label:'📷 Photo'},{id:'manual',label:'✏️ Manual'}].map(m=>(
+                  <button key={m.id} onClick={()=>{setMode(m.id);setPreview(null);setError('');}}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode===m.id?'bg-white shadow text-indigo-700':'text-gray-500'}`}>{m.label}</button>
+                ))}
+              </div>
+
+              {error && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>}
+
+              {/* ── URL mode ── */}
+              {mode === 'url' && !preview && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Paste a recipe URL from any cooking site. Structured data (JSON-LD) is extracted for free — Haiku is used only as fallback.</p>
+                  <div className="flex gap-2">
+                    <input value={urlInput} onChange={e=>setUrlInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleUrlAdd()}
+                      placeholder="https://cooking.nytimes.com/recipes/…" type="url"
+                      className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                    <button onClick={handleUrlAdd} disabled={!urlInput.trim()||loading}
+                      className="px-5 py-3 bg-indigo-600 text-white rounded-xl disabled:opacity-40 font-medium">{loading?'…':'Fetch'}</button>
+                  </div>
+                  {loading && <p className="text-sm text-indigo-600 text-center animate-pulse">🔍 Extracting recipe…</p>}
+                </div>
+              )}
+
+              {/* ── Image mode ── */}
+              {mode === 'image' && !preview && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Take a photo of a cookbook page, recipe card, or screenshot. Haiku vision extracts it.</p>
+                  <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload}/>
+                  <button onClick={()=>fileInputRef.current?.click()} disabled={loading}
+                    className="w-full py-10 border-2 border-dashed border-indigo-300 rounded-2xl flex flex-col items-center gap-2 hover:bg-indigo-50 disabled:opacity-40">
+                    <span className="text-4xl">📷</span>
+                    <span className="text-sm font-medium text-indigo-600">{loading?'Extracting…':'Tap to take photo or upload image'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* ── Preview ── */}
+              {preview && mode !== 'manual' && (
+                <div className="space-y-3">
+                  {preview.parseStatus === 'needs_review' ? (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <p className="text-sm font-medium text-amber-800">⚠️ Extraction needs review</p>
+                      <p className="text-xs text-amber-600 mt-1">Recipe will be saved with parseStatus=needs_review. You can edit it later.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                      <p className="text-sm font-medium text-green-800">✅ Recipe extracted</p>
+                    </div>
+                  )}
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                    <p className="font-semibold text-gray-800">{preview.name || 'Unnamed recipe'}</p>
+                    {preview.cuisine && <p className="text-xs text-gray-500">{preview.cuisine}</p>}
+                    {preview.totalTimeMin && <p className="text-xs text-gray-500">⏱ {preview.totalTimeMin} min</p>}
+                    <p className="text-xs text-gray-500">{(preview.ingredients||[]).length} ingredients</p>
+                    <p className="text-xs text-gray-400 line-clamp-3">{preview.methodSteps}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={()=>{setPreview(null);setUrlInput('');}} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Try again</button>
+                    <button onClick={savePreview} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Save Recipe</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Manual mode ── */}
+              {mode === 'manual' && (
+                <div className="space-y-3">
+                  <input value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Recipe name *"
+                    className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Servings</label>
+                      <input type="number" value={manualServings} onChange={e=>setManualServings(parseInt(e.target.value)||4)} min={1} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Time (min)</label>
+                      <input type="number" value={manualTime} onChange={e=>setManualTime(e.target.value)} placeholder="30" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Cuisine</label>
+                      <input value={manualCuisine} onChange={e=>setManualCuisine(e.target.value)} placeholder="Italian" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                    </div>
+                  </div>
+                  {/* Dietary tags */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Dietary tags</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DIETARY_TAGS.map(t=>(
+                        <button key={t} onClick={()=>setManualTags(p=>p.includes(t)?p.filter(x=>x!==t):[...p,t])}
+                          className={`text-xs px-2 py-1 rounded-full border transition-all ${manualTags.includes(t)?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{t}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Ingredients */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Ingredients</p>
+                    {manualIngRows.map((row,i)=>(
+                      <div key={i} className="flex gap-1.5 mb-1.5">
+                        <input value={row.name} onChange={e=>setManualIngRows(r=>r.map((x,j)=>j===i?{...x,name:e.target.value}:x))}
+                          placeholder="Ingredient" className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none"/>
+                        <input type="number" value={row.qty} onChange={e=>setManualIngRows(r=>r.map((x,j)=>j===i?{...x,qty:e.target.value}:x))}
+                          placeholder="Qty" className="w-16 px-2 py-2 border rounded-xl text-sm focus:outline-none text-center"/>
+                        <select value={row.unit} onChange={e=>setManualIngRows(r=>r.map((x,j)=>j===i?{...x,unit:e.target.value}:x))}
+                          className="px-2 py-2 border rounded-xl text-sm focus:outline-none">
+                          {['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch','to_taste'].map(u=><option key={u}>{u}</option>)}
+                        </select>
+                        <button onClick={()=>setManualIngRows(r=>r.filter((_,j)=>j!==i))} className="text-gray-300 hover:text-red-400 text-xl px-1">×</button>
+                      </div>
+                    ))}
+                    <button onClick={()=>setManualIngRows(r=>[...r,{name:'',qty:'',unit:'piece',prep:'',optional:false}])}
+                      className="text-sm text-indigo-600 font-medium mt-1">+ Add ingredient</button>
+                  </div>
+                  {/* Method */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Method</p>
+                    <textarea value={manualMethod} onChange={e=>setManualMethod(e.target.value)} rows={5}
+                      placeholder="1. Preheat oven to 375°F. 2. Mix ingredients…"
+                      className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"/>
+                  </div>
+                  <button onClick={saveManual} disabled={!manualName.trim()}
+                    className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold disabled:opacity-40">Save Recipe</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function BarcodeScannerModal({ onClose, onResult, ingredients }) {
+      const [phase,    setPhase]    = useState('scanning'); // scanning | loading | preview | error
+      const [barcode,  setBarcode]  = useState('');
+      const [result,   setResult]   = useState(null);
+      const [error,    setError]    = useState('');
+      const [addTo,    setAddTo]    = useState('pantry'); // pantry | ingredients
+      const [qty,      setQty]      = useState(1);
+      const [unit,     setUnit]     = useState('piece');
+      const videoRef = useRef(null);
+      const readerRef= useRef(null);
+
+      // Start ZXing scanner
+      useEffect(() => {
+        let reader;
+        const startScanner = async () => {
+          try {
+            const ZXing = window.ZXing;
+            if (!ZXing) { setError('Barcode library failed to load.'); setPhase('error'); return; }
+            reader = new ZXing.BrowserMultiFormatReader();
+            readerRef.current = reader;
+            const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+            const deviceId = devices.find(d=>/back|rear|environment/i.test(d.label))?.deviceId || devices[0]?.deviceId;
+            if (!deviceId) { setError('No camera found.'); setPhase('error'); return; }
+            reader.decodeFromVideoDevice(deviceId, videoRef.current, async (result, err) => {
+              if (result) {
+                reader.reset();
+                const code = result.getText();
+                setBarcode(code);
+                setPhase('loading');
+                await lookupAndSet(code);
+              }
+            });
+          } catch(e) {
+            setError(`Camera error: ${e.message}`); setPhase('error');
+          }
+        };
+        startScanner();
+        return () => { readerRef.current?.reset(); };
+      }, []);
+
+      const lookupAndSet = async (code) => {
+        try {
+          // §14c lookup chain: Open Food Facts → (USDA skip) → Haiku vision fallback
+          let found = await lookupBarcode(code);
+          if (found) {
+            setResult({ ...found, source:'off' });
+            setPhase('preview');
+            return;
+          }
+          // USDA skip (key placeholder per §0b rule 12)
+          // Haiku vision: would need image of wrapper — not available from barcode alone
+          // §0b rule 10 fallback
+          setResult({
+            canonicalName: `Unknown (${code})`,
+            openFoodFactsBarcode: code,
+            needsReview: true,
+            nutritionPer100g: '{}',
+            source: 'fallback',
+          });
+          setPhase('preview');
+        } catch(e) {
+          setResult({ canonicalName:`Unknown (${code})`, openFoodFactsBarcode:code, needsReview:true, nutritionPer100g:'{}', source:'error' });
+          setPhase('preview');
+        }
+      };
+
+      const confirm = () => {
+        if (!result) return;
+        // Upsert ingredient
+        const existing = ingredients.find(i => i.openFoodFactsBarcode === result.openFoodFactsBarcode);
+        const ingredientId = existing?.ingredientId || uuid();
+        const ing = {
+          ingredientId,
+          canonicalName: result.canonicalName,
+          openFoodFactsBarcode: result.openFoodFactsBarcode || barcode,
+          nutritionPer100g: result.nutritionPer100g || '{}',
+          needsReview: result.needsReview || false,
+          lastUpdated: nowISO(),
+        };
+        // Pantry row
+        const pantryRow = addTo === 'pantry' ? {
+          pantryId: uuid(), ingredientId,
+          quantity: qty, unit,
+          addedAt: nowISO(), addedVia: 'barcode_scan', expiryDate: null,
+        } : null;
+        if (!existing) appendRow('Ingredients', ing);
+        if (pantryRow)  appendRow('Pantry', pantryRow);
+        onResult(ing, pantryRow);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black z-50 flex flex-col">
+          {/* Header */}
+          <div className="p-4 flex items-center gap-3 bg-black/80 flex-shrink-0">
+            <button onClick={onClose} className="text-white text-2xl w-8 h-8 flex items-center justify-center">✕</button>
+            <p className="text-white font-medium text-sm">
+              {phase==='scanning'?'Point camera at barcode':phase==='loading'?'Looking up…':phase==='preview'?'Found product':'Error'}
+            </p>
+          </div>
+
+          {phase === 'scanning' && (
+            <div className="flex-1 relative">
+              <video ref={videoRef} className="w-full h-full object-cover"/>
+              {/* Viewfinder overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-40 border-2 border-white/80 rounded-xl">
+                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl"/>
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr"/>
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl"/>
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br"/>
+                </div>
+              </div>
+              <p className="absolute bottom-8 left-0 right-0 text-center text-white/70 text-sm">Hold steady over barcode</p>
+            </div>
+          )}
+
+          {phase === 'loading' && (
+            <div className="flex-1 flex items-center justify-center bg-gray-900">
+              <div className="text-center text-white">
+                <div className="text-5xl mb-4 animate-bounce">🔍</div>
+                <p className="font-medium">Looking up barcode…</p>
+                <p className="text-sm text-gray-400 mt-1">{barcode}</p>
+                <p className="text-xs text-gray-500 mt-2">Open Food Facts → USDA → Haiku vision</p>
+              </div>
+            </div>
+          )}
+
+          {phase === 'preview' && result && (
+            <div className="flex-1 bg-white overflow-y-auto">
+              <div className="p-5 space-y-4">
+                {result.source === 'fallback' || result.needsReview ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p className="text-sm font-medium text-amber-800">⚠️ Not found in database</p>
+                    <p className="text-xs text-amber-600 mt-1">Saved as Unknown ({barcode}). Review later in Pantry.</p>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                    <p className="text-sm font-medium text-green-800">✅ Found in Open Food Facts</p>
+                  </div>
+                )}
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="font-semibold text-gray-800">{result.canonicalName}</p>
+                  {result.brand && <p className="text-xs text-gray-500 mt-0.5">{result.brand}</p>}
+                  <p className="text-xs text-gray-400 mt-1 font-mono">{barcode}</p>
+                  {result.nutritionPer100g && result.nutritionPer100g !== '{}' && (() => {
+                    try {
+                      const n = typeof result.nutritionPer100g==='string'?JSON.parse(result.nutritionPer100g):result.nutritionPer100g;
+                      return n.kcal ? <p className="text-xs text-gray-500 mt-1">{n.kcal} kcal · {n.protein_g}g protein · {n.carb_g}g carbs · {n.fat_g}g fat (per 100g)</p> : null;
+                    } catch { return null; }
+                  })()}
+                </div>
+                {/* Add to pantry or just ingredients */}
+                <div>
+                  <p className="text-xs text-gray-500 font-medium mb-2">Add to</p>
+                  <div className="flex gap-2 mb-3">
+                    {[{id:'pantry',label:'🥫 Pantry'},{id:'ingredients',label:'📋 Ingredients only'}].map(o=>(
+                      <button key={o.id} onClick={()=>setAddTo(o.id)} className={`flex-1 py-2 rounded-xl text-sm border transition-all ${addTo===o.id?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{o.label}</button>
+                    ))}
+                  </div>
+                  {addTo==='pantry' && (
+                    <div className="flex gap-2">
+                      <input type="number" value={qty} onChange={e=>setQty(parseFloat(e.target.value)||1)} min={0.1} step={0.5}
+                        className="w-20 px-3 py-2 border rounded-xl text-sm focus:outline-none text-center"/>
+                      <select value={unit} onChange={e=>setUnit(e.target.value)} className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none">
+                        {['g','kg','ml','l','piece','oz','lb'].map(u=><option key={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={onClose} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Cancel</button>
+                  <button onClick={confirm} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Confirm</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {phase === 'error' && (
+            <div className="flex-1 flex items-center justify-center bg-gray-900">
+              <div className="text-center text-white p-8">
+                <div className="text-5xl mb-4">⚠️</div>
+                <p className="font-medium">{error}</p>
+                <button onClick={onClose} className="mt-6 px-8 py-3 bg-white text-gray-800 rounded-xl font-medium">Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ReceiptCaptureModal({ mode, onClose, onResult }) {
+      const [phase,         setPhase]         = useState(mode==='photo'?'capture':'paste'); // capture|paste|loading|preview|confirm
+      const [emailText,     setEmailText]      = useState('');
+      const [lineItems,     setLineItems]      = useState([]);
+      const [receiptId,     setReceiptId]      = useState(uuid());
+      const [loadingMsg,    setLoadingMsg]     = useState('');
+      const [error,         setError]          = useState('');
+      const [addedBy,       setAddedBy]        = useState('Fernando');
+      const fileRef = useRef(null);
+
+      const processPhoto = async (file) => {
+        setPhase('loading'); setLoadingMsg('Uploading receipt photo…'); setError('');
+        try {
+          const b64 = await fileToBase64(file);
+          setLoadingMsg('Extracting line items with Haiku vision…');
+          const res = await callWorker('/parse-receipt-photo', { imageBase64: b64.split(',')[1], mimeType: file.type });
+          handleParseResult(res, 'receipt_photo');
+        } catch(e) {
+          setError(e.message || 'Photo parsing failed.'); setPhase('capture');
+        }
+      };
+
+      const processEmail = async () => {
+        if (!emailText.trim()) return;
+        setPhase('loading'); setLoadingMsg('Parsing receipt email…'); setError('');
+        try {
+          const res = await callWorker('/parse-receipt-email', { text: emailText });
+          handleParseResult(res, 'receipt_digital');
+        } catch(e) {
+          setError(e.message || 'Email parsing failed.'); setPhase('paste');
+        }
+      };
+
+      const handleParseResult = (res, addedVia) => {
+        if (res.parseStatus === 'needs_review') {
+          setError('Could not parse receipt cleanly. Saved for review.'); setPhase('paste'); return;
+        }
+        const items = (res.lineItems || []).map((item, i) => ({
+          ...item, id:i, selected:true, addedVia, confidence: 1.0,
+        }));
+        setLineItems(items);
+        setPhase('preview');
+      };
+
+      const fileToBase64 = (file) => new Promise((res,rej) => {
+        const r = new FileReader(); r.onloadend=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file);
+      });
+
+      const confirmItems = () => {
+        const selected = lineItems.filter(i=>i.selected);
+        // Write ReceiptImports row
+        const receiptRow = {
+          receiptId, source: mode==='photo'?'publix_photo':'whole_foods_email',
+          rawContent: emailText || '', parsedJSON: JSON.stringify(selected),
+          lineItemCount: lineItems.length, matchedCount: selected.length,
+          matchStatus: selected.length===lineItems.length?'ok':'partial',
+          importedAt: nowISO(), importedBy: addedBy,
+        };
+        appendRow('ReceiptImports', receiptRow);
+
+        // Create Pantry rows for selected items (§15a — <80% fuzzy = unmatched, don't write Pantry)
+        const pantryRows = [];
+        selected.forEach(item => {
+          // For now create ingredient + pantry row for every confirmed item
+          const ingId = uuid();
+          const ingRow = {
+            ingredientId: ingId, canonicalName: item.name, lastUpdated: nowISO(),
+            nutritionPer100g: '{}', needsReview: false,
+          };
+          appendRow('Ingredients', ingRow);
+          const pantryRow = {
+            pantryId: uuid(), ingredientId: ingId,
+            quantity: item.quantity || 1, unit: item.unit || 'piece',
+            addedAt: nowISO(), addedVia: item.addedVia || 'receipt_photo', expiryDate: null,
+          };
+          appendRow('Pantry', pantryRow);
+          pantryRows.push(pantryRow);
+        });
+
+        onResult(pantryRows);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+              <h2 className="text-lg font-bold text-gray-800">
+                {mode==='photo'?'📷 Photo Receipt':'📧 Email Receipt'}
+              </h2>
+              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Added by */}
+              <div className="flex gap-2">
+                {['Fernando','Yenny'].map(p=>(
+                  <button key={p} onClick={()=>setAddedBy(p)} className={`flex-1 py-2 rounded-xl text-sm border transition-all ${addedBy===p?'bg-indigo-600 text-white border-indigo-600':'border-gray-200 text-gray-600'}`}>{p}</button>
+                ))}
+              </div>
+
+              {error && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>}
+
+              {/* Photo capture */}
+              {phase === 'capture' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Take a clear photo of your receipt. Haiku vision extracts every line item.</p>
+                  <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e=>e.target.files?.[0]&&processPhoto(e.target.files[0])}/>
+                  <button onClick={()=>fileRef.current?.click()}
+                    className="w-full py-12 border-2 border-dashed border-indigo-300 rounded-2xl flex flex-col items-center gap-2 hover:bg-indigo-50">
+                    <span className="text-5xl">🧾</span>
+                    <span className="text-sm font-medium text-indigo-600">Tap to photograph receipt</span>
+                    <span className="text-xs text-gray-400">Publix, Target, or any store</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Email paste */}
+              {phase === 'paste' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">Open your Whole Foods or Costco receipt email, select all text, and paste it here.</p>
+                  <textarea value={emailText} onChange={e=>setEmailText(e.target.value)} rows={8}
+                    placeholder="Paste receipt email text here…"
+                    className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none font-mono text-xs"/>
+                  <button onClick={processEmail} disabled={!emailText.trim()}
+                    className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold disabled:opacity-40">Parse Receipt</button>
+                </div>
+              )}
+
+              {/* Loading */}
+              {phase === 'loading' && (
+                <div className="py-12 text-center">
+                  <div className="text-5xl mb-4 animate-bounce">🧾</div>
+                  <p className="font-medium text-gray-700">{loadingMsg}</p>
+                  <p className="text-xs text-gray-400 mt-2">Using Haiku 4.5 vision…</p>
+                </div>
+              )}
+
+              {/* Preview + confirm */}
+              {phase === 'preview' && (
+                <div className="space-y-3">
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                    <p className="text-sm font-medium text-green-800">{lineItems.length} line item{lineItems.length!==1?'s':''} found</p>
+                    <p className="text-xs text-green-600 mt-0.5">Deselect items you don't want to add to pantry</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {lineItems.map(item => (
+                      <div key={item.id} onClick={()=>setLineItems(is=>is.map(i=>i.id===item.id?{...i,selected:!i.selected}:i))}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all ${item.selected?'bg-indigo-50 border-indigo-200':'bg-gray-50 border-gray-100 opacity-50'}`}>
+                        <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${item.selected?'bg-indigo-600 text-white':'border-2 border-gray-300'}`}>
+                          {item.selected && <span className="text-xs font-bold">✓</span>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{item.name}</p>
+                          <p className="text-xs text-gray-400">{item.quantity} {item.unit} {item.price?`· $${item.price}`:''}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 text-center">{lineItems.filter(i=>i.selected).length} of {lineItems.length} selected</p>
+                  <div className="flex gap-2">
+                    <button onClick={()=>setPhase(mode==='photo'?'capture':'paste')} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Re-scan</button>
+                    <button onClick={confirmItems} disabled={!lineItems.some(i=>i.selected)} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40">
+                      Add {lineItems.filter(i=>i.selected).length} to Pantry
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Schedule Tab (preserved from v8.4) ────────────────────────────────────
+    function ScheduleTab({ weekData, setWeekData, parent1Name, parent2Name, syncWithGoogle, currentWeek, setCurrentWeek }) {
+      const [parent1Image, setParent1Image] = useState(null);
+      const [parent2Image, setParent2Image] = useState(null);
+      const [analyzing,    setAnalyzing]    = useState(null);
+      const [analyzeError, setAnalyzeError] = useState('');
+      const [expandedDay,  setExpandedDay]  = useState(null);
+
+      const handleImageUpload = (n, e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => { n===1 ? setParent1Image(reader.result) : setParent2Image(reader.result); };
+        reader.readAsDataURL(file);
+      };
+
+      const analyzeSchedules = async () => {
+        if (!parent1Image || !parent2Image) { setAnalyzeError('Upload both calendar screenshots first.'); return; }
+        setAnalyzeError(''); setAnalyzing('reading');
+        try {
+          const getMediaType = d => { const m=d.split(';')[0].split(':')[1]; return ['image/jpeg','image/png','image/gif','image/webp'].includes(m)?m:'image/jpeg'; };
+          const [s1,s2] = await Promise.all([
+            callClaude({ model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{ role:'user', content:[
+              { type:'image', source:{ type:'base64', media_type:getMediaType(parent1Image), data:parent1Image.split(',')[1] }},
+              { type:'text', text:`This is ${parent1Name}'s work calendar for the week. Extract ALL meetings for every weekday.\nRules:\n- Ignore RED items\n- Use 12-hour time format with 30-min precision\n- Do NOT round to nearest hour\nFormat:\nMonday (3/2): [time] Title\nTuesday (3/3): No meetings`}
+            ]}]}),
+            callClaude({ model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{ role:'user', content:[
+              { type:'image', source:{ type:'base64', media_type:getMediaType(parent2Image), data:parent2Image.split(',')[1] }},
+              { type:'text', text:`This is ${parent2Name}'s work calendar for the week. Extract ALL meetings for every weekday.\nRules:\n- Ignore RED items\n- Use 12-hour time format with 30-min precision\n- Do NOT round to nearest hour\nFormat:\nMonday (3/2): [time] Title\nTuesday (3/3): No meetings`}
+            ]}]})
+          ]);
+          setAnalyzing('assigning');
+          const raw = await callClaude({ model:'claude-sonnet-4-20250514', max_tokens:2000, messages:[{ role:'user', content:
+            `Assign Leo's daycare duties.\n\n${parent1Name}: ${s1}\n\n${parent2Name}: ${s2}\n\nWindows:\n- Drop-off: ${DROPOFF_WINDOW.start}–${DROPOFF_WINDOW.end}\n- Pick-up: ${PICKUP_WINDOW.start}–${PICKUP_WINDOW.end}\n- Nap: ${NAP_WINDOW.start}–${NAP_WINDOW.end}\n\nRules: overlap=cannot. Both free=alternate (${parent1Name} first). Neither=DISCUSS. Nap=prefer who didn't pickup.\n\nReturn ONLY valid JSON:\n{"week":"Jan 26–30","days":[{"day":"Monday","date":"1/26","hidden":false,"notes":"","fernando_meetings":[{"time":"9:00 AM","title":"Meeting"}],"yenny_meetings":[],"dropoff":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"},"pickup":{"assigned":"${parent2Name}","conflict":false,"reason":"reason"},"nap":{"assigned":"${parent1Name}","conflict":false,"reason":"reason"}}]}`
+          }]});
+          const match = raw.replace(/```json|```/g,'').trim().match(/\{[\s\S]*\}/);
+          if (!match) throw new Error('No JSON found in response');
+          const parsed = JSON.parse(match[0]);
+          const norm = { ...parsed, days: parsed.days.map(d => ({
+            hidden:false, notes:'', fernando_meetings:[], yenny_meetings:[], ...d,
+            dropoff:{conflict:false,reason:'',...d.dropoff},
+            pickup:{conflict:false,reason:'',...d.pickup},
+            nap:{conflict:false,reason:'',...d.nap},
+          }))};
+          if (norm.week) setCurrentWeek(norm.week);
+          setWeekData(norm);
+          syncWithGoogle(norm, undefined, undefined, undefined, undefined);
+        } catch(err) {
+          setAnalyzeError(`Analysis failed. ${err.message || ''}`);
+        } finally { setAnalyzing(null); }
+      };
+
+      const saveSchedule = nd => { setWeekData(nd); syncWithGoogle(nd,undefined,undefined,undefined,undefined); };
+      const toggleAssignment = (di, type) => {
+        const nd = {...weekData, days: weekData.days.map((d,i) => {
+          if (i!==di) return d;
+          const cur = d[type].assigned;
+          return {...d,[type]:{...d[type],assigned:cur===parent1Name?parent2Name:cur===parent2Name?'DISCUSS':parent1Name}};
+        })};
+        saveSchedule(nd);
+      };
+      const toggleDayVisibility = di => saveSchedule({...weekData,days:weekData.days.map((d,i)=>i===di?{...d,hidden:!d.hidden}:d)});
+      const updateNotes = (di,notes) => saveSchedule({...weekData,days:weekData.days.map((d,i)=>i===di?{...d,notes}:d)});
+      const exportToClipboard = () => {
+        let t = `📅 LEO'S SCHEDULE\n\n`;
+        (weekData?.days||[]).filter(d=>!d.hidden).forEach(d => {
+          t += `${d.day} ${d.date}:\n  🚗 Drop-off: ${d.dropoff.assigned}\n  🏠 Pick-up: ${d.pickup.assigned}\n  😴 Nap: ${d.nap.assigned}\n`;
+          if (d.notes) t += `  📝 ${d.notes}\n`;
+          t += '\n';
+        });
+        navigator.clipboard.writeText(t).then(()=>alert('📋 Copied!'));
+      };
+
+      const visibleDays = weekData?.days?.filter(d=>!d.hidden)||[];
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow p-6">
+            <h2 className="text-lg font-bold text-indigo-900 mb-1">📸 Upload This Week's Calendars</h2>
+            <p className="text-sm text-gray-500 mb-4">Screenshot each parent's calendar, upload both, then tap Analyze.</p>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              {[1,2].map(n => {
+                const img = n===1?parent1Image:parent2Image;
+                const name = n===1?parent1Name:parent2Name;
+                return (
+                  <div key={n} className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-indigo-400 transition-colors">
+                    <p className="font-semibold text-gray-700 mb-3">{name}'s Calendar</p>
+                    <input type="file" accept="image/*" onChange={e=>handleImageUpload(n,e)} className="hidden" id={`upload-${n}`}/>
+                    <label htmlFor={`upload-${n}`} className="cursor-pointer block">
+                      {img ? (
+                        <><img src={img} alt="" className="w-full h-36 object-cover rounded-lg mb-2"/><p className="text-green-600 text-sm font-medium">✓ Tap to replace</p></>
+                      ) : (
+                        <div className="py-8"><div className="text-4xl mb-2">📷</div><p className="text-indigo-600 text-sm font-medium">Tap to upload</p></div>
+                      )}
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={analyzeSchedules} disabled={!parent1Image||!parent2Image||!!analyzing}
+              className="w-full py-4 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
+              {analyzing==='reading'?'🔍 Reading calendars…':analyzing==='assigning'?'🧠 Assigning duties…':'✨ Analyze & Assign Duties'}
+            </button>
+            {analyzeError && <p className="mt-3 text-sm text-red-600 text-center">{analyzeError}</p>}
+            <div className="mt-3 p-3 bg-blue-50 rounded-xl text-xs text-gray-600 text-center">
+              Drop-off {DROPOFF_WINDOW.start}–{DROPOFF_WINDOW.end} · Pick-up {PICKUP_WINDOW.start}–{PICKUP_WINDOW.end} · Nap {NAP_WINDOW.start}–{NAP_WINDOW.end}
+            </div>
+          </div>
+          {weekData && (
+            <>
+              <button onClick={exportToClipboard} className="w-full py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700">📋 Copy Week to Clipboard</button>
+              <p className="text-xs text-center text-gray-400">Tap any card to cycle: {parent1Name} → {parent2Name} → DISCUSS</p>
+              {weekData.days.map((day,i) => (
+                <div key={i} className={`bg-white rounded-2xl shadow-sm border-2 ${day.hidden?'opacity-50 border-gray-100':'border-transparent'}`}>
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <button onClick={()=>toggleDayVisibility(i)} className="text-xl">{day.hidden?'👁️‍🗨️':'👁️'}</button>
+                      <div><h3 className="font-bold text-gray-800">{day.day}</h3><p className="text-xs text-gray-400">{day.date}</p></div>
+                      {(day.dropoff.conflict||day.pickup.conflict||day.nap.conflict) && <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">⚠️ Conflicts</span>}
+                    </div>
+                    <button onClick={()=>setExpandedDay(expandedDay===i?null:i)} className="text-indigo-600 text-sm px-3 py-1 hover:bg-indigo-50 rounded-lg">
+                      {expandedDay===i?'▼ Hide':'▶ Meetings'}
+                    </button>
+                  </div>
+                  {!day.hidden && (
+                    <>
+                      <div className="px-4 pt-3">
+                        <input type="text" placeholder="Notes…" value={day.notes||''} onChange={e=>updateNotes(i,e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm"/>
+                      </div>
+                      <div className="p-4 grid grid-cols-3 gap-3">
+                        {['dropoff','pickup','nap'].map(type => (
+                          <div key={type} onClick={()=>toggleAssignment(i,type)} className="cursor-pointer p-3 rounded-xl border-2 hover:shadow-md transition-all"
+                            style={{borderColor:day[type].assigned==='DISCUSS'?'#ef4444':'#10b981',backgroundColor:day[type].assigned==='DISCUSS'?'#fef2f2':'#f9fafb'}}>
+                            <div className="text-xs text-gray-500 mb-1">{type==='dropoff'?'🚗 Drop-off':type==='pickup'?'🏠 Pick-up':'😴 Nap'}</div>
+                            <p className="font-bold text-sm" style={{color:day[type].assigned==='DISCUSS'?'#dc2626':'#111827'}}>{day[type].assigned}</p>
+                            <p className="text-xs text-gray-400 mt-1">{day[type].reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {expandedDay===i && (
+                        <div className="px-4 pb-4 pt-3 bg-gray-50 border-t rounded-b-2xl grid grid-cols-2 gap-4">
+                          {[{name:parent1Name,key:'fernando_meetings',cls:'text-indigo-700'},{name:parent2Name,key:'yenny_meetings',cls:'text-pink-600'}].map(p => (
+                            <div key={p.key}>
+                              <h5 className={`font-bold text-sm mb-2 ${p.cls}`}>{p.name}</h5>
+                              {!(day[p.key]||[]).length ? <p className="text-xs text-gray-400">No meetings</p> :
+                                (day[p.key]||[]).map((m,j) => (
+                                  <div key={j} className="text-xs bg-white border rounded-lg p-2 mb-1"><span className={`font-medium ${p.cls}`}>{m.time}:</span> {m.title}</div>
+                                ))
+                              }
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+          {!weekData && !analyzing && (
+            <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
+              <div className="text-5xl mb-3">📅</div>
+              <p className="font-medium text-gray-600">No schedule yet</p>
+              <p className="text-sm mt-1">Upload both calendar screenshots above and tap Analyze</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Dump Tab (preserved from v8.4) ─────────────────────────────────────────
+    function DumpTab({ captures, setCaptures, groceries, setGroceries, categories, parent1Name, parent2Name, captureParent, setCaptureParent, syncWithGoogle }) {
+      const [textInput,  setTextInput]  = useState('');
+      const [isRecording,setIsRecording]= useState(false);
+      const [dumpError,  setDumpError]  = useState('');
+      const [parsing,    setParsing]    = useState(false);
+      const recognitionRef = useRef(null);
+
+      const buildGroceryItems = (itemNames, addedBy) => itemNames.map((name,i) => ({
+        id: Date.now()+i, name:capitalize(name), store:'', completed:false, addedBy, timestamp:nowISO(),
+      }));
+
+      const saveCapture = async (content, type) => {
+        setParsing(true);
+        try {
+          const result = await parseGroceryIntent(content);
+          if (result.isGrocery && result.items.length > 0) {
+            const newItems = buildGroceryItems(result.items, captureParent);
+            const updatedGroceries = [...newItems, ...groceries];
+            setGroceries(updatedGroceries);
+            syncWithGoogle(undefined, undefined, updatedGroceries, undefined, undefined);
+          } else {
+            const newCapture = {
+              id:Date.now(), content, category:guessCategory(content), type,
+              parent:captureParent, timestamp:nowISO(), completed:false,
+            };
+            const updated = [newCapture, ...captures];
+            setCaptures(updated);
+            syncWithGoogle(undefined, updated, undefined, undefined, undefined);
+          }
+        } finally { setParsing(false); setDumpError(''); }
+      };
+
+      const handleTextSubmit = () => { if (!textInput.trim()) return; saveCapture(textInput.trim(),'text'); setTextInput(''); };
+
+      const startVoice = () => {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { setDumpError('Voice not supported. Use Chrome.'); return; }
+        const rec = new SR();
+        rec.lang='en-US'; rec.interimResults=false;
+        rec.onstart  = () => { setIsRecording(true); setDumpError(''); };
+        rec.onend    = () => setIsRecording(false);
+        rec.onerror  = e => { setIsRecording(false); setDumpError(e.error==='not-allowed'?'Mic blocked. Check permissions.':`Error: ${e.error}`); };
+        rec.onresult = e => saveCapture(e.results[0][0].transcript,'voice');
+        recognitionRef.current = rec;
+        rec.start();
+      };
+      const stopVoice = () => { recognitionRef.current?.stop(); setIsRecording(false); };
+
+      const pending = captures.filter(c=>!c.completed).length;
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Capturing as</p>
+            <div className="flex gap-3">
+              {[parent1Name,parent2Name].map(name => (
+                <button key={name} onClick={()=>setCaptureParent(name)}
+                  className={`flex-1 py-2.5 rounded-xl font-medium text-sm border-2 transition-all ${captureParent===name?'bg-indigo-600 text-white border-indigo-600':'text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+          {parsing && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="text-2xl animate-spin">🧠</div>
+              <div><p className="font-medium text-indigo-800 text-sm">Routing your capture…</p><p className="text-xs text-indigo-500">Grocery items auto-split</p></div>
+            </div>
+          )}
+          <div className="bg-white rounded-2xl shadow p-5">
+            <h2 className="font-bold text-gray-800 mb-3">🎤 Voice Memo</h2>
+            <button onClick={isRecording?stopVoice:startVoice} disabled={parsing}
+              className={`w-full py-5 rounded-xl font-semibold text-lg transition-all ${isRecording?'bg-red-500 text-white animate-pulse':parsing?'bg-gray-200 text-gray-400 cursor-not-allowed':'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+              {isRecording?'⏹ Stop Recording':parsing?'Processing…':'🎤 Tap to Speak'}
+            </button>
+            {isRecording && <p className="text-center text-sm text-red-500 mt-2 animate-pulse">Listening… tap Stop when done</p>}
+            {dumpError  && <p className="text-center text-sm text-red-500 mt-2">{dumpError}</p>}
+          </div>
+          <div className="bg-white rounded-2xl shadow p-5">
+            <h2 className="font-bold text-gray-800 mb-3">✍️ Quick Text</h2>
+            <div className="flex gap-2">
+              <input type="text" value={textInput} onChange={e=>setTextInput(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&handleTextSubmit()} disabled={parsing}
+                placeholder="Type anything… grocery items auto-routed"
+                className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-gray-50"/>
+              <button onClick={handleTextSubmit} disabled={!textInput.trim()||parsing}
+                className="px-5 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-40 text-xl font-bold">+</button>
+            </div>
+          </div>
+          {captures.length > 0 && (
+            <div className="bg-white rounded-2xl shadow p-5">
+              <h2 className="font-bold text-gray-800 mb-3">Recent <span className="text-gray-400 font-normal text-sm">({pending} pending)</span></h2>
+              {captures.slice(0,6).map(cap => {
+                const cat = categories.find(c=>c.id===cap.category);
+                return (
+                  <div key={cap.id} className={`flex items-start gap-3 p-3 mb-2 rounded-xl border ${cap.completed?'opacity-40 bg-gray-50':'bg-white'}`}>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm text-gray-800 ${cap.completed?'line-through':''}`}>{cap.content}</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        <span className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full">{cat?.icon} {cat?.name}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${cap.parent===parent1Name?'bg-blue-50 text-blue-700':'bg-pink-50 text-pink-700'}`}>{cap.parent}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {captures.length > 6 && <p className="text-xs text-center text-gray-400 mt-2">+{captures.length-6} more in 🧠 Organized</p>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Organized Tab (preserved from v8.4) ───────────────────────────────────
+    function OrganizedTab({ captures, setCaptures, groceries, setGroceries, categories, setCategories, parent1Name, parent2Name, syncWithGoogle }) {
+      const [editingId,   setEditingId]   = useState(null);
+      const [editingText, setEditingText] = useState('');
+      const [newCatName,  setNewCatName]  = useState('');
+      const [showNewCat,  setShowNewCat]  = useState(false);
+      const [movingId,    setMovingId]    = useState(null);
+      const [expandedCats,setExpandedCats]= useState({});
+
+      const pending    = captures.filter(c=>!c.completed).length;
+      const urgentItems= captures.filter(c=>{ const cat=categories.find(x=>x.id===c.category); return cat?.urgent&&!c.completed; });
+      const byCategory = id => captures.filter(c=>c.category===id&&!c.completed);
+
+      const toggleDone = id => {
+        const u = captures.map(c=>c.id===id?{...c,completed:!c.completed}:c);
+        setCaptures(u); syncWithGoogle(undefined,u,undefined,undefined,undefined);
+      };
+      const deleteCapture = id => {
+        const u = captures.filter(c=>c.id!==id);
+        setCaptures(u); syncWithGoogle(undefined,u,undefined,undefined,undefined);
+      };
+      const saveEdit = id => {
+        const u = captures.map(c=>c.id===id?{...c,content:editingText}:c);
+        setCaptures(u); syncWithGoogle(undefined,u,undefined,undefined,undefined);
+        setEditingId(null); setEditingText('');
+      };
+      const changeCategory = (id, catId) => {
+        const u = captures.map(c=>c.id===id?{...c,category:catId}:c);
+        setCaptures(u); syncWithGoogle(undefined,u,undefined,undefined,undefined);
+      };
+      const moveToGrocery = async cap => {
+        setMovingId(cap.id);
+        try {
+          const itemNames = await parseItemsFromText(cap.content);
+          const newItems = itemNames.map((name,i)=>({id:Date.now()+i,name:capitalize(name),store:'',completed:false,addedBy:cap.parent,timestamp:nowISO()}));
+          const updG = [...newItems,...groceries];
+          const updC = captures.filter(c=>c.id!==cap.id);
+          setGroceries(updG); setCaptures(updC);
+          syncWithGoogle(undefined,updC,updG,undefined,undefined);
+        } finally { setMovingId(null); }
+      };
+      const addCustomCategory = () => {
+        if (!newCatName.trim()) return;
+        const newCat = { id:`custom_${Date.now()}`, name:newCatName.trim(), icon:'📌', urgent:false };
+        const u = [...categories, newCat];
+        setCategories(u); syncWithGoogle(undefined,undefined,undefined,u,undefined);
+        setNewCatName(''); setShowNewCat(false);
+      };
+
+      return (
+        <div className="space-y-3">
+          {urgentItems.length > 0 && (
+            <div className="bg-red-50 border-l-4 border-red-500 rounded-2xl p-4">
+              <h3 className="font-bold text-red-800 mb-2">⚡ Urgent</h3>
+              {urgentItems.map(cap => {
+                const cat = categories.find(c=>c.id===cap.category);
+                return (
+                  <div key={cap.id} className="flex items-center gap-2 text-sm text-red-700 mb-1">
+                    <span>{cat?.icon}</span><span className="flex-1">{cap.content}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${cap.parent===parent1Name?'bg-blue-100 text-blue-700':'bg-pink-100 text-pink-700'}`}>{cap.parent}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              {label:'Pending',value:pending,cls:'text-indigo-700'},
+              {label:'Done',value:captures.filter(c=>c.completed).length,cls:'text-green-600'},
+              {label:'Active cats',value:new Set(captures.filter(c=>!c.completed).map(c=>c.category)).size,cls:'text-amber-600'},
+            ].map(s => (
+              <div key={s.label} className="bg-white rounded-2xl p-3 text-center shadow">
+                <div className={`text-2xl font-bold ${s.cls}`}>{s.value}</div>
+                <div className="text-xs text-gray-500">{s.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-white rounded-2xl shadow p-4">
+            {!showNewCat ? (
+              <button onClick={()=>setShowNewCat(true)} className="text-sm text-indigo-600 font-medium">+ Add custom category</button>
+            ) : (
+              <div className="flex gap-2">
+                <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addCustomCategory()}
+                  placeholder="Category name…" className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" autoFocus/>
+                <button onClick={addCustomCategory} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium">Add</button>
+                <button onClick={()=>{setShowNewCat(false);setNewCatName('');}} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm">Cancel</button>
+              </div>
+            )}
+          </div>
+          {categories.map(cat => {
+            const items = byCategory(cat.id);
+            if (!items.length) return null;
+            const open = !!expandedCats[cat.id];
+            return (
+              <div key={cat.id} className="bg-white rounded-2xl shadow overflow-hidden">
+                <button onClick={()=>setExpandedCats(p=>({...p,[cat.id]:!p[cat.id]}))}
+                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{cat.icon}</span>
+                    <span className="font-semibold text-gray-800">{cat.name}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cat.urgent?'bg-red-100 text-red-700':'bg-gray-100 text-gray-600'}`}>{items.length}</span>
+                  </div>
+                  <span className="text-gray-400 text-sm">{open?'▼':'▶'}</span>
+                </button>
+                {open && (
+                  <div className="px-4 pb-4 space-y-2 border-t pt-3">
+                    {items.map(cap => (
+                      <div key={cap.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                        <button onClick={()=>toggleDone(cap.id)} className="mt-0.5 flex-shrink-0">
+                          <div className="w-5 h-5 rounded border-2 border-gray-300 hover:border-green-400 transition-colors"/>
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          {editingId===cap.id ? (
+                            <div className="flex gap-2 mb-2">
+                              <input value={editingText} onChange={e=>setEditingText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&saveEdit(cap.id)}
+                                className="flex-1 px-2 py-1 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" autoFocus/>
+                              <button onClick={()=>saveEdit(cap.id)} className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-xs font-medium">Save</button>
+                              <button onClick={()=>{setEditingId(null);setEditingText('');}} className="px-2 py-1 bg-gray-200 text-gray-600 rounded-lg text-xs">×</button>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-800 mb-1.5">{cap.content}</p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <select value={cap.category} onChange={e=>changeCategory(cap.id,e.target.value)}
+                              className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full border-0 focus:ring-1 focus:ring-indigo-400 cursor-pointer">
+                              {categories.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                            </select>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${cap.parent===parent1Name?'bg-blue-50 text-blue-700':'bg-pink-50 text-pink-700'}`}>{cap.parent}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1 flex-shrink-0">
+                          {editingId!==cap.id && <button onClick={()=>{setEditingId(cap.id);setEditingText(cap.content);}} className="text-xs text-gray-400 hover:text-indigo-600 px-1.5 py-0.5 rounded hover:bg-indigo-50">✏️</button>}
+                          <button onClick={()=>moveToGrocery(cap)} disabled={movingId===cap.id}
+                            className="text-xs text-gray-400 hover:text-green-600 px-1.5 py-0.5 rounded hover:bg-green-50 disabled:opacity-40">
+                            {movingId===cap.id?'⏳':'🛒'}
+                          </button>
+                          <button onClick={()=>deleteCapture(cap.id)} className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!pending && (
+            <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
+              <div className="text-5xl mb-3">🧠</div>
+              <p className="font-medium text-gray-600">All clear!</p>
+              <p className="text-sm mt-1">No pending items.</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Grocery Tab — extended v20 ────────────────────────────────────────────
+    function GroceryTab({ groceries, setGroceries, stores, setStores, categories, parent1Name, parent2Name, captureParent, syncWithGoogle, mealPlanSlots, ingredients, pantry, setPantry }) {
+      const [groceryInput,  setGroceryInput]  = useState('');
+      const [showNewStore,  setShowNewStore]  = useState(false);
+      const [newStoreName,  setNewStoreName]  = useState('');
+      const [promoteModal,  setPromoteModal]  = useState(null); // grocery item being promoted
+      const [promoteIng,    setPromoteIng]    = useState('');
+      const [promoteQty,    setPromoteQty]    = useState('');
+      const [promoteUnit,   setPromoteUnit]   = useState('piece');
+      const [showSuppressed,setShowSuppressed]= useState(false);
+
+      const groceryPending = groceries.filter(g=>!g.completed).length;
+
+      // Determine pantry-backed status for items with ingredientId
+      const isPantryBacked = (item) => {
+        if (!item.ingredientId) return false;
+        const rows  = pantry.filter(p=>p.ingredientId===item.ingredientId);
+        const total = rows.reduce((s,p)=>s+parseFloat(p.quantity||0),0);
+        const needed= parseFloat(item.quantity||1);
+        return total >= needed;
+      };
+
+      // Split items: pantry-backed (suppressed) vs needed
+      const pendingItems    = groceries.filter(g=>!g.completed && !isPantryBacked(g));
+      const suppressedItems = groceries.filter(g=>!g.completed &&  isPantryBacked(g));
+      const completedItems  = groceries.filter(g=>g.completed);
+
+      // Is this item a legacy row (no ingredientId)?
+      const isLegacy = (item) => !item.ingredientId;
+
+      const addItem = () => {
+        if (!groceryInput.trim()) return;
+        const newItem = { id:Date.now(), name:groceryInput.trim(), store:'', completed:false, addedBy:captureParent, timestamp:nowISO() };
+        const u = [newItem,...groceries];
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+        setGroceryInput('');
+      };
+      const toggleDone = (id) => {
+        const u = groceries.map(g=>g.id===id?{...g,completed:!g.completed}:g);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+        // §16c: on completion → add to Pantry if ingredientId present
+        const item = groceries.find(g=>g.id===id);
+        if (item && item.ingredientId && !item.completed) {
+          const pantryRow = {
+            pantryId:uuid(), ingredientId:item.ingredientId,
+            quantity:parseFloat(item.quantity||1), unit:item.unit||'piece',
+            addedAt:nowISO(), addedVia:'grocery_completion', expiryDate:null,
+          };
+          setPantry(ps=>[...ps,pantryRow]);
+          appendRow('Pantry', pantryRow);
+          // §16c: preferredStore learning — 3 consecutive same-store → set preferredStore
+          if (item.store && item.ingredientId) {
+            const ing = ingredients.find(i=>i.ingredientId===item.ingredientId);
+            if (ing) {
+              const recentSameStore = completedItems.filter(g=>g.ingredientId===item.ingredientId&&g.store===item.store).length;
+              if (recentSameStore >= 2) { // this is the 3rd
+                updateRow('Ingredients', item.ingredientId, { preferredStore: item.store });
+              }
+            }
+          }
+        }
+      };
+      const deleteItem = id => {
+        const u = groceries.filter(g=>g.id!==id);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+      };
+      const updateStore = (id, store) => {
+        const u = groceries.map(g=>g.id===id?{...g,store}:g);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+      };
+      const clearCompleted = () => {
+        const u = groceries.filter(g=>!g.completed);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+      };
+      const addStore = () => {
+        if (!newStoreName.trim()) return;
+        const u = [...stores,newStoreName.trim()];
+        setStores(u); syncWithGoogle(undefined,undefined,undefined,undefined,u);
+        setNewStoreName(''); setShowNewStore(false);
+      };
+      const buyAnyway = (id) => {
+        const u = groceries.map(g=>g.id===id?{...g,pantryBacked:false,ingredientId:null}:g);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+      };
+      // §16d: promote legacy row to v20 ingredient
+      const openPromote = (item) => {
+        setPromoteModal(item); setPromoteIng(item.name); setPromoteQty('1'); setPromoteUnit('piece');
+      };
+      const confirmPromote = () => {
+        if (!promoteModal || !promoteIng.trim()) return;
+        const ingId = uuid();
+        const newIng = { ingredientId:ingId, canonicalName:promoteIng.trim(), lastUpdated:nowISO(), nutritionPer100g:'{}', needsReview:false };
+        appendRow('Ingredients', newIng);
+        const u = groceries.map(g=>g.id===promoteModal.id?{...g,name:promoteIng.trim(),ingredientId:ingId,quantity:promoteQty,unit:promoteUnit}:g);
+        setGroceries(u); syncWithGoogle(undefined,undefined,u,undefined,undefined);
+        setPromoteModal(null);
+      };
+
+      const GroceryRow = ({ item, showPromote }) => (
+        <div key={item.id} className={`flex items-center gap-2 p-2.5 rounded-xl border mb-2 transition-colors ${item.completed?'bg-gray-50 opacity-60':'bg-white hover:bg-gray-50'} ${isLegacy(item)&&showPromote?'border-dashed border-gray-300':''}`}>
+          <button onClick={()=>toggleDone(item.id)} className="flex-shrink-0">
+            {item.completed ? (
+              <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold">✓</div>
+            ) : (
+              <div className="w-6 h-6 rounded-full border-2 border-gray-300 hover:border-green-500 transition-colors"/>
+            )}
+          </button>
+          <div className="flex-1 min-w-0">
+            <span className={`text-sm font-medium ${item.completed?'line-through text-gray-400':'text-gray-800'}`}>{item.name}</span>
+            {item.quantity && <span className="text-xs text-gray-400 ml-1.5">{item.quantity} {item.unit}</span>}
+            {isLegacy(item) && showPromote && (
+              <button onClick={()=>openPromote(item)} className="ml-2 text-xs text-indigo-500 hover:underline">promote</button>
+            )}
+          </div>
+          {!item.completed && (
+            <select value={item.store||''} onChange={e=>updateStore(item.id,e.target.value)}
+              className="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none flex-shrink-0 max-w-[90px]">
+              <option value="">— store —</option>
+              {stores.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          <button onClick={()=>deleteItem(item.id)} className="text-gray-300 hover:text-red-400 text-lg flex-shrink-0">×</button>
+        </div>
+      );
+
+      return (
+        <div className="space-y-4">
+          {/* Add item + store management */}
+          <div className="bg-white rounded-2xl shadow p-5">
+            <h2 className="font-bold text-gray-800 mb-3">🛒 Grocery List</h2>
+            <div className="flex gap-2 mb-2">
+              <input value={groceryInput} onChange={e=>setGroceryInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addItem()}
+                placeholder="Add an item…" className="flex-1 px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-400"/>
+              <button onClick={addItem} disabled={!groceryInput.trim()} className="px-5 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-40 text-xl font-bold">+</button>
+            </div>
+            <p className="text-xs text-gray-400 mb-3">Auto-routed from Mental Dump · Meal Plan projects ingredients here</p>
+            <div className="border-t pt-3">
+              <p className="text-xs text-gray-500 font-medium mb-2">Stores: {stores.join(' · ')}</p>
+              {!showNewStore ? (
+                <button onClick={()=>setShowNewStore(true)} className="text-xs text-indigo-600 font-medium">+ Add store</button>
+              ) : (
+                <div className="flex gap-2">
+                  <input value={newStoreName} onChange={e=>setNewStoreName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addStore()}
+                    placeholder="Store name…" className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" autoFocus/>
+                  <button onClick={addStore} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium">Add</button>
+                  <button onClick={()=>{setShowNewStore(false);setNewStoreName('');}} className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs">Cancel</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Main list */}
+          {(pendingItems.length > 0 || suppressedItems.length > 0 || completedItems.length > 0) ? (
+            <div className="bg-white rounded-2xl shadow p-5">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-gray-800">{pendingItems.length} item{pendingItems.length!==1?'s':''} to get</h3>
+                {completedItems.length > 0 && <button onClick={clearCompleted} className="text-xs text-red-400 hover:text-red-600 font-medium">Clear done</button>}
+              </div>
+
+              {/* Pending items */}
+              {pendingItems.map(item => <GroceryRow key={item.id} item={item} showPromote={true}/>)}
+
+              {/* Pantry-suppressed section */}
+              {suppressedItems.length > 0 && (
+                <div className="border-t mt-3 pt-3">
+                  <button onClick={()=>setShowSuppressed(s=>!s)} className="w-full flex items-center justify-between text-xs text-gray-500 font-medium mb-2 hover:text-gray-700">
+                    <span>✅ You're good on: {suppressedItems.map(i=>i.name).slice(0,3).join(', ')}{suppressedItems.length>3?` +${suppressedItems.length-3}`:''}</span>
+                    <span>{showSuppressed?'▼':'▶'}</span>
+                  </button>
+                  {showSuppressed && suppressedItems.map(item => (
+                    <div key={item.id} className="flex items-center gap-2 p-2.5 rounded-xl border mb-1.5 bg-green-50 border-green-100">
+                      <span className="text-green-500 text-sm">✓</span>
+                      <span className="flex-1 text-sm text-gray-600 line-through">{item.name}</span>
+                      <button onClick={()=>buyAnyway(item.id)} className="text-xs text-indigo-500 hover:underline flex-shrink-0">buy anyway</button>
+                      <button onClick={()=>deleteItem(item.id)} className="text-gray-300 hover:text-red-400 text-lg">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* In cart */}
+              {completedItems.length > 0 && (
+                <div className="border-t mt-3 pt-3">
+                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2">In cart</p>
+                  {completedItems.map(item => <GroceryRow key={item.id} item={item} showPromote={false}/>)}
+                </div>
+              )}
+
+              {pendingItems.length === 0 && suppressedItems.length === 0 && completedItems.length > 0 && (
+                <p className="text-center text-sm text-green-600 font-medium py-4">🎉 All items in cart!</p>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-14 text-gray-400 bg-white rounded-2xl shadow">
+              <div className="text-5xl mb-3">🛒</div>
+              <p className="font-medium text-gray-600">List is empty</p>
+              <p className="text-sm mt-1">Add items above · say "add milk and eggs" in Dump · assign meals in Meal Plan</p>
+            </div>
+          )}
+
+          {/* Promote legacy row modal */}
+          {promoteModal && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setPromoteModal(null)}>
+              <div className="bg-white rounded-t-3xl w-full p-5 space-y-3" onClick={e=>e.stopPropagation()}>
+                <h3 className="font-bold text-gray-800">Promote to v20 ingredient</h3>
+                <p className="text-xs text-gray-500">Adds to Ingredients table so Pantry tracking and nutrition work.</p>
+                <input value={promoteIng} onChange={e=>setPromoteIng(e.target.value)} placeholder="Canonical ingredient name"
+                  className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                <div className="flex gap-2">
+                  <input type="number" value={promoteQty} onChange={e=>setPromoteQty(e.target.value)} placeholder="Qty"
+                    className="w-20 px-3 py-2 border rounded-xl text-sm focus:outline-none text-center"/>
+                  <select value={promoteUnit} onChange={e=>setPromoteUnit(e.target.value)} className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none">
+                    {['g','kg','ml','l','tsp','tbsp','cup','oz','lb','piece','pinch'].map(u=><option key={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setPromoteModal(null)} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">Cancel</button>
+                  <button onClick={confirmPromote} disabled={!promoteIng.trim()} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40">Promote</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MAIN APP
+    // ══════════════════════════════════════════════════════════════════════════
+    function App() {
+      // ── v8.4 shared state ────────────────────────────────────────────────────
+      const [activeTab,    setActiveTab]    = useState('overview');
+      const [parent1Name,  setParent1Name]  = useState('Fernando');
+      const [parent2Name,  setParent2Name]  = useState('Yenny');
+      const [currentWeek,  setCurrentWeek]  = useState('');
+      const [syncStatus,   setSyncStatus]   = useState('ready');
+      const [lastSyncTime, setLastSyncTime] = useState(null);
+      const [categories,   setCategories]   = useState(DEFAULT_CATEGORIES);
+      const [stores,       setStores]       = useState(DEFAULT_STORES);
+      const [captureParent,setCaptureParent]= useState('Fernando');
+
+      // ── v8.4 data ────────────────────────────────────────────────────────────
+      const [weekData,  setWeekData]  = useState(null);
+      const [captures,  setCaptures]  = useState([]);
+      const [groceries, setGroceries] = useState([]);
+
+      // ── v20 data ─────────────────────────────────────────────────────────────
+      const [recipes,           setRecipes]           = useState([]);
+      const [ingredients,       setIngredients]       = useState([]);
+      const [recipeIngredients, setRecipeIngredients] = useState([]);
+      const [mealPlanSlots,     setMealPlanSlots]     = useState([]);
+      const [pantry,            setPantry]            = useState([]);
+      const [family,            setFamily]            = useState([]);
+      const [v20Loading,        setV20Loading]        = useState(true);
+
+      // ── Week navigation ──────────────────────────────────────────────────────
+      const [viewWeek, setViewWeek] = useState(() => toISOWeek(getMonday(new Date())));
+
+      // ── Modal state ──────────────────────────────────────────────────────────
+      const [selectedRecipeId,  setSelectedRecipeId]  = useState(null);
+      const [showAddRecipe,     setShowAddRecipe]     = useState(false);
+      const [showBarcodeScanner,setShowBarcodeScanner]= useState(false);
+      const [showReceiptCapture,setShowReceiptCapture]= useState(false);
+      const [receiptMode,       setReceiptMode]       = useState('photo');
+
+      // ── v8.4 sync ────────────────────────────────────────────────────────────
+      const syncWithGoogle = useCallback(async (saveWeek, saveDump, saveGroceries, saveCategories, saveStores) => {
+        if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'PASTE_YOUR_URL_HERE') { setSyncStatus('setup_needed'); return; }
+        try {
+          setSyncStatus('syncing');
+          const isWrite = [saveWeek,saveDump,saveGroceries,saveCategories,saveStores].some(v=>v!==undefined);
+          if (isWrite) {
+            await fetch(GOOGLE_SCRIPT_URL, {
+              method:'POST', mode:'no-cors',
+              body: JSON.stringify({
+                weekData:   saveWeek      !==undefined ? saveWeek      : weekData,
+                captures:   saveDump      !==undefined ? saveDump      : captures,
+                groceries:  saveGroceries !==undefined ? saveGroceries : groceries,
+                categories: saveCategories!==undefined ? saveCategories: categories,
+                stores:     saveStores    !==undefined ? saveStores    : stores,
+                parent1Name, parent2Name, currentWeek,
+              })
+            });
+          } else {
+            const res  = await fetch(GOOGLE_SCRIPT_URL);
+            const data = await res.json();
+            if (data?.weekData)    setWeekData(data.weekData);
+            if (data?.captures)    setCaptures(data.captures);
+            if (data?.groceries)   setGroceries(data.groceries);
+            if (data?.categories)  setCategories(data.categories);
+            if (data?.stores)      setStores(data.stores);
+            if (data?.parent1Name) setParent1Name(data.parent1Name);
+            if (data?.parent2Name) setParent2Name(data.parent2Name);
+            if (data?.currentWeek) setCurrentWeek(data.currentWeek);
+          }
+          setSyncStatus('synced'); setLastSyncTime(new Date());
+        } catch { setSyncStatus('error'); }
+      }, [weekData,captures,groceries,categories,stores,parent1Name,parent2Name,currentWeek]);
+
+      useEffect(() => {
+        syncWithGoogle();
+        const id = setInterval(() => syncWithGoogle(), SYNC_INTERVAL);
+        return () => clearInterval(id);
+      }, []);
+
+      // ── v20 data loader ──────────────────────────────────────────────────────
+      const loadV20Data = useCallback(async () => {
+        try {
+          const [r,i,ri,mp,p,f] = await Promise.all([
+            loadSheet('Recipes'), loadSheet('Ingredients'), loadSheet('RecipeIngredients'),
+            loadSheet('MealPlanSlots'), loadSheet('Pantry'), loadSheet('Family'),
+          ]);
+          if (Array.isArray(r))  setRecipes(r);
+          if (Array.isArray(i))  setIngredients(i);
+          if (Array.isArray(ri)) setRecipeIngredients(ri);
+          if (Array.isArray(mp)) setMealPlanSlots(mp);
+          if (Array.isArray(p))  setPantry(p);
+          if (Array.isArray(f))  setFamily(f);
+        } catch(err) { console.warn('v20 data load error:', err); }
+        finally { setV20Loading(false); }
+      }, []);
+
+      useEffect(() => {
+        loadV20Data();
+        const id = setInterval(loadV20Data, V20_POLL_INTERVAL);
+        return () => clearInterval(id);
+      }, []);
+
+      // ── Debug panel (?debug=1) ────────────────────────────────────────────────
+      const isDebug = new URLSearchParams(window.location.search).get('debug') === '1';
+
+      // ── Derived counts ────────────────────────────────────────────────────────
+      const pending        = captures.filter(c=>!c.completed).length;
+      const groceryPending = groceries.filter(g=>!g.completed).length;
+      const needsReview    = ingredients.filter(i=>i.needsReview==='true'||i.needsReview===true).length;
+
+      const badgeInfo = ({
+        syncing:      {icon:'🔄',text:'Syncing…',    cls:'text-blue-500'  },
+        synced:       {icon:'✅',text:'Synced',       cls:'text-green-600' },
+        error:        {icon:'⚠️',text:'Sync error',   cls:'text-red-500'   },
+        setup_needed: {icon:'⚙️',text:'Setup needed', cls:'text-orange-500'},
+      })[syncStatus]||{icon:'⏸️',text:'Ready',cls:'text-gray-400'};
+
+      // ── Render ────────────────────────────────────────────────────────────────
+      return (
+        <div className="min-h-screen bg-indigo-50">
+          {/* ── HEADER ─────────────────────────────── */}
+          <div className="bg-white shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40">
+            <div>
+              <h1 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+                👨‍👩‍👦 Family Coordinator
+                <span className="text-xs font-normal px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">v20</span>
+              </h1>
+              <div className={`flex items-center gap-1 text-xs ${badgeInfo.cls}`}>
+                <span>{badgeInfo.icon}</span><span>{badgeInfo.text}</span>
+                {lastSyncTime && <span className="text-gray-400 ml-1">{lastSyncTime.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {groceryPending > 0 && <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-full">🛒 {groceryPending}</span>}
+              {pending > 0        && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded-full">🧠 {pending}</span>}
+              {needsReview > 0    && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded-full">⚠️ {needsReview}</span>}
+            </div>
+          </div>
+
+          {/* ── DESKTOP TOP TABS ─────────────────── */}
+          <div className="top-tabs bg-white border-b px-4 gap-1 overflow-x-auto">
+            {TABS.map(tab => (
+              <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 py-3 px-4 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${activeTab===tab.id?'border-indigo-600 text-indigo-600':'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── DEBUG PANEL ──────────────────────── */}
+          {isDebug && (
+            <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-2 text-xs font-mono text-yellow-800 overflow-x-auto">
+              v20 | week:{viewWeek} | recipes:{recipes.length} | pantry:{pantry.length} | ingredients:{ingredients.length} | slots:{mealPlanSlots.length} | needsReview:{needsReview} | v20Loading:{String(v20Loading)}
+            </div>
+          )}
+
+          {/* ── CONTENT ──────────────────────────── */}
+          <div className="max-w-2xl mx-auto px-4 py-4 tab-content">
+            {activeTab === 'overview'  && <OverviewTab week={viewWeek} onWeekChange={setViewWeek} mealPlanSlots={mealPlanSlots} recipes={recipes} weekData={weekData} captures={captures} categories={categories} groceries={groceries} parent1Name={parent1Name} parent2Name={parent2Name}/>}
+            {activeTab === 'mealplan'  && <MealPlanTab week={viewWeek} onWeekChange={setViewWeek} recipes={recipes} mealPlanSlots={mealPlanSlots} setMealPlanSlots={setMealPlanSlots} ingredients={ingredients} recipeIngredients={recipeIngredients} pantry={pantry} groceries={groceries} setGroceries={setGroceries} onAddRecipe={()=>setShowAddRecipe(true)} onViewRecipe={setSelectedRecipeId}/>}
+            {activeTab === 'schedule'  && <ScheduleTab weekData={weekData} setWeekData={setWeekData} parent1Name={parent1Name} parent2Name={parent2Name} syncWithGoogle={syncWithGoogle} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek}/>}
+            {activeTab === 'dump'      && <DumpTab captures={captures} setCaptures={setCaptures} groceries={groceries} setGroceries={setGroceries} categories={categories} parent1Name={parent1Name} parent2Name={parent2Name} captureParent={captureParent} setCaptureParent={setCaptureParent} syncWithGoogle={syncWithGoogle}/>}
+            {activeTab === 'organized' && <OrganizedTab captures={captures} setCaptures={setCaptures} groceries={groceries} setGroceries={setGroceries} categories={categories} setCategories={setCategories} parent1Name={parent1Name} parent2Name={parent2Name} syncWithGoogle={syncWithGoogle}/>}
+            {activeTab === 'grocery'   && <GroceryTab groceries={groceries} setGroceries={setGroceries} stores={stores} setStores={setStores} categories={categories} parent1Name={parent1Name} parent2Name={parent2Name} captureParent={captureParent} syncWithGoogle={syncWithGoogle} mealPlanSlots={mealPlanSlots} ingredients={ingredients} pantry={pantry} setPantry={setPantry}/>}
+            {activeTab === 'pantry'    && <PantryTab pantry={pantry} setPantry={setPantry} ingredients={ingredients} setIngredients={setIngredients} onBarcodeOpen={()=>setShowBarcodeScanner(true)} onReceiptOpen={(mode)=>{setReceiptMode(mode);setShowReceiptCapture(true);}}/>}
+          </div>
+
+          {/* ── MOBILE BOTTOM NAV ────────────────── */}
+          <nav className="bottom-nav bg-white border-t shadow-lg">
+            <div className="flex">
+              {TABS.map(tab => (
+                <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+                  className={`flex-1 flex flex-col items-center py-2 text-xs transition-colors ${activeTab===tab.id?'text-indigo-600':'text-gray-400 hover:text-gray-600'}`}>
+                  <span className="text-lg mb-0.5">{tab.icon}</span>
+                  <span className="leading-tight">{tab.label}</span>
+                </button>
+              ))}
+            </div>
+          </nav>
+
+          {/* ── MODALS ───────────────────────────── */}
+          {selectedRecipeId && (
+            <RecipeDetailModal recipeId={selectedRecipeId} recipes={recipes} recipeIngredients={recipeIngredients} ingredients={ingredients} pantry={pantry} mealPlanSlots={mealPlanSlots} onClose={()=>setSelectedRecipeId(null)} onUpdateRecipe={(id,row)=>{setRecipes(rs=>rs.map(r=>r.recipeId===id?{...r,...row}:r));updateRow('Recipes',id,row);}} onUpdateMealPlanSlots={setMealPlanSlots} onUpdatePantry={setPantry}/>
+          )}
+          {showAddRecipe && (
+            <AddRecipeModal onClose={()=>setShowAddRecipe(false)} onSave={(recipe,ings,ris)=>{setRecipes(rs=>[...rs,recipe]);setIngredients(is=>[...is,...ings]);setRecipeIngredients(ris2=>[...ris2,...ris]);setShowAddRecipe(false);}} ingredients={ingredients} setIngredients={setIngredients}/>
+          )}
+          {showBarcodeScanner && (
+            <BarcodeScannerModal onClose={()=>setShowBarcodeScanner(false)} onResult={(ing,pantryRow)=>{setIngredients(is=>{const idx=is.findIndex(i=>i.openFoodFactsBarcode===ing.openFoodFactsBarcode);return idx>=0?is.map((i,j)=>j===idx?{...i,...ing}:i):[...is,ing];});if(pantryRow){setPantry(ps=>[...ps,pantryRow]);}setShowBarcodeScanner(false);}} ingredients={ingredients}/>
+          )}
+          {showReceiptCapture && (
+            <ReceiptCaptureModal mode={receiptMode} onClose={()=>setShowReceiptCapture(false)} onResult={(newPantryRows)=>{setPantry(ps=>[...ps,...newPantryRows]);setShowReceiptCapture(false);}}/>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App/>, document.getElementById('root'));
+  </script>
+</body>
+</html>
