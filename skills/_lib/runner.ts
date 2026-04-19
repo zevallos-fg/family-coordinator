@@ -1,7 +1,16 @@
 import "server-only";
 
+import { PostHog } from "posthog-node";
 import { createClient } from "@/lib/supabase/server";
 import type { SkillContext, SkillResult, SkillTier } from "./types";
+
+const posthogClient = process.env.NEXT_PUBLIC_POSTHOG_KEY
+  ? new PostHog(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
+      host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+      flushAt: 1,
+      flushInterval: 0,
+    })
+  : null;
 
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 const SONNET_MODEL = "claude-sonnet-4-6";
@@ -143,7 +152,24 @@ export async function callSkill<T = string>(
     });
   }
 
-  // 5. Return text content (caller parses further if needed)
+  // 5. Emit PostHog event (serverless: flush immediately)
+  if (posthogClient) {
+    posthogClient.capture({
+      distinctId: ctx.userId,
+      event: "skill.invoked",
+      properties: {
+        skill_name: skillName,
+        model,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_cents: costCents,
+        family_id: ctx.familyId,
+      },
+    });
+    await posthogClient.shutdown();
+  }
+
+  // 6. Return text content (caller parses further if needed)
   const text = body.content?.[0]?.text ?? "";
   return {
     ok: true,
