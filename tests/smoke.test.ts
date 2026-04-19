@@ -88,3 +88,64 @@ describe("T1 smoke: skill framework", () => {
     expect(result.error?.code).toBe("invalid_input");
   });
 });
+
+describe("T2 smoke: new skill contracts", () => {
+  it("family-schedule-reconciler exports run function", async () => {
+    const mod = await import("@/skills/family-schedule-reconciler");
+    expect(typeof mod.run).toBe("function");
+  });
+
+  it("family-schedule-reconciler rejects empty imageBase64", async () => {
+    const mod = await import("@/skills/family-schedule-reconciler");
+    const result = await mod.run(
+      {
+        imageBase64: "",
+        imageMimeType: "image/jpeg",
+        weekOf: "2025-03-03",
+        knownNames: ["Fernando", "Yenny"],
+      },
+      {
+        familyId: "00000000-0000-4000-8000-000000000000",
+        userId: "00000000-0000-4000-8000-000000000000",
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_input");
+  });
+
+  it("family-grocery-parser exports run function", async () => {
+    const mod = await import("@/skills/family-grocery-parser");
+    expect(typeof mod.run).toBe("function");
+  });
+
+  it("family-grocery-parser rejects empty text", async () => {
+    const mod = await import("@/skills/family-grocery-parser");
+    const result = await mod.run(
+      { text: "", stores: [] },
+      {
+        familyId: "00000000-0000-4000-8000-000000000000",
+        userId: "00000000-0000-4000-8000-000000000000",
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_input");
+  });
+
+  it("anon cannot read captures table without session (RLS)", async () => {
+    const anon = createClient<Database>(URL, ANON);
+    const { data } = await anon.from("captures").select("*");
+    expect(data).toEqual([]);
+  });
+
+  it("anon cannot read grocery_items table without session (RLS)", async () => {
+    const anon = createClient<Database>(URL, ANON);
+    const { data } = await anon.from("grocery_items").select("*");
+    expect(data).toEqual([]);
+  });
+
+  it("anon cannot read schedule_entries table without session (RLS)", async () => {
+    const anon = createClient<Database>(URL, ANON);
+    const { data } = await anon.from("schedule_entries").select("*");
+    expect(data).toEqual([]);
+  });
+});
