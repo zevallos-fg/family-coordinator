@@ -1,5 +1,7 @@
 "use server";
 
+export const maxDuration = 60;
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";

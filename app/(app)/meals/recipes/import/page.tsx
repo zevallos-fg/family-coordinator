@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { RecipeImportForm } from "@/components/meals/RecipeImportForm";
 
+export const maxDuration = 60;
+
 export default async function RecipeImportPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
