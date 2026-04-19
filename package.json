@@ -1,6 +1,6 @@
 {
   "name": "family-coordinator",
-  "version": "0.3.0",
+  "version": "32.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

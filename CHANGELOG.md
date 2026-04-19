@@ -1,5 +1,51 @@
 # Changelog
 
+## [32.0.0] — 2026-04-19
+
+**Audit close-the-loop release.** All 23 findings from the April 19 adversarial audit resolved.
+
+### Fixed (High severity)
+- Client-only greeting resolves React hydration error #418; four time buckets: morning/afternoon/evening/night (#11, #22)
+- Grocery badge shows total count, not capped 5-item preview slice (#1)
+- Mobile WeekPicker "This week" button restored (was hidden behind sm: breakpoint) (#3)
+
+### Fixed (Medium severity)
+- WeekPicker visual label updated to "This week" (#4)
+- 404 page renders with app shell + back-to-dashboard CTA (#5)
+- Dashboard schedule CTA relabeled "Plan next week →" (#6)
+- Mobile capture hides desktop-only "Cmd+Enter" hint (#7)
+- Quick brief button uses primary amber (#8)
+- Recipe names normalized to Title Case — 6 backfilled (#9)
+- SwapRecipeDialog has real-time search filter (#18)
+- Dead duplicate View button in ShiftCard — confirmed already absent (#21)
+- /api/spend server-side 60s LRU cache + client raised to 5min poll (#20, #23)
+
+### Fixed (Low severity)
+- Receipts upload zone uses proper `<label>` — screen reader and keyboard accessible; camera still works (#2)
+- Grocery tap targets ≥44px (Apple HIG / WCAG 2.5.5) (#12)
+- Caregiver phone numbers formatted (XXX) XXX-XXXX (#13)
+- New caregiver names + roles normalized to Title Case on save (#14)
+- Layout containers standardized — caregiver + receipts list match other pages (#15)
+- Dashboard "Pending" empty state has "+ Capture →" CTA (#16)
+- Family default_serves configurable (1–20, default 4); meal planner respects it (#17)
+
+### Fixed (Performance)
+- Supabase server client memoized per-request via React.cache() — eliminates repeated auth.getUser() calls (#19)
+
+### Added
+- Playwright E2E test suite with Chromium + WebKit + GitHub Actions CI
+- 29 regression tests covering all audit findings across 3 spec files
+- `lib/format/phone.ts`, `lib/format/titleCase.ts` helpers
+- `/settings` page with family default_serves selector + nav link
+- `families.default_serves` column (migration applied)
+
+### Migrations applied
+- `20260419_api_usage_diagnostics.sql` (v0.2.1 — response_preview + error_message)
+- `20260419_recipe_backfill_v0.2.1.sql` (v0.2.1 — description, tags, times)
+- `20260419_recipe_title_case_and_default_serves.sql` (v32.0 — title case + default_serves)
+
+---
+
 ## [0.3.0] — 2026-04-19
 
 ### Fixed
