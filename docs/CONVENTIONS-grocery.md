@@ -2,7 +2,7 @@
 
 ## Write side: T3 meal planner
 
-When `generatePlanAction` in `app/(app)/meals/actions.ts` inserts grocery items from a meal plan delta:
+When `generatePlanAction` in `app/(app)/meal-plans/actions.ts` inserts grocery items from a meal plan delta:
 
 - `family_id`: current family
 - `name`: formatted as `"ingredient name (qty unit)"` when quantity is known, or just `"ingredient name"` when null

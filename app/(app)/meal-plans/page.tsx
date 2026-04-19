@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
 import { MealPlanWeek } from "@/components/meal-plans/MealPlanWeek";
@@ -88,13 +87,7 @@ export default async function MealPlanPage({ searchParams }: Props) {
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         {/* Header */}
         <div>
-          <Link
-            href="/meal-plans"
-            className="text-sm text-orange-600 hover:text-orange-800 font-medium"
-          >
-            ← Meal Plans
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">Meal Plan</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Meal Plans</h1>
         </div>
 
         {/* Week picker */}
