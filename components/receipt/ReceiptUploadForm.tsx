@@ -27,9 +27,12 @@ export function ReceiptUploadForm({ onSubmit, loading }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div
-        className="border-2 border-dashed border-amber-200 rounded-2xl p-8 text-center cursor-pointer hover:border-amber-400 transition-colors bg-amber-50"
-        onClick={() => fileRef.current?.click()}
+      {/* Proper <label> wrapping makes the tap zone fully accessible:
+          screen readers announce the label text, keyboard Tab navigates here,
+          and mobile camera still triggers via capture="environment" on the input. */}
+      <label
+        htmlFor="receipt-file"
+        className="block border-2 border-dashed border-amber-200 rounded-2xl p-8 text-center cursor-pointer hover:border-amber-400 transition-colors bg-amber-50"
       >
         {preview ? (
           <img
@@ -46,15 +49,16 @@ export function ReceiptUploadForm({ onSubmit, loading }: Props) {
         )}
         <input
           ref={fileRef}
+          id="receipt-file"
           type="file"
           name="receipt"
           accept="image/*"
           capture="environment"
-          className="hidden"
+          className="sr-only"
           onChange={handleFileChange}
           required
         />
-      </div>
+      </label>
 
       {preview && (
         <div className="flex gap-3">
