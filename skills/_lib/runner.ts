@@ -29,13 +29,27 @@ const PER_FAMILY_MONTHLY_CAP_CENTS = 1000;
 
 const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL!;
 
+
+export type MessageContent =
+  | string
+  | Array<
+      | { type: "text"; text: string }
+      | {
+          type: "image";
+          source:
+            | { type: "base64"; media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string }
+            | { type: "url"; url: string };
+        }
+    >;
+
 export interface SkillCallOptions {
   skillName: string;
   tier: SkillTier;
-  messages: Array<{ role: "user" | "assistant"; content: unknown }>;
+  messages: Array<{ role: "user" | "assistant"; content: MessageContent }>;
   maxTokens: number;
   system?: string;
 }
+
 
 /**
  * Core skill call. Every skill routes through this function.
