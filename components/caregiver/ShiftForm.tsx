@@ -9,6 +9,7 @@ interface ShiftFormProps {
   kids: Array<{ id: string; name: string }>;
   defaultCaregiverId?: string;
   defaultKidNames?: string[];
+  defaultStartAt?: Date; // week-aware default start time
 }
 
 export function ShiftForm({
@@ -16,6 +17,7 @@ export function ShiftForm({
   kids,
   defaultCaregiverId,
   defaultKidNames,
+  defaultStartAt,
 }: ShiftFormProps) {
   const [, formAction, pending] = useActionState(
     async (_: unknown, formData: FormData) => {
@@ -26,8 +28,8 @@ export function ShiftForm({
   );
 
   const now = new Date();
-  const defaultStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0);
-  const defaultEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0);
+  const defaultStart = defaultStartAt ?? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0);
+  const defaultEnd = new Date(defaultStart.getFullYear(), defaultStart.getMonth(), defaultStart.getDate(), defaultStart.getHours() + 8, defaultStart.getMinutes());
   const toLocalInput = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
