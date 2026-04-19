@@ -102,18 +102,22 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
   }
 
   // Total time: use cook_time_min for the sum
-  const cookTimeMin = recipe.totalTimeMin ?? null;
+  const cookTimeMin = recipe.cookTimeMin ?? recipe.totalTimeMin ?? null;
+  const prepTimeMin = recipe.prepTimeMin ?? null;
 
-  // Insert recipe
+  // Insert recipe with all enriched fields from the upgraded importer
   const { data: newRecipe, error: recipeErr } = await supabase
     .from("recipes")
     .insert({
       family_id: familyId,
       title: recipe.name,
+      description: recipe.description,
       source_url: recipe.sourceUrl,
       servings: recipe.servings,
+      prep_time_min: prepTimeMin,
       cook_time_min: cookTimeMin,
-      instructions: JSON.stringify(recipe.instructions),
+      tags: recipe.tags.length > 0 ? recipe.tags : null,
+      instructions: recipe.instructions.length > 0 ? JSON.stringify(recipe.instructions) : null,
       created_by_user_id: user.id,
     })
     .select("id")
@@ -207,16 +211,19 @@ export async function importRecipeFromPhotoAction(
     }
   }
 
-  // Insert recipe — note source_url is empty for photo imports
+  // Insert recipe with enriched fields — source_url is empty for photo imports
   const { data: newRecipe, error: recipeErr } = await supabase
     .from("recipes")
     .insert({
       family_id: familyId,
       title: recipe.name,
+      description: recipe.description,
       source_url: "",
       servings: recipe.servings,
-      cook_time_min: recipe.totalTimeMin ?? null,
-      instructions: JSON.stringify(recipe.instructions),
+      prep_time_min: recipe.prepTimeMin ?? null,
+      cook_time_min: recipe.cookTimeMin ?? recipe.totalTimeMin ?? null,
+      tags: recipe.tags.length > 0 ? recipe.tags : null,
+      instructions: recipe.instructions.length > 0 ? JSON.stringify(recipe.instructions) : null,
       created_by_user_id: user.id,
     })
     .select("id")
