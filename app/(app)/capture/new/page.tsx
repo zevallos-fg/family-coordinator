@@ -14,7 +14,7 @@ export default function NewCapturePage() {
       <CaptureForm />
 
       <p className="text-xs text-stone-400 text-center">
-        Grocery items (e.g. "need milk and eggs") are automatically sent to your grocery list.
+        Grocery items (e.g. &quot;need milk and eggs&quot;) are automatically sent to your grocery list.
         Everything else lands in Organized.
       </p>
     </div>
