@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { deleteRecipeAction } from "@/app/(app)/meals/actions";
+import { deleteRecipeAction } from "@/app/(app)/meal-plans/actions";
 import { useRouter } from "next/navigation";
 
 interface Ingredient {
@@ -41,7 +41,7 @@ export function RecipeDetail({ id, title, servings, cookTimeMin, sourceUrl, inst
       alert(result.error);
       setDeleting(false);
     } else {
-      router.push("/meals/recipes");
+      router.push("/meal-plans/recipes");
     }
   }
 
@@ -49,7 +49,7 @@ export function RecipeDetail({ id, title, servings, cookTimeMin, sourceUrl, inst
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
       <div>
-        <Link href="/meals/recipes" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
+        <Link href="/meal-plans/recipes" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
           ← Back to recipes
         </Link>
         <h1 className="mt-3 text-3xl font-bold text-gray-900">{title}</h1>

@@ -52,7 +52,7 @@ export function MealPlanCard({ mealType, recipeId, recipeTitle, notes, entryId, 
       ) : isLeftover ? (
         <p className="text-sm text-amber-800 leading-snug">{notes}</p>
       ) : (
-        <Link href={`/meals/recipes/${recipeId}`} className="block">
+        <Link href={`/meal-plans/recipes/${recipeId}`} className="block">
           <p className="font-medium text-gray-800 leading-snug hover:text-orange-700 transition-colors line-clamp-2">
             {recipeTitle}
           </p>

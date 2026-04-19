@@ -136,7 +136,7 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
     await supabase.from("recipe_ingredients").insert(ingredientRows);
   }
 
-  revalidatePath("/meals/recipes");
+  revalidatePath("/meal-plans/recipes");
   return { recipeId: newRecipe.id };
 }
 
@@ -239,7 +239,7 @@ export async function importRecipeFromPhotoAction(
     await supabase.from("recipe_ingredients").insert(ingredientRows);
   }
 
-  revalidatePath("/meals/recipes");
+  revalidatePath("/meal-plans/recipes");
   return { recipeId: newRecipe.id };
 }
 export async function deleteRecipeAction(recipeId: string): Promise<{ error?: string }> {
@@ -257,7 +257,7 @@ export async function deleteRecipeAction(recipeId: string): Promise<{ error?: st
     .eq("family_id", familyId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/recipes");
+  revalidatePath("/meal-plans/recipes");
   return {};
 }
 
@@ -309,7 +309,7 @@ export async function addPantryItemAction(data: {
   });
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/pantry");
+  revalidatePath("/meal-plans/pantry");
   return {};
 }
 
@@ -328,7 +328,7 @@ export async function updatePantryItemAction(id: string, amount: number): Promis
     .eq("family_id", familyId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/pantry");
+  revalidatePath("/meal-plans/pantry");
   return {};
 }
 
@@ -347,7 +347,7 @@ export async function removePantryItemAction(id: string): Promise<{ error?: stri
     .eq("family_id", familyId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/pantry");
+  revalidatePath("/meal-plans/pantry");
   return {};
 }
 
@@ -555,8 +555,8 @@ async function runPlanGeneration(
     await supabase.from("grocery_items").insert(groceryRows);
   }
 
-  revalidatePath("/meals");
-  revalidatePath("/meals/plan");
+  revalidatePath("/meal-plans");
+  revalidatePath("/meal-plans");
   return { planId: mealPlan.id };
 }
 
@@ -584,6 +584,6 @@ export async function swapMealEntryAction(entryId: string, newRecipeId: string):
     .eq("id", entryId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/plan");
+  revalidatePath("/meal-plans");
   return {};
 }

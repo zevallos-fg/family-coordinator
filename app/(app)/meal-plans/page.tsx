@@ -2,8 +2,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
-import { MealPlanWeek } from "@/components/meals/MealPlanWeek";
-import { MealPlanGenerateClient } from "@/components/meals/MealPlanGenerateClient";
+import { MealPlanWeek } from "@/components/meal-plans/MealPlanWeek";
+import { MealPlanGenerateClient } from "@/components/meal-plans/MealPlanGenerateClient";
 import { parseWeekParam, formatWeekParam, formatWeekRange } from "@/lib/week";
 
 interface Props {
@@ -33,7 +33,7 @@ export default async function MealPlanPage({ searchParams }: Props) {
 
   // Canonicalize URL — ensure ?week is always present
   if (!weekParam) {
-    redirect(`/meals/plan?week=${weekStr}`);
+    redirect(`/meal-plans?week=${weekStr}`);
   }
 
   const { data: plan } = await supabase
@@ -89,10 +89,10 @@ export default async function MealPlanPage({ searchParams }: Props) {
         {/* Header */}
         <div>
           <Link
-            href="/meals"
+            href="/meal-plans"
             className="text-sm text-orange-600 hover:text-orange-800 font-medium"
           >
-            ← Meals
+            ← Meal Plans
           </Link>
           <h1 className="text-2xl font-bold text-gray-900 mt-1">Meal Plan</h1>
         </div>

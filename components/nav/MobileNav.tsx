@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { href: "/capture", label: "Capture" },
   { href: "/organized", label: "Organized" },
   { href: "/grocery", label: "Grocery" },
-  { href: "/meals", label: "Meals" },
+  { href: "/meal-plans", label: "Meal Plans" },
   { href: "/receipts", label: "Receipts" },
   { href: "/caregiver", label: "Caregiver" },
 ];

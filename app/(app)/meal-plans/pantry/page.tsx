@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { PantryList } from "@/components/meals/PantryList";
-import { PantryAddForm } from "@/components/meals/PantryAddForm";
+import { PantryList } from "@/components/meal-plans/PantryList";
+import { PantryAddForm } from "@/components/meal-plans/PantryAddForm";
 
 export default async function PantryPage() {
   const supabase = await createClient();
@@ -35,8 +35,8 @@ export default async function PantryPage() {
     <main className="min-h-screen bg-amber-50/30">
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <div>
-          <Link href="/meals" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
-            ← Meals
+          <Link href="/meal-plans" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
+            ← Meal Plans
           </Link>
           <h1 className="text-2xl font-bold text-gray-900 mt-1">Pantry</h1>
           <p className="text-sm text-gray-400 mt-0.5">

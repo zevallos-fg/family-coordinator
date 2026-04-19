@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { RecipeCard } from "@/components/meals/RecipeCard";
+import { RecipeCard } from "@/components/meal-plans/RecipeCard";
 
 export default async function RecipesPage() {
   const supabase = await createClient();
@@ -27,13 +27,13 @@ export default async function RecipesPage() {
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <Link href="/meals" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
-              ← Meals
+            <Link href="/meal-plans" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
+              ← Meal Plans
             </Link>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">Recipe Library</h1>
           </div>
           <Link
-            href="/meals/recipes/import"
+            href="/meal-plans/recipes/import"
             className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow transition-all"
           >
             + Import Recipe
@@ -48,7 +48,7 @@ export default async function RecipesPage() {
               Paste any recipe URL to import it — AllRecipes, NYT Cooking, and most sites work.
             </p>
             <Link
-              href="/meals/recipes/import"
+              href="/meal-plans/recipes/import"
               className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-3 rounded-2xl shadow transition-all"
             >
               Import Your First Recipe

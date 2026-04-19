@@ -22,7 +22,7 @@ function timeLabel(min: number | null): string {
 export function RecipeCard({ id, title, servings, cookTimeMin, ingredientCount }: RecipeCardProps) {
   return (
     <Link
-      href={`/meals/recipes/${id}`}
+      href={`/meal-plans/recipes/${id}`}
       className="group block bg-white rounded-2xl shadow-sm border border-orange-100 p-5 hover:shadow-md hover:border-orange-200 transition-all"
     >
       <div className="flex items-start justify-between gap-3">

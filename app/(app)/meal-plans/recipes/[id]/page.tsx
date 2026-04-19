@@ -1,6 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { RecipeDetail } from "@/components/meals/RecipeDetail";
+import { RecipeDetail } from "@/components/meal-plans/RecipeDetail";
 
 interface Props {
   params: Promise<{ id: string }>;

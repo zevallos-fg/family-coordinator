@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { updatePantryItemAction, removePantryItemAction } from "@/app/(app)/meals/actions";
+import { updatePantryItemAction, removePantryItemAction } from "@/app/(app)/meal-plans/actions";
 
 interface PantryItem {
   id: string;
