@@ -1,57 +1,192 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { Button } from "@/components/ui/button";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
   const { data: membership } = await supabase
     .from("family_members")
-    .select("family_id, role, families(name)")
+    .select("family_id, role, families(name, timezone)")
     .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
 
   if (!membership) redirect("/onboarding");
 
-  const { data: spendCents } = await supabase.rpc(
-    "fn_skill_get_monthly_spend",
-    { target_family_id: membership.family_id }
-  );
+  const familyId = membership.family_id;
+  const familyName = (membership.families as { name: string } | null)?.name ?? "your household";
+  const today = new Date().toISOString().slice(0, 10);
 
-  const spend = (Number(spendCents ?? 0) / 100).toFixed(2);
+  const [
+    { data: todayDuties },
+    { data: unresolvedCaptures },
+    { data: pendingGrocery },
+    { data: userData },
+  ] = await Promise.all([
+    supabase
+      .from("schedule_entries")
+      .select("id, duty_type, notes")
+      .eq("family_id", familyId)
+      .eq("date", today),
+    supabase
+      .from("captures")
+      .select("id, text, created_at, categories(name, icon)")
+      .eq("family_id", familyId)
+      .is("completed_at", null)
+      .order("created_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("grocery_items")
+      .select("id, name, quantity")
+      .eq("family_id", familyId)
+      .eq("in_cart", false)
+      .is("completed_at", null)
+      .order("created_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("users")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle(),
+  ]);
+
+  const firstName = userData?.full_name?.split(" ")[0] ?? user.email?.split("@")[0] ?? "there";
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  const dateDisplay = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
 
   return (
-    <main className="mx-auto max-w-2xl p-8 space-y-6">
+    <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-3xl font-semibold">
-          Welcome to {membership.families?.name ?? "your household"}
+        <h1 className="text-2xl font-semibold text-stone-800">
+          {greeting}, {firstName}
         </h1>
-        <p className="text-sm text-foreground/60 mt-1">
-          Signed in as {user.email}
+        <p className="text-stone-500 text-sm mt-0.5">
+          {dateDisplay} · {familyName}
         </p>
       </div>
 
-      <div className="rounded-lg border border-foreground/10 p-4">
-        <div className="text-xs uppercase text-foreground/50 tracking-wider">
-          This month&apos;s AI usage
+      {/* Today's schedule */}
+      <div className="bg-white rounded-xl border border-stone-200 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-medium text-stone-700">Today&apos;s duties</h2>
+          <Link href="/schedule" className="text-xs text-amber-600 hover:text-amber-700">
+            Full schedule →
+          </Link>
         </div>
-        <div className="text-2xl font-semibold mt-1">
-          ${spend}{" "}
-          <span className="text-sm font-normal text-foreground/50">
-            / $10.00
-          </span>
+        {todayDuties && todayDuties.length > 0 ? (
+          <div className="grid grid-cols-3 gap-2">
+            {todayDuties.map((duty) => (
+              <div key={duty.id} className="bg-amber-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-stone-500 capitalize">{duty.duty_type}</p>
+                <p className="text-sm font-medium text-stone-800 mt-0.5">
+                  {duty.notes ?? "—"}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-6 text-stone-400">
+            <p className="text-sm">No duties set for today</p>
+            <Link href="/schedule/upload" className="text-xs text-amber-600 mt-1 block hover:underline">
+              Upload calendar →
+            </Link>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Unresolved captures */}
+        <div className="bg-white rounded-xl border border-stone-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-medium text-stone-700">
+              Pending{" "}
+              {unresolvedCaptures && unresolvedCaptures.length > 0 && (
+                <span className="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full">
+                  {unresolvedCaptures.length}
+                </span>
+              )}
+            </h2>
+            <Link href="/organized" className="text-xs text-amber-600 hover:text-amber-700">
+              Organized →
+            </Link>
+          </div>
+          {unresolvedCaptures && unresolvedCaptures.length > 0 ? (
+            <ul className="space-y-2">
+              {unresolvedCaptures.map((c) => {
+                const cat = c.categories as { name: string; icon: string | null } | null;
+                return (
+                  <li key={c.id} className="flex items-start gap-2">
+                    {cat?.icon && (
+                      <span className="text-sm shrink-0 mt-0.5">{cat.icon}</span>
+                    )}
+                    <p className="text-sm text-stone-700 line-clamp-1">{c.text}</p>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-sm text-stone-400 py-3 text-center">All clear!</p>
+          )}
+        </div>
+
+        {/* Grocery needed */}
+        <div className="bg-white rounded-xl border border-stone-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-medium text-stone-700">
+              Grocery list{" "}
+              {pendingGrocery && pendingGrocery.length > 0 && (
+                <span className="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded-full">
+                  {pendingGrocery.length}
+                </span>
+              )}
+            </h2>
+            <Link href="/grocery" className="text-xs text-amber-600 hover:text-amber-700">
+              Full list →
+            </Link>
+          </div>
+          {pendingGrocery && pendingGrocery.length > 0 ? (
+            <ul className="space-y-1.5">
+              {pendingGrocery.map((item) => (
+                <li key={item.id} className="text-sm text-stone-700 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  {item.name}
+                  {item.quantity && (
+                    <span className="text-xs text-stone-400">({item.quantity})</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-stone-400 py-3 text-center">List is empty</p>
+          )}
         </div>
       </div>
 
-      <form action="/api/auth/signout" method="POST">
-        <Button variant="outline" type="submit">
-          Sign out
-        </Button>
-      </form>
-    </main>
+      {/* Quick capture */}
+      <div className="bg-white rounded-xl border border-stone-200 p-4">
+        <h2 className="font-medium text-stone-700 mb-3">Quick capture</h2>
+        <Link
+          href="/capture/new"
+          className="flex items-center gap-3 w-full px-4 py-3 rounded-lg border-2 border-dashed border-stone-200 text-stone-400 hover:border-amber-300 hover:text-amber-600 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span className="text-sm">What&apos;s on your mind?</span>
+        </Link>
+      </div>
+    </div>
   );
 }
