@@ -1,0 +1,411 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { withSkillContext } from "@/lib/skill-action";
+import * as recipeImporter from "@/skills/family-recipe-importer";
+import * as mealPlanner from "@/skills/family-meal-planner";
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+async function getFamilyId(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("family_members")
+    .select("family_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  return data?.family_id ?? null;
+}
+
+// ── Recipe actions ────────────────────────────────────────────────────────────
+
+export async function importRecipeAction(url: string): Promise<{ error?: string; recipeId?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found — complete onboarding first" };
+
+  // Fetch HTML from the recipe URL
+  let html: string;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; FamilyCoordinator/1.0)" },
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return { error: `Could not fetch page (HTTP ${res.status})` };
+    html = await res.text();
+  } catch (err) {
+    return { error: err instanceof Error && err.name === "AbortError" ? "Page took too long to load" : "Could not reach that URL" };
+  }
+
+  // Check for duplicate
+  const { data: existing } = await supabase
+    .from("recipes")
+    .select("id")
+    .eq("family_id", familyId)
+    .eq("source_url", url)
+    .maybeSingle();
+  if (existing) return { recipeId: existing.id };
+
+  // Invoke skill
+  const result = await withSkillContext(recipeImporter.run, { url, html });
+  if (!result.ok) {
+    if (result.error?.code === "budget_exceeded") {
+      return { error: "Family monthly AI budget reached. Try again next month." };
+    }
+    return { error: result.error?.message ?? "Recipe import failed" };
+  }
+
+  const recipe = result.data!;
+
+  // Upsert ingredients and build id map
+  const ingredientIds: Record<string, string> = {};
+  for (const ing of recipe.ingredients) {
+    const { data: existing } = await supabase
+      .from("ingredients")
+      .select("id")
+      .eq("family_id", familyId)
+      .eq("canonical_name", ing.canonicalName)
+      .maybeSingle();
+
+    if (existing) {
+      ingredientIds[ing.canonicalName] = existing.id;
+    } else {
+      const { data: inserted } = await supabase
+        .from("ingredients")
+        .insert({ family_id: familyId, canonical_name: ing.canonicalName, name: ing.canonicalName })
+        .select("id")
+        .single();
+      if (inserted) ingredientIds[ing.canonicalName] = inserted.id;
+    }
+  }
+
+  // Total time: use cook_time_min for the sum
+  const cookTimeMin = recipe.totalTimeMin ?? null;
+
+  // Insert recipe
+  const { data: newRecipe, error: recipeErr } = await supabase
+    .from("recipes")
+    .insert({
+      family_id: familyId,
+      title: recipe.name,
+      source_url: recipe.sourceUrl,
+      servings: recipe.servings,
+      cook_time_min: cookTimeMin,
+      instructions: JSON.stringify(recipe.instructions),
+      created_by_user_id: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (recipeErr || !newRecipe) return { error: "Failed to save recipe" };
+
+  // Insert recipe_ingredients
+  const ingredientRows = recipe.ingredients
+    .filter(ing => ingredientIds[ing.canonicalName])
+    .map(ing => ({
+      recipe_id: newRecipe.id,
+      ingredient_id: ingredientIds[ing.canonicalName],
+      amount: ing.quantity,
+      unit: ing.unit,
+      notes: ing.note,
+    }));
+
+  if (ingredientRows.length > 0) {
+    await supabase.from("recipe_ingredients").insert(ingredientRows);
+  }
+
+  revalidatePath("/meals/recipes");
+  return { recipeId: newRecipe.id };
+}
+
+export async function deleteRecipeAction(recipeId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found" };
+
+  const { error } = await supabase
+    .from("recipes")
+    .delete()
+    .eq("id", recipeId)
+    .eq("family_id", familyId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/meals/recipes");
+  return {};
+}
+
+// ── Pantry actions ────────────────────────────────────────────────────────────
+
+export async function addPantryItemAction(data: {
+  ingredientName: string;
+  amount: number | null;
+  unit: string | null;
+  expiresOn: string | null;
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found" };
+
+  const canonicalName = data.ingredientName.trim().toLowerCase();
+  if (!canonicalName) return { error: "Ingredient name is required" };
+
+  // Upsert ingredient
+  let ingredientId: string;
+  const { data: existing } = await supabase
+    .from("ingredients")
+    .select("id")
+    .eq("family_id", familyId)
+    .eq("canonical_name", canonicalName)
+    .maybeSingle();
+
+  if (existing) {
+    ingredientId = existing.id;
+  } else {
+    const { data: inserted, error: insertErr } = await supabase
+      .from("ingredients")
+      .insert({ family_id: familyId, canonical_name: canonicalName, name: canonicalName })
+      .select("id")
+      .single();
+    if (insertErr || !inserted) return { error: "Failed to create ingredient" };
+    ingredientId = inserted.id;
+  }
+
+  const { error } = await supabase.from("pantry_items").insert({
+    family_id: familyId,
+    ingredient_id: ingredientId,
+    amount: data.amount,
+    unit: data.unit,
+    expires_on: data.expiresOn,
+  });
+
+  if (error) return { error: error.message };
+  revalidatePath("/meals/pantry");
+  return {};
+}
+
+export async function updatePantryItemAction(id: string, amount: number): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found" };
+
+  const { error } = await supabase
+    .from("pantry_items")
+    .update({ amount, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("family_id", familyId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/meals/pantry");
+  return {};
+}
+
+export async function removePantryItemAction(id: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found" };
+
+  const { error } = await supabase
+    .from("pantry_items")
+    .delete()
+    .eq("id", id)
+    .eq("family_id", familyId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/meals/pantry");
+  return {};
+}
+
+export async function searchIngredientsAction(query: string): Promise<Array<{ id: string; name: string }>> {
+  if (!query.trim()) return [];
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return [];
+
+  const { data } = await supabase
+    .from("ingredients")
+    .select("id, canonical_name")
+    .eq("family_id", familyId)
+    .ilike("canonical_name", `%${query}%`)
+    .order("canonical_name")
+    .limit(10);
+
+  return (data ?? []).map(r => ({ id: r.id, name: r.canonical_name }));
+}
+
+// ── Meal plan actions ─────────────────────────────────────────────────────────
+
+export async function generatePlanAction(weekOf: string): Promise<{ error?: string; planId?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found — complete onboarding first" };
+
+  // Load recipes with ingredients
+  const { data: recipesRaw } = await supabase
+    .from("recipes")
+    .select("id, title, servings, cook_time_min, recipe_ingredients(amount, unit, ingredients(canonical_name))")
+    .eq("family_id", familyId);
+
+  if (!recipesRaw || recipesRaw.length === 0) {
+    return { error: "No recipes found. Import some recipes first." };
+  }
+
+  const recipes = recipesRaw.map(r => ({
+    id: r.id,
+    name: r.title,
+    servings: r.servings ?? 4,
+    totalTimeMin: r.cook_time_min,
+    ingredients: (r.recipe_ingredients as Array<{ amount: number | null; unit: string | null; ingredients: { canonical_name: string } | null }>)
+      .filter(ri => ri.ingredients)
+      .map(ri => ({
+        canonicalName: ri.ingredients!.canonical_name,
+        quantity: ri.amount,
+        unit: ri.unit,
+      })),
+  }));
+
+  // Load pantry
+  const { data: pantryRaw } = await supabase
+    .from("pantry_items")
+    .select("amount, unit, ingredients(canonical_name)")
+    .eq("family_id", familyId)
+    .gt("amount", 0);
+
+  const pantry = (pantryRaw ?? [])
+    .filter(p => (p.ingredients as { canonical_name: string } | null)?.canonical_name)
+    .map(p => ({
+      ingredientName: (p.ingredients as { canonical_name: string }).canonical_name,
+      quantity: p.amount ?? 0,
+      unit: p.unit ?? "",
+    }));
+
+  // Build 7 days of meals starting from weekOf (Monday)
+  const monday = new Date(weekOf);
+  const mealsNeeded = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return {
+      date: d.toISOString().split("T")[0],
+      mealTypes: ["breakfast", "lunch", "dinner"] as Array<"breakfast" | "lunch" | "dinner">,
+    };
+  });
+
+  // Invoke flagship Sonnet skill
+  const result = await withSkillContext(mealPlanner.run, {
+    recipes,
+    pantry,
+    mealsNeeded,
+    preferences: {
+      servingsPerMeal: 4,
+      dislikes: [],
+      dietaryConstraints: [],
+      varietyPreference: "medium",
+    },
+  });
+
+  if (!result.ok) {
+    if (result.error?.code === "budget_exceeded") {
+      return { error: "Family monthly AI budget reached ($10). Try again next month." };
+    }
+    return { error: result.error?.message ?? "Meal plan generation failed" };
+  }
+
+  const plan = result.data!;
+
+  // Insert meal_plan
+  const { data: mealPlan, error: planErr } = await supabase
+    .from("meal_plans")
+    .insert({ family_id: familyId, week_start_date: weekOf })
+    .select("id")
+    .single();
+
+  if (planErr || !mealPlan) return { error: "Failed to create meal plan" };
+
+  // Insert meal_plan_entries
+  const entryRows = plan.entries.map(e => ({
+    meal_plan_id: mealPlan.id,
+    date: e.date,
+    meal_type: e.mealType,
+    recipe_id: e.recipeId,
+    notes: e.notes,
+  }));
+
+  if (entryRows.length > 0) {
+    await supabase.from("meal_plan_entries").insert(entryRows);
+  }
+
+  // Write grocery delta items — quantity stored as formatted string since schema has quantity: string | null
+  const groceryRows = plan.groceryDelta
+    .filter(g => (g.quantityNeeded ?? 0) > 0 || g.quantityNeeded === null)
+    .map(g => ({
+      family_id: familyId,
+      name: g.quantityNeeded !== null && g.unit
+        ? `${g.name} (${g.quantityNeeded} ${g.unit})`
+        : g.name,
+      quantity: g.quantityNeeded !== null
+        ? `${g.quantityNeeded}${g.unit ? ` ${g.unit}` : ""}`
+        : null,
+      in_cart: false,
+    }));
+
+  if (groceryRows.length > 0) {
+    await supabase.from("grocery_items").insert(groceryRows);
+  }
+
+  revalidatePath("/meals");
+  revalidatePath("/meals/plan");
+  return { planId: mealPlan.id };
+}
+
+export async function swapMealEntryAction(entryId: string, newRecipeId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found" };
+
+  // Verify recipe belongs to family
+  const { data: recipe } = await supabase
+    .from("recipes")
+    .select("id")
+    .eq("id", newRecipeId)
+    .eq("family_id", familyId)
+    .maybeSingle();
+
+  if (!recipe) return { error: "Recipe not found" };
+
+  const { error } = await supabase
+    .from("meal_plan_entries")
+    .update({ recipe_id: newRecipeId, notes: null })
+    .eq("id", entryId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/meals/plan");
+  return {};
+}
