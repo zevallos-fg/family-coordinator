@@ -69,7 +69,7 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
   if (existing) return { recipeId: existing.id };
 
   // Invoke skill
-  const result = await withSkillContext(recipeImporter.run, { url, html });
+  const result = await withSkillContext(recipeImporter.run, { mode: "url", url, html });
   if (!result.ok) {
     if (result.error?.code === "budget_exceeded") {
       return { error: "Family monthly AI budget reached. Try again next month." };
@@ -140,6 +140,108 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
   return { recipeId: newRecipe.id };
 }
 
+// ── Photo-based recipe import (no URL fetch; works on blocked sites and cookbook photos)
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
+const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+type SupportedImageType = (typeof SUPPORTED_IMAGE_TYPES)[number];
+
+export async function importRecipeFromPhotoAction(
+  formData: FormData
+): Promise<{ error?: string; recipeId?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found — complete onboarding first" };
+
+  const file = formData.get("image");
+  if (!(file instanceof File)) return { error: "No image uploaded" };
+  if (file.size === 0) return { error: "Image file is empty" };
+  if (file.size > MAX_IMAGE_BYTES) {
+    return { error: "Image is larger than 5MB. Try a smaller photo or crop it first." };
+  }
+  if (!SUPPORTED_IMAGE_TYPES.includes(file.type as SupportedImageType)) {
+    return { error: "Image must be JPEG, PNG, or WEBP" };
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const imageBase64 = buffer.toString("base64");
+  const imageMimeType = file.type as SupportedImageType;
+
+  const result = await withSkillContext(recipeImporter.run, {
+    mode: "image",
+    imageBase64,
+    imageMimeType,
+  });
+
+  if (!result.ok) {
+    if (result.error?.code === "budget_exceeded") {
+      return { error: "Family monthly AI budget reached. Try again next month." };
+    }
+    return { error: result.error?.message ?? "Recipe import failed" };
+  }
+
+  const recipe = result.data!;
+
+  // Upsert ingredients and build id map (same pattern as importRecipeAction)
+  const ingredientIds: Record<string, string> = {};
+  for (const ing of recipe.ingredients) {
+    const { data: existing } = await supabase
+      .from("ingredients")
+      .select("id")
+      .eq("family_id", familyId)
+      .eq("canonical_name", ing.canonicalName)
+      .maybeSingle();
+
+    if (existing) {
+      ingredientIds[ing.canonicalName] = existing.id;
+    } else {
+      const { data: inserted } = await supabase
+        .from("ingredients")
+        .insert({ family_id: familyId, canonical_name: ing.canonicalName, name: ing.canonicalName })
+        .select("id")
+        .single();
+      if (inserted) ingredientIds[ing.canonicalName] = inserted.id;
+    }
+  }
+
+  // Insert recipe — note source_url is empty for photo imports
+  const { data: newRecipe, error: recipeErr } = await supabase
+    .from("recipes")
+    .insert({
+      family_id: familyId,
+      title: recipe.name,
+      source_url: "",
+      servings: recipe.servings,
+      cook_time_min: recipe.totalTimeMin ?? null,
+      instructions: JSON.stringify(recipe.instructions),
+      created_by_user_id: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (recipeErr || !newRecipe) return { error: "Failed to save recipe" };
+
+  // Insert recipe_ingredients
+  const ingredientRows = recipe.ingredients
+    .filter(ing => ingredientIds[ing.canonicalName])
+    .map(ing => ({
+      recipe_id: newRecipe.id,
+      ingredient_id: ingredientIds[ing.canonicalName],
+      amount: ing.quantity,
+      unit: ing.unit,
+      notes: ing.note,
+    }));
+
+  if (ingredientRows.length > 0) {
+    await supabase.from("recipe_ingredients").insert(ingredientRows);
+  }
+
+  revalidatePath("/meals/recipes");
+  return { recipeId: newRecipe.id };
+}
 export async function deleteRecipeAction(recipeId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

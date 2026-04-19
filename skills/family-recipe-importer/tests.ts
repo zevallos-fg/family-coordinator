@@ -100,7 +100,7 @@ describe("family-recipe-importer", () => {
       usage: { model: "claude-haiku-4-5-20251001", inputTokens: 500, outputTokens: 200, costCents: 0.02 },
     });
 
-    const result = await run({ url: "https://example.com/pasta", html: PASTA_HTML }, TEST_CTX);
+    const result = await run({ mode: "url", url: "https://example.com/pasta", html: PASTA_HTML }, TEST_CTX);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -153,7 +153,7 @@ describe("family-recipe-importer", () => {
       usage: { model: "claude-haiku-4-5-20251001", inputTokens: 600, outputTokens: 250, costCents: 0.025 },
     });
 
-    const result = await run({ url: "https://example.com/cookies", html: COOKIE_HTML }, TEST_CTX);
+    const result = await run({ mode: "url", url: "https://example.com/cookies", html: COOKIE_HTML }, TEST_CTX);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -179,14 +179,14 @@ describe("family-recipe-importer", () => {
       usage: { model: "claude-haiku-4-5-20251001", inputTokens: 100, outputTokens: 10, costCents: 0.001 },
     });
 
-    const result = await run({ url: "https://example.com/404", html: "<html>Not found</html>" }, TEST_CTX);
+    const result = await run({ mode: "url", url: "https://example.com/404", html: "<html>Not found</html>" }, TEST_CTX);
 
     expect(result.ok).toBe(false);
     expect(result.error!.code).toBe("parse_error");
   });
 
   it("returns invalid_input when url is missing", async () => {
-    const result = await run({ url: "", html: PASTA_HTML }, TEST_CTX);
+    const result = await run({ mode: "url", url: "", html: PASTA_HTML }, TEST_CTX);
     expect(result.ok).toBe(false);
     expect(result.error!.code).toBe("invalid_input");
   });
@@ -197,7 +197,7 @@ describe("family-recipe-importer", () => {
       error: { code: "budget_exceeded", message: "monthly cap reached" },
     });
 
-    const result = await run({ url: "https://example.com/r", html: PASTA_HTML }, TEST_CTX);
+    const result = await run({ mode: "url", url: "https://example.com/r", html: PASTA_HTML }, TEST_CTX);
     expect(result.ok).toBe(false);
     expect(result.error!.code).toBe("budget_exceeded");
   });
