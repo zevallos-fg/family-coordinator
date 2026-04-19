@@ -94,7 +94,7 @@ export function MealPlanGenerateClient({
         <p className="text-sm text-gray-600">
           A plan already exists for the week of {weekLabel}
           {pendingCreatedAt
-            ? ` (created ${new Date(pendingCreatedAt).toLocaleDateString("en-US", {
+            ? ` (created ${new Date(pendingCreatedAt).toLocaleString("en-US", {
                 month: "short",
                 day: "numeric",
                 hour: "numeric",
