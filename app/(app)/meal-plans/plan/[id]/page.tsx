@@ -1,7 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { MealPlanWeek } from "@/components/meals/MealPlanWeek";
+import { MealPlanWeek } from "@/components/meal-plans/MealPlanWeek";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -70,8 +70,8 @@ export default async function MealPlanPage({ params }: Props) {
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         <div className="flex items-start justify-between">
           <div>
-            <Link href="/meals" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
-              ← Meals
+            <Link href="/meal-plans" className="text-sm text-orange-600 hover:text-orange-800 font-medium">
+              ← Meal Plans
             </Link>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">
               Meal Plan — {formatWeekRange(plan.week_start_date)}
@@ -81,7 +81,7 @@ export default async function MealPlanPage({ params }: Props) {
             </p>
           </div>
           <Link
-            href="/meals"
+            href="/meal-plans"
             className="text-sm font-medium text-orange-600 hover:text-orange-800 border border-orange-200 rounded-xl px-3 py-1.5 hover:bg-orange-50 transition-all"
           >
             Generate new plan

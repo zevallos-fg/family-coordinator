@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import { importRecipeAction } from "@/app/(app)/meals/actions";
+import { importRecipeAction } from "@/app/(app)/meal-plans/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -57,7 +57,7 @@ export function RecipeImportForm() {
     try {
       const result = await importRecipeAction(trimmed);
       if (result.error) setError(result.error);
-      else if (result.recipeId) router.push(`/meals/recipes/${result.recipeId}`);
+      else if (result.recipeId) router.push(`/meal-plans/recipes/${result.recipeId}`);
     } finally {
       setLoading(false);
     }
@@ -120,7 +120,7 @@ async function handlePhotoSubmit(e: React.FormEvent) {
         return;
       }
       if (data.recipeId) {
-        router.push(`/meals/recipes/${data.recipeId}`);
+        router.push(`/meal-plans/recipes/${data.recipeId}`);
       } else {
         setError("Server returned an empty response");
       }
@@ -138,7 +138,7 @@ async function handlePhotoSubmit(e: React.FormEvent) {
   return (
     <div className="max-w-xl mx-auto px-4 py-8">
       <Link
-        href="/meals/recipes"
+        href="/meal-plans/recipes"
         className="text-sm text-orange-600 hover:text-orange-800 font-medium"
       >
         ← Back to recipes

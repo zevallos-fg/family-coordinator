@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { addPantryItemAction, searchIngredientsAction } from "@/app/(app)/meals/actions";
+import { addPantryItemAction, searchIngredientsAction } from "@/app/(app)/meal-plans/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 

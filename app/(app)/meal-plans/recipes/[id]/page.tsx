@@ -1,6 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { RecipeDetail } from "@/components/meals/RecipeDetail";
+import { RecipeDetail } from "@/components/meal-plans/RecipeDetail";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -22,7 +22,7 @@ export default async function RecipeDetailPage({ params }: Props) {
 
   const { data: recipe } = await supabase
     .from("recipes")
-    .select("id, title, servings, cook_time_min, source_url, instructions, recipe_ingredients(amount, unit, notes, ingredients(canonical_name))")
+    .select("id, title, description, servings, prep_time_min, cook_time_min, tags, source_url, instructions, recipe_ingredients(amount, unit, notes, ingredients(canonical_name))")
     .eq("id", id)
     .eq("family_id", membership.family_id)
     .maybeSingle();
@@ -57,8 +57,11 @@ export default async function RecipeDetailPage({ params }: Props) {
     <RecipeDetail
       id={recipe.id}
       title={recipe.title}
+      description={recipe.description}
       servings={recipe.servings}
+      prepTimeMin={recipe.prep_time_min}
       cookTimeMin={recipe.cook_time_min}
+      tags={recipe.tags}
       sourceUrl={recipe.source_url}
       instructions={instructions}
       ingredients={ingredients}

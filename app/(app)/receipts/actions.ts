@@ -272,6 +272,6 @@ export async function addReceiptItemsToPantryAction(
     addedCount++;
   }
 
-  revalidatePath("/meals");
+  revalidatePath("/meal-plans");
   return { ok: true, addedCount };
 }

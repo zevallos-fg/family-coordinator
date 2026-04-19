@@ -18,33 +18,39 @@ export type Database = {
         Row: {
           cost_cents: number | null
           created_at: string
+          error_message: string | null
           family_id: string | null
           id: string
           input_tokens: number | null
           model: string
           output_tokens: number | null
+          response_preview: string | null
           skill_name: string
           user_id: string | null
         }
         Insert: {
           cost_cents?: number | null
           created_at?: string
+          error_message?: string | null
           family_id?: string | null
           id?: string
           input_tokens?: number | null
           model: string
           output_tokens?: number | null
+          response_preview?: string | null
           skill_name: string
           user_id?: string | null
         }
         Update: {
           cost_cents?: number | null
           created_at?: string
+          error_message?: string | null
           family_id?: string | null
           id?: string
           input_tokens?: number | null
           model?: string
           output_tokens?: number | null
+          response_preview?: string | null
           skill_name?: string
           user_id?: string | null
         }
@@ -1934,6 +1940,14 @@ export type Database = {
           target_user_id: string
         }
         Returns: string
+      }
+      fn_skill_update_diagnostics: {
+        Args: {
+          p_error_message?: string
+          p_response_preview?: string
+          p_usage_id: string
+        }
+        Returns: undefined
       }
       fn_user_in_family: {
         Args: { target_family_id: string }

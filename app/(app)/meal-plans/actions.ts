@@ -102,18 +102,22 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
   }
 
   // Total time: use cook_time_min for the sum
-  const cookTimeMin = recipe.totalTimeMin ?? null;
+  const cookTimeMin = recipe.cookTimeMin ?? recipe.totalTimeMin ?? null;
+  const prepTimeMin = recipe.prepTimeMin ?? null;
 
-  // Insert recipe
+  // Insert recipe with all enriched fields from the upgraded importer
   const { data: newRecipe, error: recipeErr } = await supabase
     .from("recipes")
     .insert({
       family_id: familyId,
       title: recipe.name,
+      description: recipe.description,
       source_url: recipe.sourceUrl,
       servings: recipe.servings,
+      prep_time_min: prepTimeMin,
       cook_time_min: cookTimeMin,
-      instructions: JSON.stringify(recipe.instructions),
+      tags: recipe.tags.length > 0 ? recipe.tags : null,
+      instructions: recipe.instructions.length > 0 ? JSON.stringify(recipe.instructions) : null,
       created_by_user_id: user.id,
     })
     .select("id")
@@ -136,7 +140,7 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
     await supabase.from("recipe_ingredients").insert(ingredientRows);
   }
 
-  revalidatePath("/meals/recipes");
+  revalidatePath("/meal-plans/recipes");
   return { recipeId: newRecipe.id };
 }
 
@@ -207,16 +211,19 @@ export async function importRecipeFromPhotoAction(
     }
   }
 
-  // Insert recipe — note source_url is empty for photo imports
+  // Insert recipe with enriched fields — source_url is empty for photo imports
   const { data: newRecipe, error: recipeErr } = await supabase
     .from("recipes")
     .insert({
       family_id: familyId,
       title: recipe.name,
+      description: recipe.description,
       source_url: "",
       servings: recipe.servings,
-      cook_time_min: recipe.totalTimeMin ?? null,
-      instructions: JSON.stringify(recipe.instructions),
+      prep_time_min: recipe.prepTimeMin ?? null,
+      cook_time_min: recipe.cookTimeMin ?? recipe.totalTimeMin ?? null,
+      tags: recipe.tags.length > 0 ? recipe.tags : null,
+      instructions: recipe.instructions.length > 0 ? JSON.stringify(recipe.instructions) : null,
       created_by_user_id: user.id,
     })
     .select("id")
@@ -239,7 +246,7 @@ export async function importRecipeFromPhotoAction(
     await supabase.from("recipe_ingredients").insert(ingredientRows);
   }
 
-  revalidatePath("/meals/recipes");
+  revalidatePath("/meal-plans/recipes");
   return { recipeId: newRecipe.id };
 }
 export async function deleteRecipeAction(recipeId: string): Promise<{ error?: string }> {
@@ -257,7 +264,7 @@ export async function deleteRecipeAction(recipeId: string): Promise<{ error?: st
     .eq("family_id", familyId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/recipes");
+  revalidatePath("/meal-plans/recipes");
   return {};
 }
 
@@ -309,7 +316,7 @@ export async function addPantryItemAction(data: {
   });
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/pantry");
+  revalidatePath("/meal-plans/pantry");
   return {};
 }
 
@@ -328,7 +335,7 @@ export async function updatePantryItemAction(id: string, amount: number): Promis
     .eq("family_id", familyId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/pantry");
+  revalidatePath("/meal-plans/pantry");
   return {};
 }
 
@@ -347,7 +354,7 @@ export async function removePantryItemAction(id: string): Promise<{ error?: stri
     .eq("family_id", familyId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/pantry");
+  revalidatePath("/meal-plans/pantry");
   return {};
 }
 
@@ -555,8 +562,8 @@ async function runPlanGeneration(
     await supabase.from("grocery_items").insert(groceryRows);
   }
 
-  revalidatePath("/meals");
-  revalidatePath("/meals/plan");
+  revalidatePath("/meal-plans");
+  revalidatePath("/meal-plans");
   return { planId: mealPlan.id };
 }
 
@@ -584,6 +591,6 @@ export async function swapMealEntryAction(entryId: string, newRecipeId: string):
     .eq("id", entryId);
 
   if (error) return { error: error.message };
-  revalidatePath("/meals/plan");
+  revalidatePath("/meal-plans");
   return {};
 }

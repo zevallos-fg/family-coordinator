@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { MealPlanCard } from "./MealPlanCard";
-import { swapMealEntryAction } from "@/app/(app)/meals/actions";
+import { swapMealEntryAction } from "@/app/(app)/meal-plans/actions";
 
 interface Entry {
   id: string;

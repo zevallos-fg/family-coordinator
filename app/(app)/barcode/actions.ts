@@ -165,7 +165,7 @@ export async function addBarcodeToPantryAction(
     });
   }
 
-  revalidatePath("/meals");
+  revalidatePath("/meal-plans");
   return { ok: true };
 }
 

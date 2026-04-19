@@ -1,5 +1,7 @@
 # T3 — Meal Planning — Complete
 
+> **Renamed in v0.2.1:** Routes moved from `/meals/*` → `/meal-plans/*`. Components moved from `components/meals/` → `components/meal-plans/`. Actions at `app/(app)/meal-plans/actions.ts`.
+
 ## Shipped
 
 - **Recipe import** (URL → family-recipe-importer → DB): paste any recipe URL, Haiku extracts structured data, stored in `recipes` + `ingredients` + `recipe_ingredients`

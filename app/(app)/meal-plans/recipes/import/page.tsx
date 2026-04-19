@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { RecipeImportForm } from "@/components/meals/RecipeImportForm";
+import { RecipeImportForm } from "@/components/meal-plans/RecipeImportForm";
 
 export const maxDuration = 60;
 

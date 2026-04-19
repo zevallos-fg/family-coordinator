@@ -11,30 +11,18 @@ import {
   buildImageUserPrompt,
 } from "./prompt";
 
-/**
- * Input is a discriminated union — either URL mode (fetch HTML, send text)
- * or IMAGE mode (send photo bytes to a vision-enabled model).
- *
- * URL mode is the original flow. IMAGE mode sidesteps bot-detection on
- * Cloudflare-protected recipe sites and handles cookbook pages and
- * handwritten cards.
- */
 export type Input =
-  | {
-      mode: "url";
-      url: string;
-      html: string;
-    }
-  | {
-      mode: "image";
-      imageBase64: string;
-      imageMimeType: "image/jpeg" | "image/png" | "image/webp";
-    };
+  | { mode: "url"; url: string; html: string }
+  | { mode: "image"; imageBase64: string; imageMimeType: "image/jpeg" | "image/png" | "image/webp" };
 
 export interface Output {
   name: string;
+  description: string | null;
   servings: number;
+  prepTimeMin: number | null;
+  cookTimeMin: number | null;
   totalTimeMin: number | null;
+  tags: string[];
   instructions: string[];
   ingredients: Array<{
     canonicalName: string;
@@ -54,11 +42,15 @@ const ingredientSchema = z.object({
 
 const outputSchema = z.object({
   name: z.string().min(1),
+  description: z.string().nullable().default(null),
   servings: z.number().int().positive().default(4),
-  totalTimeMin: z.number().int().positive().nullable(),
-  instructions: z.array(z.string().min(1)),
+  prep_time_min: z.number().int().positive().nullable().default(null),
+  cook_time_min: z.number().int().positive().nullable().default(null),
+  totalTimeMin: z.number().int().positive().nullable().default(null),
+  tags: z.array(z.string().min(1)).default([]),
+  instructions: z.array(z.string().min(1)).default([]),
   ingredients: z.array(ingredientSchema),
-  sourceUrl: z.string(),
+  sourceUrl: z.string().default(""),
 });
 
 export const run: SkillRunner<Input, Output> = async (
@@ -66,19 +58,11 @@ export const run: SkillRunner<Input, Output> = async (
   ctx: SkillContext
 ): Promise<SkillResult<Output>> => {
   if (input.mode === "url") {
-    if (!input.url?.trim()) {
-      return { ok: false, error: { code: "invalid_input", message: "url is required" } };
-    }
-    if (!input.html?.trim()) {
-      return { ok: false, error: { code: "invalid_input", message: "html is required" } };
-    }
+    if (!input.url?.trim()) return { ok: false, error: { code: "invalid_input", message: "url is required" } };
+    if (!input.html?.trim()) return { ok: false, error: { code: "invalid_input", message: "html is required" } };
   } else if (input.mode === "image") {
-    if (!input.imageBase64) {
-      return { ok: false, error: { code: "invalid_input", message: "imageBase64 is required" } };
-    }
-    if (!input.imageMimeType) {
-      return { ok: false, error: { code: "invalid_input", message: "imageMimeType is required" } };
-    }
+    if (!input.imageBase64) return { ok: false, error: { code: "invalid_input", message: "imageBase64 is required" } };
+    if (!input.imageMimeType) return { ok: false, error: { code: "invalid_input", message: "imageMimeType is required" } };
   } else {
     return { ok: false, error: { code: "invalid_input", message: "unknown input mode" } };
   }
@@ -89,16 +73,14 @@ export const run: SkillRunner<Input, Output> = async (
           skillName: "family-recipe-importer",
           tier: "haiku" as const,
           system: SYSTEM_PROMPT,
-          maxTokens: 1500,
-          messages: [
-            { role: "user" as const, content: buildUserPrompt(input.html, input.url) },
-          ],
+          maxTokens: 2000,
+          messages: [{ role: "user" as const, content: buildUserPrompt(input.html, input.url) }],
         }
       : {
           skillName: "family-recipe-importer",
           tier: "haiku" as const,
           system: IMAGE_SYSTEM_PROMPT,
-          maxTokens: 1500,
+          maxTokens: 2000,
           messages: [
             {
               role: "user" as const,
@@ -136,16 +118,27 @@ export const run: SkillRunner<Input, Output> = async (
       };
     }
     const parsed = outputSchema.parse(raw);
-    return { ok: true, data: parsed, usage: result.usage };
+    const output: Output = {
+      name: parsed.name,
+      description: parsed.description,
+      servings: parsed.servings,
+      prepTimeMin: parsed.prep_time_min,
+      cookTimeMin: parsed.cook_time_min,
+      totalTimeMin: parsed.totalTimeMin,
+      tags: parsed.tags,
+      instructions: parsed.instructions,
+      ingredients: parsed.ingredients,
+      sourceUrl: parsed.sourceUrl,
+    };
+    return { ok: true, data: output, usage: result.usage };
   } catch (err) {
     return {
       ok: false,
       error: {
         code: "parse_error",
-        message:
-          err instanceof Error
-            ? `Response did not match expected shape: ${err.message}`
-            : "Response parse failed",
+        message: err instanceof Error
+          ? `Response did not match expected shape: ${err.message}`
+          : "Response parse failed",
       },
     };
   }
