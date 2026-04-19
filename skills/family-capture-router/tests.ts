@@ -10,12 +10,13 @@ vi.mock("../_lib/runner", () => ({
 }));
 
 // Mock posthog-node
-vi.mock("posthog-node", () => ({
-  PostHog: vi.fn().mockImplementation(() => ({
-    capture: vi.fn(),
-    shutdown: vi.fn(),
-  })),
-}));
+vi.mock("posthog-node", () => {
+  class PostHog {
+    capture = vi.fn();
+    shutdown = vi.fn().mockResolvedValue(undefined);
+  }
+  return { PostHog };
+});
 
 // Mock next/headers (required by server supabase client, pulled in transitively)
 vi.mock("next/headers", () => ({
