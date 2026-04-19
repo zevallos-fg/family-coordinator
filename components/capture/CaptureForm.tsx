@@ -78,7 +78,8 @@ export function CaptureForm() {
 
       <div className="flex justify-between items-center">
         <p className="text-xs text-stone-400">
-          Grocery items auto-routed · Cmd+Enter to save
+          Grocery items auto-routed
+          <span className="hidden sm:inline"> · Cmd+Enter to save</span>
         </p>
         <button
           onClick={submit}

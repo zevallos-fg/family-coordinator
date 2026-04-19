@@ -26,8 +26,8 @@ export default async function ReceiptsPage() {
     .limit(50);
 
   return (
-    <main className="min-h-screen bg-stone-50">
-      <div className="max-w-lg mx-auto px-4 py-8">
+    <main>
+      <div className="space-y-6">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-stone-800">Receipts</h1>
           <Link

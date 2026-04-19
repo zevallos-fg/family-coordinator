@@ -89,7 +89,7 @@ export default async function CaregiverHubPage({ searchParams }: Props) {
   const hasCaregivers = (caregivers ?? []).length > 0;
 
   return (
-    <main className="mx-auto max-w-2xl p-6 space-y-6">
+    <main className="space-y-6">
       {/* Week picker */}
       <div className="bg-white rounded-xl border border-foreground/10 px-4 py-3">
         <WeekPickerNav maxWeeksForward={8} minWeeksBack={4} />

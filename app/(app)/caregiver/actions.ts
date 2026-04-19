@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import { toTitleCase } from "@/lib/format/titleCase";
 import { withSkillContext } from "@/lib/skill-action";
 import { run as runBriefSkill } from "@/skills/family-caregiver-brief";
 import { run as runRecapSkill } from "@/skills/family-caregiver-recap";
@@ -41,8 +42,8 @@ export async function createCaregiver(formData: FormData) {
 
   const { error } = await supabase.from("caregivers").insert({
     family_id: familyId,
-    name: name.trim(),
-    role: role.trim(),
+    name: toTitleCase(name.trim()),
+    role: toTitleCase(role.trim()),
     email: email?.trim() || null,
     phone: phone?.trim() || null,
     notes: notes?.trim() || null,

@@ -35,7 +35,12 @@ export function QuickBriefModal({ caregivers, kids }: QuickBriefModalProps) {
 
   if (!open) {
     return (
-      <Button onClick={() => setOpen(true)}>Quick brief</Button>
+      <Button
+        onClick={() => setOpen(true)}
+        className="bg-amber-600 hover:bg-amber-700 text-white"
+      >
+        Quick brief
+      </Button>
     );
   }
 

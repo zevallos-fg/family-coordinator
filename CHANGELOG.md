@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0] — 2026-04-19
+
+### Fixed
+- Grocery badge shows real total count, not capped preview count (#1)
+- Dashboard schedule CTA relabeled "Plan next week →" (#6)
+- Dashboard pending empty-state adds "+ Capture →" link (#16)
+- WeekPicker "This week" button restored on mobile — was hidden behind sm: breakpoint (#3)
+- WeekPicker label changed from "Today" to "This week" to match aria intent (#4)
+- Mobile Cmd+Enter keyboard hint hidden on small screens (#7)
+- Quick brief button now uses amber primary color (#8)
+- Grocery list checkbox + delete tap targets ≥44px (Apple HIG / WCAG 2.5.5) (#12)
+- Caregiver phone numbers formatted as (XXX) XXX-XXXX (#13)
+- New caregiver names + roles normalized to Title Case on save (#14)
+- Caregiver + Receipts list pages use consistent full-width layout (#15)
+- MealPlanCard titles use `line-clamp-2` — no single-line truncation (#10)
+
+### Added
+- `app/not-found.tsx` — 404 page with app shell + back-to-dashboard CTA (#5)
+- `lib/format/phone.ts` — phone number formatter
+- `lib/format/titleCase.ts` — title-case helper with name particle support (de, la, van, von)
+- 13 Playwright regression tests for PR-2 scope
+
+---
+
 ## [0.2.2] — 2026-04-19
 
 ### Fixed
