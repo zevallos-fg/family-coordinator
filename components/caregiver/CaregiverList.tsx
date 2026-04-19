@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { deleteCaregiver } from "@/app/(app)/caregiver/actions";
+import { formatPhone } from "@/lib/format/phone";
 
 const ROLE_LABELS: Record<string, string> = {
   nanny: "Nanny",
@@ -63,7 +64,7 @@ export function CaregiverList({ caregivers }: { caregivers: Caregiver[] }) {
               </span>
             </div>
             {c.phone && (
-              <p className="text-sm text-foreground/60 mt-0.5">{c.phone}</p>
+              <p className="text-sm text-foreground/60 mt-0.5">{formatPhone(c.phone)}</p>
             )}
             {c.email && (
               <p className="text-sm text-foreground/60">{c.email}</p>
