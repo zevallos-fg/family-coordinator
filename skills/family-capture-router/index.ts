@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { parseJsonResponse } from "../_lib/parse";
+
 import { callSkill } from "../_lib/runner";
 import type { SkillContext, SkillResult, SkillRunner } from "../_lib/types";
 
@@ -52,7 +54,7 @@ export const run: SkillRunner<Input, Output> = async (
   if (!result.ok || !result.data) return result as unknown as SkillResult<Output>;
 
   try {
-    const parsed = outputSchema.parse(JSON.parse(result.data));
+    const parsed = outputSchema.parse(parseJsonResponse(result.data));
     return {
       ok: true,
       data: parsed,

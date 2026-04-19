@@ -2,6 +2,7 @@
 
 import { randomBytes } from "crypto";
 import { redirect } from "next/navigation";
+
 import { createClient } from "@/lib/supabase/server";
 
 export async function createFamily(formData: FormData) {
@@ -16,27 +17,16 @@ export async function createFamily(formData: FormData) {
 
   if (!name) return { error: "Family name is required." };
 
-  const { data: family, error: familyErr } = await supabase
-    .from("families")
-    .insert({ name, city, timezone })
-    .select("id")
-    .single();
+  const { data: familyId, error } = await supabase.rpc(
+    "fn_create_family_and_claim",
+    { p_name: name, p_city: city ?? undefined, p_timezone: timezone }
+  );
 
-  if (familyErr || !family) {
-    return { error: familyErr?.message ?? "Failed to create family." };
+  if (error || !familyId) {
+    return { error: error?.message ?? "Failed to create family." };
   }
 
-  const { error: memberErr } = await supabase.from("family_members").insert({
-    family_id: family.id,
-    user_id: authData.user.id,
-    role: "owner",
-  });
-
-  if (memberErr) {
-    return { error: memberErr.message };
-  }
-
-  return { familyId: family.id };
+  return { familyId };
 }
 
 export async function sendInvite(familyId: string, formData: FormData) {
@@ -48,7 +38,9 @@ export async function sendInvite(familyId: string, formData: FormData) {
   if (!email) return { error: "Email is required." };
 
   const token = randomBytes(16).toString("hex");
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + 7 * 24 * 60 * 60 * 1000
+  ).toISOString();
 
   const { error } = await supabase.from("family_invites").insert({
     family_id: familyId,
@@ -59,6 +51,24 @@ export async function sendInvite(familyId: string, formData: FormData) {
   });
 
   if (error) return { error: error.message };
-
   return { token };
+}
+
+export async function acceptInvite(token: string) {
+  const supabase = await createClient();
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData?.user) redirect("/login");
+
+  const { data: familyId, error } = await supabase.rpc("fn_accept_invite", {
+    p_token: token,
+  });
+
+  if (error || !familyId) {
+    return {
+      error:
+        error?.message ?? "Invite not found, already accepted, or expired.",
+    };
+  }
+
+  return { familyId };
 }
