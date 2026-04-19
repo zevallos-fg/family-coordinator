@@ -35,12 +35,14 @@ export function MealPlanWeek({ entries, recipes, rationale }: MealPlanWeekProps)
   const [swappingEntryId, setSwappingEntryId] = useState<string | null>(null);
   const [swapping, setSwapping] = useState(false);
   const [localEntries, setLocalEntries] = useState<Entry[]>(entries);
+  const [swapQuery, setSwapQuery] = useState("");
 
   // Group entries by date
   const dates = [...new Set(localEntries.map(e => e.date))].sort();
 
   function openSwap(entryId: string) {
     setSwappingEntryId(entryId);
+    setSwapQuery("");
   }
 
   async function doSwap(newRecipeId: string) {
@@ -107,9 +109,21 @@ export function MealPlanWeek({ entries, recipes, rationale }: MealPlanWeekProps)
       {swappingEntryId && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => setSwappingEntryId(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-            <h3 className="font-semibold text-gray-900 mb-4">Pick a different recipe</h3>
-            <div className="space-y-2 max-h-72 overflow-y-auto">
-              {recipes.map(r => (
+            <h3 className="font-semibold text-gray-900 mb-3">Pick a different recipe</h3>
+            <input
+              type="search"
+              placeholder="Search recipes…"
+              value={swapQuery}
+              onChange={(e) => setSwapQuery(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-3 focus:outline-none focus:ring-2 focus:ring-orange-300"
+              autoFocus
+            />
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {recipes
+                .filter((r) =>
+                  r.title.toLowerCase().includes(swapQuery.toLowerCase())
+                )
+                .map(r => (
                 <button
                   key={r.id}
                   onClick={() => doSwap(r.id)}

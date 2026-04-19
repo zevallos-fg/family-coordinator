@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/meal-plans", label: "Meal Plans" },
   { href: "/receipts", label: "Receipts" },
   { href: "/caregiver", label: "Caregiver" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export function TopNav() {
