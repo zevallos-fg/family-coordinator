@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.2] — 2026-04-19
+
+### Fixed
+- Client-only `Greeting` + `TodayDate` components resolve React hydration error #418 (#11, #22)
+  — greeting now shows correct local-time bucket (morning/afternoon/evening/night)
+  — evening threshold corrected: 17:00–21:59 (was implicitly missing "night" bucket)
+- 18 pre-existing lint errors cleaned: `<a>` → `<Link>` in 4 files, unescaped entities, refs accessed during render in `receipts/new`, setState in effect in `PantryAddForm`
+
+### Added
+- Playwright E2E test runner with Chromium + WebKit projects (`npm run test:e2e`)
+- GitHub Actions workflow for Playwright on PR and main push (`.github/workflows/playwright.yml`)
+- `tests/e2e/dashboard-greeting.spec.ts` — regression for greeting correctness + hydration cleanliness
+
+### Engineering note
+**Sentry action required (Fernando):** Configure a Sentry alert to fire on any React error #418 in production. Should be 0 after this deploy.
+**GitHub Secrets required (Fernando):** Add all 8 env vars from `.env.local` to GitHub repo secrets for CI to build and run E2E tests.
+
+---
+
 ## [0.2.1] — 2026-04-19
 
 ### Renamed

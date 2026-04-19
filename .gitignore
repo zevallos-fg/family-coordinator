@@ -32,3 +32,8 @@ next-env.d.ts
 # Supabase CLI metadata
 supabase/.temp/
 supabase/.branches/
+
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/
