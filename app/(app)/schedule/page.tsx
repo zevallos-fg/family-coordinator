@@ -2,21 +2,16 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { WeekView } from "@/components/schedule/WeekView";
+import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
+import { parseWeekParam, formatWeekParam, addDays } from "@/lib/week";
 
-function getWeekRange() {
-  const now = new Date();
-  const day = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - day + (day === 0 ? -6 : 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return {
-    start: monday.toISOString().slice(0, 10),
-    end: sunday.toISOString().slice(0, 10),
-  };
+interface Props {
+  searchParams: Promise<{ week?: string }>;
 }
 
-export default async function SchedulePage() {
+export default async function SchedulePage({ searchParams }: Props) {
+  const { week: weekParam } = await searchParams;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -31,14 +26,23 @@ export default async function SchedulePage() {
     .maybeSingle();
   if (!membership) redirect("/onboarding");
 
-  const { start, end } = getWeekRange();
+  const today = new Date();
+  const selectedWeek = parseWeekParam(weekParam ?? null, today);
+  const weekStr = formatWeekParam(selectedWeek);
+
+  if (!weekParam) {
+    redirect(`/schedule?week=${weekStr}`);
+  }
+
+  // Fetch Mon–Sun for selected week
+  const weekEnd = formatWeekParam(addDays(selectedWeek, 6));
 
   const { data: duties } = await supabase
     .from("schedule_entries")
     .select("id, date, duty_type, notes")
     .eq("family_id", membership.family_id)
-    .gte("date", start)
-    .lte("date", end)
+    .gte("date", weekStr)
+    .lte("date", weekEnd)
     .order("date", { ascending: true });
 
   return (
@@ -46,14 +50,19 @@ export default async function SchedulePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-800">Schedule</h1>
-          <p className="text-sm text-stone-400 mt-0.5">This week&apos;s Leo duties</p>
+          <p className="text-sm text-stone-400 mt-0.5">Leo&apos;s care duties by week</p>
         </div>
         <Link
-          href="/schedule/upload"
+          href={`/schedule/upload?week=${weekStr}`}
           className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 transition-colors"
         >
           Upload calendar
         </Link>
+      </div>
+
+      {/* Week picker */}
+      <div className="bg-white rounded-xl border border-stone-200 px-4 py-3">
+        <WeekPickerNav maxWeeksForward={8} minWeeksBack={4} />
       </div>
 
       <WeekView duties={duties ?? []} />

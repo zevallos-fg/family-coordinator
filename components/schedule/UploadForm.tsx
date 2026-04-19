@@ -1,24 +1,21 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { processScreenshot, saveReconciliation } from "@/app/(app)/schedule/actions";
-import type { Output } from "@/skills/family-schedule-reconciler";
 import { useRouter } from "next/navigation";
-
-function getWeekStart() {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d.setDate(diff));
-  return monday.toISOString().slice(0, 10);
-}
+import { processScreenshot, saveReconciliation, checkDatesHaveDuties } from "@/app/(app)/schedule/actions";
+import type { Output } from "@/skills/family-schedule-reconciler";
+import { formatWeekRange } from "@/lib/week";
 
 function formatDayDate(isoDate: string) {
   const d = new Date(isoDate + "T00:00:00");
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-export function UploadForm() {
+interface UploadFormProps {
+  weekOf: string; // YYYY-MM-DD (Monday of the target week)
+}
+
+export function UploadForm({ weekOf }: UploadFormProps) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -26,8 +23,10 @@ export function UploadForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Output | null>(null);
-  const [weekOf] = useState(getWeekStart());
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
   const [, startTransition] = useTransition();
+
+  const weekLabel = formatWeekRange(new Date(weekOf + "T12:00:00"));
 
   function handleFile(file: File) {
     const url = URL.createObjectURL(file);
@@ -64,7 +63,7 @@ export function UploadForm() {
     setResult(res.data ?? null);
   }
 
-  async function handleSave() {
+  async function doSave() {
     if (!result) return;
     setSaving(true);
     const res = await saveReconciliation(result);
@@ -73,11 +72,28 @@ export function UploadForm() {
       setError(res.error ?? "Save failed.");
       return;
     }
-    startTransition(() => router.push("/schedule"));
+    startTransition(() => router.push(`/schedule?week=${weekOf}`));
+  }
+
+  async function handleSave() {
+    if (!result) return;
+    // UX safety net: check if this week already has duties
+    const dates = result.days.map((d) => d.date);
+    const hasDuties = await checkDatesHaveDuties(dates);
+    if (hasDuties) {
+      setShowReplaceConfirm(true);
+    } else {
+      await doSave();
+    }
   }
 
   return (
     <div className="space-y-5">
+      {/* Target week label */}
+      <div className="text-xs text-stone-500 bg-stone-50 rounded-lg p-2.5">
+        Assigning duties for: <span className="font-medium text-stone-700">{weekLabel}</span>
+      </div>
+
       {/* Drop zone */}
       <div
         onDrop={handleDrop}
@@ -169,6 +185,42 @@ export function UploadForm() {
             >
               {saving ? "Saving…" : "Save schedule"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Replace confirmation dialog */}
+      {showReplaceConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          onClick={() => setShowReplaceConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl bg-white shadow-xl p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-semibold text-stone-900">Replace existing schedule?</h3>
+            <p className="text-sm text-stone-600">
+              The week of {weekLabel} already has schedule entries. Saving will replace them with the newly analyzed duties.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowReplaceConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl border border-stone-300 text-stone-600 text-sm hover:bg-stone-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowReplaceConfirm(false);
+                  await doSave();
+                }}
+                disabled={saving}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:bg-stone-300 transition-colors"
+              >
+                {saving ? "Replacing…" : "Replace"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -2,8 +2,15 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ShiftForm } from "@/components/caregiver/ShiftForm";
+import { parseWeekParam, formatWeekParam, addDays } from "@/lib/week";
 
-export default async function NewShiftPage() {
+interface Props {
+  searchParams: Promise<{ week?: string }>;
+}
+
+export default async function NewShiftPage({ searchParams }: Props) {
+  const { week: weekParam } = await searchParams;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -31,17 +38,39 @@ export default async function NewShiftPage() {
       .order("created_at"),
   ]);
 
+  // Compute default start time based on selected week
+  const today = new Date();
+  const selectedWeek = parseWeekParam(weekParam ?? null, today);
+  const weekStr = formatWeekParam(selectedWeek);
+  const weekEndDate = addDays(selectedWeek, 6);
+
+  // If today falls within the selected week → use today at 08:00 local
+  // Otherwise → use Monday of selected week at 08:00 local
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const isCurrentWeek =
+    todayMidnight >= selectedWeek && todayMidnight <= weekEndDate;
+
+  const defaultDateBase = isCurrentWeek ? today : selectedWeek;
+  const defaultStartAt = new Date(
+    defaultDateBase.getFullYear(),
+    defaultDateBase.getMonth(),
+    defaultDateBase.getDate(),
+    8, // 08:00 local
+    0
+  );
+
   return (
     <main className="mx-auto max-w-lg p-6 space-y-6">
       <div>
-        <Link href="/caregiver/shifts" className="text-sm text-foreground/40 hover:text-foreground/60">
-          ← Shifts
+        <Link href={`/caregiver?week=${weekStr}`} className="text-sm text-foreground/40 hover:text-foreground/60">
+          ← Caregiver Hub
         </Link>
         <h1 className="text-2xl font-semibold mt-1">New shift</h1>
       </div>
       <ShiftForm
         caregivers={caregivers ?? []}
         kids={(kids ?? []).map((k) => ({ id: k.id, name: k.name }))}
+        defaultStartAt={defaultStartAt}
       />
     </main>
   );

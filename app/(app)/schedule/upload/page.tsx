@@ -1,12 +1,22 @@
 import Link from "next/link";
 import { UploadForm } from "@/components/schedule/UploadForm";
+import { parseWeekParam, formatWeekParam } from "@/lib/week";
 
-export default function ScheduleUploadPage() {
+interface Props {
+  searchParams: Promise<{ week?: string }>;
+}
+
+export default async function ScheduleUploadPage({ searchParams }: Props) {
+  const { week: weekParam } = await searchParams;
+  const today = new Date();
+  const selectedWeek = parseWeekParam(weekParam ?? null, today);
+  const weekStr = formatWeekParam(selectedWeek);
+
   return (
     <div className="max-w-xl mx-auto space-y-5">
       <div className="flex items-center gap-3">
         <Link
-          href="/schedule"
+          href={`/schedule?week=${weekStr}`}
           className="text-sm text-stone-400 hover:text-stone-600"
         >
           ← Schedule
@@ -19,7 +29,7 @@ export default function ScheduleUploadPage() {
         and assign Leo&apos;s care duties for each day. Red-colored events are ignored.
       </p>
 
-      <UploadForm />
+      <UploadForm weekOf={weekStr} />
     </div>
   );
 }

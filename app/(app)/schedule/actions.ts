@@ -114,6 +114,31 @@ export async function saveReconciliation(reconciliation: Output) {
   return { ok: true };
 }
 
+// Check whether any schedule_entries exist for a set of ISO dates (family-scoped).
+export async function checkDatesHaveDuties(dates: string[]): Promise<boolean> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data: membership } = await supabase
+    .from("family_members")
+    .select("family_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+  if (!membership) return false;
+
+  const { count } = await supabase
+    .from("schedule_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("family_id", membership.family_id)
+    .in("date", dates);
+
+  return (count ?? 0) > 0;
+}
+
 export async function deleteEntry(id: string) {
   const supabase = await createClient();
   const {

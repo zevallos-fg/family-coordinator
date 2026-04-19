@@ -373,7 +373,12 @@ export async function searchIngredientsAction(query: string): Promise<Array<{ id
 
 // ── Meal plan actions ─────────────────────────────────────────────────────────
 
-export async function generatePlanAction(weekOf: string): Promise<{ error?: string; planId?: string }> {
+type GeneratePlanResult =
+  | { planId: string; requiresConfirmation?: undefined; error?: undefined }
+  | { requiresConfirmation: true; existingPlanId: string; existingCreatedAt: string; planId?: undefined; error?: undefined }
+  | { error: string; planId?: undefined; requiresConfirmation?: undefined };
+
+export async function generatePlanAction(weekOf: string): Promise<GeneratePlanResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
@@ -381,6 +386,58 @@ export async function generatePlanAction(weekOf: string): Promise<{ error?: stri
   const familyId = await getFamilyId(supabase, user.id);
   if (!familyId) return { error: "No family found — complete onboarding first" };
 
+  // Check for existing plan — return confirmation request without calling Sonnet
+  const { data: existing } = await supabase
+    .from("meal_plans")
+    .select("id, created_at")
+    .eq("family_id", familyId)
+    .eq("week_start_date", weekOf)
+    .maybeSingle();
+
+  if (existing) {
+    return {
+      requiresConfirmation: true,
+      existingPlanId: existing.id,
+      existingCreatedAt: existing.created_at,
+    };
+  }
+
+  return runPlanGeneration(supabase, familyId, weekOf, user.id);
+}
+
+// Replace an existing plan: delete old → generate new, all guarded so no half-states on Sonnet failure.
+export async function replacePlanAction(
+  existingPlanId: string,
+  weekOf: string
+): Promise<{ error?: string; planId?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found" };
+
+  // Verify plan belongs to this family
+  const { data: planCheck } = await supabase
+    .from("meal_plans")
+    .select("id")
+    .eq("id", existingPlanId)
+    .eq("family_id", familyId)
+    .maybeSingle();
+  if (!planCheck) return { error: "Plan not found" };
+
+  // Run Sonnet BEFORE deleting — if generation fails, the old plan survives
+  const result = await runPlanGeneration(supabase, familyId, weekOf, user.id, existingPlanId);
+  return result;
+}
+
+async function runPlanGeneration(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  familyId: string,
+  weekOf: string,
+  userId: string,
+  deletePlanId?: string
+): Promise<{ error: string; planId?: undefined } | { planId: string; error?: undefined }> {
   // Load recipes with ingredients
   const { data: recipesRaw } = await supabase
     .from("recipes")
@@ -421,7 +478,7 @@ export async function generatePlanAction(weekOf: string): Promise<{ error?: stri
     }));
 
   // Build 7 days of meals starting from weekOf (Monday)
-  const monday = new Date(weekOf);
+  const monday = new Date(weekOf + "T12:00:00");
   const mealsNeeded = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -451,6 +508,11 @@ export async function generatePlanAction(weekOf: string): Promise<{ error?: stri
     return { error: result.error?.message ?? "Meal plan generation failed" };
   }
 
+  // Sonnet succeeded — now it's safe to delete the old plan (CASCADE clears entries)
+  if (deletePlanId) {
+    await supabase.from("meal_plans").delete().eq("id", deletePlanId);
+  }
+
   const plan = result.data!;
 
   // Insert meal_plan
@@ -475,7 +537,7 @@ export async function generatePlanAction(weekOf: string): Promise<{ error?: stri
     await supabase.from("meal_plan_entries").insert(entryRows);
   }
 
-  // Write grocery delta items — quantity stored as formatted string since schema has quantity: string | null
+  // Write grocery delta items
   const groceryRows = plan.groceryDelta
     .filter(g => (g.quantityNeeded ?? 0) > 0 || g.quantityNeeded === null)
     .map(g => ({
