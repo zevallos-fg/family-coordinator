@@ -88,3 +88,37 @@ Click Deploy. Share the production URL.
 
 ### Step 22c — Google OAuth update
 Update Google OAuth Authorized Redirect URIs to include `https://{vercel-url}/api/auth/callback`.
+
+
+
+
+---
+
+## Production smoke — verified April 19, 2026 02:56 UTC
+
+- Production URL: https://family-coordinator.vercel.app
+- Google OAuth flow: ✓
+- Supabase Auth URL allowlist: ✓
+- Dashboard render with live skill-spend RPC: ✓
+- Session cookies working through Vercel's edge network: ✓
+
+**Database reconciliation post-deploy:**
+- 1 family (Zevallos)
+- 1 family_members (owner)
+- 1 public.users row
+- 3 api_usage rows from local smoke testing
+- Total spend: $0.000378 (3 × $0.000126 per capture-router call)
+
+**Known follow-ups logged:** `docs/POSTBUILD-T1.md`
+
+**Tag:** v0.1.0-foundation points at commit 55b5836.
+
+T1 is production-verified. Wave 1 (T2, T3, T4, T5) unblocked.
+
+
+
+
+
+
+
+
