@@ -445,11 +445,20 @@ async function runPlanGeneration(
   userId: string,
   deletePlanId?: string
 ): Promise<{ error: string; planId?: undefined } | { planId: string; error?: undefined }> {
-  // Load recipes with ingredients
-  const { data: recipesRaw } = await supabase
-    .from("recipes")
-    .select("id, title, servings, cook_time_min, recipe_ingredients(amount, unit, ingredients(canonical_name))")
-    .eq("family_id", familyId);
+  // Load family settings (default_serves) and recipes in parallel
+  const [{ data: familyData }, { data: recipesRaw }] = await Promise.all([
+    supabase
+      .from("families")
+      .select("default_serves")
+      .eq("id", familyId)
+      .maybeSingle(),
+    supabase
+      .from("recipes")
+      .select("id, title, servings, cook_time_min, recipe_ingredients(amount, unit, ingredients(canonical_name))")
+      .eq("family_id", familyId),
+  ]);
+
+  const servingsPerMeal = familyData?.default_serves ?? 4;
 
   if (!recipesRaw || recipesRaw.length === 0) {
     return { error: "No recipes found. Import some recipes first." };
@@ -501,7 +510,7 @@ async function runPlanGeneration(
     pantry,
     mealsNeeded,
     preferences: {
-      servingsPerMeal: 4,
+      servingsPerMeal,
       dislikes: [],
       dietaryConstraints: [],
       varietyPreference: "medium",
