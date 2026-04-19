@@ -19,9 +19,13 @@ export function PantryAddForm({ onAdded }: { onAdded?: () => void }) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!name.trim()) { setSuggestions([]); return; }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
+      if (!name.trim()) {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
       const results = await searchIngredientsAction(name.trim());
       setSuggestions(results);
       setShowSuggestions(results.length > 0);

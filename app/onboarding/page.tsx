@@ -23,7 +23,7 @@ export default async function OnboardingPage() {
       <div className="w-full max-w-md space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome! Let's set up your household.
+            Welcome! Let&apos;s set up your household.
           </h1>
           <p className="mt-1 text-sm text-foreground/60">
             This takes about 30 seconds.

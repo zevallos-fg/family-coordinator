@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { Greeting } from "@/components/dashboard/Greeting";
+import { TodayDate } from "@/components/dashboard/TodayDate";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -27,6 +29,7 @@ export default async function DashboardPage() {
     { data: unresolvedCaptures },
     { data: pendingGrocery },
     { data: userData },
+    { count: groceryTotal },
   ] = await Promise.all([
     supabase
       .from("schedule_entries")
@@ -53,28 +56,22 @@ export default async function DashboardPage() {
       .select("full_name")
       .eq("id", user.id)
       .maybeSingle(),
+    supabase
+      .from("grocery_items")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", familyId)
+      .eq("in_cart", false)
+      .is("completed_at", null),
   ]);
 
   const firstName = userData?.full_name?.split(" ")[0] ?? user.email?.split("@")[0] ?? "there";
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-
-  const dateDisplay = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header — client components avoid SSR/client time mismatch (hydration #418) */}
       <div>
-        <h1 className="text-2xl font-semibold text-stone-800">
-          {greeting}, {firstName}
-        </h1>
-        <p className="text-stone-500 text-sm mt-0.5">
-          {dateDisplay} · {familyName}
-        </p>
+        <Greeting name={firstName} />
+        <TodayDate familyName={familyName} />
       </div>
 
       {/* Today's schedule */}
@@ -82,7 +79,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-medium text-stone-700">Today&apos;s duties</h2>
           <Link href="/schedule" className="text-xs text-amber-600 hover:text-amber-700">
-            Full schedule →
+            Plan next week →
           </Link>
         </div>
         {todayDuties && todayDuties.length > 0 ? (
@@ -137,7 +134,12 @@ export default async function DashboardPage() {
               })}
             </ul>
           ) : (
-            <p className="text-sm text-stone-400 py-3 text-center">All clear!</p>
+            <div className="py-3 text-center">
+              <p className="text-sm text-stone-400">All clear!</p>
+              <Link href="/capture/new" className="text-xs text-amber-600 hover:text-amber-700 mt-1 block">
+                + Capture →
+              </Link>
+            </div>
           )}
         </div>
 
@@ -146,9 +148,9 @@ export default async function DashboardPage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium text-stone-700">
               Grocery list{" "}
-              {pendingGrocery && pendingGrocery.length > 0 && (
+              {(groceryTotal ?? 0) > 0 && (
                 <span className="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded-full">
-                  {pendingGrocery.length}
+                  {groceryTotal}
                 </span>
               )}
             </h2>

@@ -57,9 +57,9 @@ export function WeekPicker({
           onClick={goToToday}
           disabled={onDefaultWeek}
           aria-label="Jump to default week"
-          className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border border-stone-200 text-stone-500 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border border-stone-200 text-stone-500 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          Today
+          This week
         </button>
       )}
 
