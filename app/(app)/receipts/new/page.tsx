@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { ReceiptUploadForm } from "@/components/receipt/ReceiptUploadForm";
 import {
@@ -22,10 +22,8 @@ export default function NewReceiptPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [parsed, setParsed] = useState<ParsedReceipt | null>(null);
-  const imageRef = useRef<{ base64: string; mimeType: string } | null>(null);
-  // knownStores fetched on parse (returned from server action indirectly via parse)
-  // We store them for the preview step
-  const knownStoresRef = useRef<Array<{ id: string; name: string }>>([]);
+  const [imageData, setImageData] = useState<{ base64: string; mimeType: string } | null>(null);
+  const [knownStores, setKnownStores] = useState<Array<{ id: string; name: string }>>([]);
 
   async function handleUpload(formData: FormData) {
     setLoading(true);
@@ -33,7 +31,7 @@ export default function NewReceiptPage() {
       const file = formData.get("receipt") as File;
       const bytes = await file.arrayBuffer();
       const base64 = Buffer.from(bytes).toString("base64");
-      imageRef.current = { base64, mimeType: file.type };
+      setImageData({ base64, mimeType: file.type });
 
       const result = await parseReceiptAction(formData);
       if (!result.ok || !result.parsed) {
@@ -55,8 +53,8 @@ export default function NewReceiptPage() {
     try {
       const result = await saveReceiptAction({
         ...data,
-        imageBase64: imageRef.current?.base64 ?? "",
-        imageMimeType: imageRef.current?.mimeType ?? "image/jpeg",
+        imageBase64: imageData?.base64 ?? "",
+        imageMimeType: imageData?.mimeType ?? "image/jpeg",
       });
       if (!result.ok) {
         toast.error(result.error ?? "Failed to save receipt");
@@ -94,9 +92,9 @@ export default function NewReceiptPage() {
         {phase === "preview" && parsed && (
           <ReceiptParsePreview
             parsed={parsed}
-            imageBase64={imageRef.current?.base64 ?? ""}
-            imageMimeType={imageRef.current?.mimeType ?? "image/jpeg"}
-            knownStores={knownStoresRef.current}
+            imageBase64={imageData?.base64 ?? ""}
+            imageMimeType={imageData?.mimeType ?? "image/jpeg"}
+            knownStores={knownStores}
             onConfirm={handleConfirm}
             onCancel={() => setPhase("upload")}
             saving={saving}

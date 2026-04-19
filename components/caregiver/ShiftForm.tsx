@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { createShift } from "@/app/(app)/caregiver/actions";
 
@@ -42,9 +43,9 @@ export function ShiftForm({
         {caregivers.length === 0 ? (
           <p className="text-sm text-foreground/50">
             No caregivers yet.{" "}
-            <a href="/caregiver/caregivers/new" className="underline">
+            <Link href="/caregiver/caregivers/new" className="underline">
               Add one first.
-            </a>
+            </Link>
           </p>
         ) : (
           <select
@@ -71,9 +72,9 @@ export function ShiftForm({
         {kids.length === 0 ? (
           <p className="text-sm text-foreground/50">
             No kids yet.{" "}
-            <a href="/caregiver/kids/new" className="underline">
+            <Link href="/caregiver/kids/new" className="underline">
               Add one first.
-            </a>
+            </Link>
           </p>
         ) : (
           <>

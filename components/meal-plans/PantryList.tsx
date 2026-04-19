@@ -26,7 +26,7 @@ function formatExpiry(expiresOn: string | null): string {
 function ExpiryBadge({ expiresOn }: { expiresOn: string | null }) {
   if (!expiresOn) return null;
   const d = new Date(expiresOn);
-  const diffDays = Math.ceil((d.getTime() - Date.now()) / 86400000);
+  const diffDays = Math.ceil((d.getTime() - new Date().getTime()) / 86400000);
   const isWarning = diffDays <= 3;
   const label = formatExpiry(expiresOn);
   return (

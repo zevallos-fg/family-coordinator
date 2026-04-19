@@ -115,7 +115,7 @@ export function OnboardingWizard() {
 
       <div className="space-y-1">
         <label htmlFor="email" className="block text-sm font-medium">
-          Partner's email
+          Partner&apos;s email
         </label>
         <Input
           id="email"

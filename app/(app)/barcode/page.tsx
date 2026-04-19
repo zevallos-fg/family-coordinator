@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { BarcodeScanner } from "@/components/barcode/BarcodeScanner";
 import { BarcodeResult } from "@/components/barcode/BarcodeResult";
@@ -37,9 +38,9 @@ export default function BarcodePage() {
     <main className="min-h-screen bg-stone-50">
       <div className="max-w-lg mx-auto px-4 py-8">
         <div className="flex items-center gap-3 mb-6">
-          <a href="/receipts" className="text-stone-400 hover:text-stone-600 text-xl leading-none">
+          <Link href="/receipts" className="text-stone-400 hover:text-stone-600 text-xl leading-none">
             ←
-          </a>
+          </Link>
           <h1 className="text-xl font-bold text-stone-800">Barcode scanner</h1>
         </div>
 
