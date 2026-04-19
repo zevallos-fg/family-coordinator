@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.2.1] — 2026-04-19
+
+### Renamed
+- The Meals section is now "Meal Plans" everywhere: nav, routes, and docs
+- Old `/meals`, `/meals/plan`, `/meals/recipes`, `/meals/pantry` URLs return 404 — use `/meal-plans/*` instead
+- The T3 landing page was removed; `/meal-plans` IS the plan grid (with week navigation from v0.2.0)
+
+### Added
+- `api_usage` now captures `response_preview` (first 500 chars of Sonnet/Haiku output) and `error_message` on every skill call for post-hoc debugging
+- `fn_skill_update_diagnostics` Postgres RPC for secure error reporting from the skill runner
+- Recipe importer now extracts `description`, `tags` (controlled vocabulary), `prep_time_min`, and `cook_time_min` from imported sources; max tokens increased to 2000
+- Recipe list and detail pages now surface descriptions, tag chips (slate-100 style), prep/cook times, and numbered instruction steps
+
+### Fixed
+- Skill runner now captures the `api_usage` row ID returned by `fn_skill_record_usage` and writes `response_preview` immediately after every call — zero additional DB roundtrips on the happy path
+- The 13 existing recipes were backfilled with curated descriptions, tags, times, and instructions (all 13 had null metadata before this patch)
+- Overnight Oats instructions were empty `[]` — backfilled with 4 canonical steps
+- `RecipeDetail` now shows an "No instructions yet" empty state instead of a blank section when instructions are absent
+
+### Unchanged (intentional)
+- `generatePlanAction` logic — data enrichment is the upstream fix; Sonnet call is untouched
+- `family-meal-planner` skill prompt — unchanged
+- Schedule, Caregiver, Dashboard, Capture, Organized, Grocery, Receipts — no route changes
+- All 96 pre-existing unit tests pass unchanged
+
+### Tech debt logged
+- `/meal-plans/plan/[id]` route is now orphaned (no navigation links to it); candidate for removal in v0.3.0
+- Recipe edit UI not built (instructions field is view-only; "Edit to add them" placeholder is shown)
+- Recipe library depth (13 recipes) is still thin; grows through normal use
+
+---
+
 ## [0.2.0] — 2026-04-19
 
 ### Added
