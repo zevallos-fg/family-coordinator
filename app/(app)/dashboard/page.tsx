@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { Greeting } from "@/components/dashboard/Greeting";
+import { TodayDate } from "@/components/dashboard/TodayDate";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -56,25 +58,13 @@ export default async function DashboardPage() {
   ]);
 
   const firstName = userData?.full_name?.split(" ")[0] ?? user.email?.split("@")[0] ?? "there";
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-
-  const dateDisplay = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header — client components avoid SSR/client time mismatch (hydration #418) */}
       <div>
-        <h1 className="text-2xl font-semibold text-stone-800">
-          {greeting}, {firstName}
-        </h1>
-        <p className="text-stone-500 text-sm mt-0.5">
-          {dateDisplay} · {familyName}
-        </p>
+        <Greeting name={firstName} />
+        <TodayDate familyName={familyName} />
       </div>
 
       {/* Today's schedule */}
