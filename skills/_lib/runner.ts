@@ -30,6 +30,25 @@ const PER_FAMILY_MONTHLY_CAP_CENTS = 1000;
 const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL!;
 
 
+/**
+ * Report a parse/validation error against an existing api_usage row.
+ * Call this after a skill returns ok:true but the caller fails to parse the data.
+ * Silently no-ops if usageId is undefined (e.g., usage logging itself failed).
+ */
+export async function updateSkillError(
+  usageId: string | undefined,
+  errorMessage: string
+): Promise<void> {
+  if (!usageId) return;
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("fn_skill_update_diagnostics", {
+    p_usage_id: usageId,
+    p_error_message: errorMessage,
+  });
+  if (error) console.error("[skillRunner] updateSkillError failed", error.message);
+}
+
 export type MessageContent =
   | string
   | Array<
@@ -141,14 +160,14 @@ export async function callSkill<T = string>(
     };
   }
 
-  // 4. Compute cost and log via RPC
+  // 4. Compute cost and log via RPC; capture the returned usage row ID
   const inputTokens = body.usage?.input_tokens ?? 0;
   const outputTokens = body.usage?.output_tokens ?? 0;
   const pricing = PRICING[model as keyof typeof PRICING];
   const costCents =
     (inputTokens * pricing.input + outputTokens * pricing.output) / 10000;
 
-  const { error: logErr } = await supabase.rpc("fn_skill_record_usage", {
+  const { data: usageId, error: logErr } = await supabase.rpc("fn_skill_record_usage", {
     target_family_id: ctx.familyId,
     target_user_id: ctx.userId,
     p_skill_name: skillName,
@@ -159,10 +178,21 @@ export async function callSkill<T = string>(
   });
 
   if (logErr) {
-    // Don't fail the call — the work is done — but log the failure
     console.error("[skillRunner] usage logging failed", {
       skillName,
       error: logErr.message,
+    });
+  }
+
+  const text = body.content?.[0]?.text ?? "";
+
+  // 4b. Store response_preview (first 500 chars) for diagnostics
+  if (usageId) {
+    supabase.rpc("fn_skill_update_diagnostics", {
+      p_usage_id: usageId,
+      p_response_preview: text.slice(0, 500),
+    }).then(({ error }) => {
+      if (error) console.error("[skillRunner] diagnostics update failed", error.message);
     });
   }
 
@@ -183,11 +213,11 @@ export async function callSkill<T = string>(
     await posthogClient.shutdown();
   }
 
-  // 6. Return text content (caller parses further if needed)
-  const text = body.content?.[0]?.text ?? "";
+  // 6. Return text content + usageId so callers can report parse errors
   return {
     ok: true,
     data: text as unknown as T,
     usage: { model, inputTokens, outputTokens, costCents },
+    usageId: usageId ?? undefined,
   };
 }

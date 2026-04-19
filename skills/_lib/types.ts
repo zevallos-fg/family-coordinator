@@ -29,6 +29,7 @@ export interface SkillResult<T> {
     outputTokens: number;
     costCents: number;
   };
+  usageId?: string; // api_usage row ID — use to report parse errors via updateSkillError
 }
 
 export type SkillRunner<TInput, TOutput> = (
