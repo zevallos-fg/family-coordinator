@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { importRecipeAction } from "@/app/(app)/meals/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,5 +95,3 @@ export function RecipeImportForm() {
   );
 }
 
-// need Link in scope
-import Link from "next/link";
