@@ -29,20 +29,34 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
   const familyId = await getFamilyId(supabase, user.id);
   if (!familyId) return { error: "No family found — complete onboarding first" };
 
-  // Fetch HTML from the recipe URL
+// Fetch HTML from the recipe URL
+  // We send a real-browser User-Agent to bypass bot detection on recipe sites.
   let html: string;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; FamilyCoordinator/1.0)" },
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+      },
     });
     clearTimeout(timeout);
     if (!res.ok) return { error: `Could not fetch page (HTTP ${res.status})` };
     html = await res.text();
   } catch (err) {
-    return { error: err instanceof Error && err.name === "AbortError" ? "Page took too long to load" : "Could not reach that URL" };
+    return {
+      error:
+        err instanceof Error && err.name === "AbortError"
+          ? "Page took too long to load"
+          : "Could not reach that URL",
+    };
   }
 
   // Check for duplicate
