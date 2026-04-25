@@ -38,6 +38,27 @@
 
 **family-school-brief — removed.** Skill stub deleted in v34 P0. No schema for school newsletters. Revisit when school inbox triage becomes priority.
 
+## v34.0.0 — Session B deferrals
+
+### Composition opportunities (deferred to v35+)
+- Receipts → Expenses auto-conversion
+- Trips → Document Vault attachment
+- Vendors → Maintenance auto-prompt
+
+### Visual / design polish
+- Each v34 feature shipped with minimal-functional UX
+- No animations or advanced affordances
+- Dedicated UX session needed
+
+### Killed entirely
+- family-school-brief: removed in v34 P0. Revisit when school inbox becomes priority.
+
+### Pre-existing TS errors (out of scope)
+- lib/grocery/dedup.ts: fn_grocery_upsert removed from database.types.ts — types mismatch
+- lib/grocery/resolve-ingredient.ts: fn_ingredient_fuzzy_search removed from database.types.ts
+- scripts/backfill-grocery-ingredient-ids.ts: similar type mismatch
+These errors pre-date v34 and are in files not touched by v34. Deferred to dedicated cleanup sprint.
+
 ## Future migration path
 - **Supabase / Postgres**: when Google Sheets limits bind (~5M cells). Schema is designed for relational migration. Apps Script `weeklyBackup()` provides JSON snapshot for migration. All IDs are UUIDs.
 - **Obsidian integration**: for long-form/narrative content (family memory, decision log). Explicitly a separate system — not a v20 concern.

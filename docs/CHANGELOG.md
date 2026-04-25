@@ -1,5 +1,48 @@
 # Changelog — Family Coordinator
 
+## [34.0.0] — 2026-04-25
+
+**Session B: 8 schema-and-skill features activated. Mega-menu nav. Hallucination guards on three skills.**
+
+### Cross-cutting
+- `ActionResult<T>` type, `withRetry` helper (1s/3s/9s exponential backoff), `ErrorBanner`/`EmptyState`/`LoadingState` UI primitives
+- Hallucination guards library (`verifyEntitiesExist`, `verifySubstringInCorpus`, `extractDates`, `extractAmounts`)
+- Mega-menu nav with Receipts demoted to More dropdown; mobile flat list with all 16 destinations
+- `lib/supabase/database.types.ts` fixed (stray SQL prefix removed)
+
+### Features shipped
+- **F1: Vendors** — CRUD + service log + AI memory search (vendor-memory skill)
+- **F2: Trips** — trip planner + AI packing list + prep tasks (travel skill)
+- **F3: Hurricane Prep** — season-phase checklist + named-storm/cross-region hallucination guards
+- **F4: Kid Milestones** — milestone logger (AI analyze→review→save) + medical CRUD (no AI)
+- **F5: Kid Birthday Events** — party tracker + on-demand gift suggestions
+- **F6: Expenses + Reimbursements** — text-parse + manual entry + reimbursement flow
+- **F7: Document Vault** — upload + vision indexing + verbatim-passage QA search
+- **F8: Weekly Digest** — 9-source composition + blind spots + convert-to-task
+
+### Skills (9 total)
+- `family-vendor-memory` — vendor relevance matching with hallucination guard
+- `family-travel` — packing list + prep tasks with owner validation
+- `family-hurricane-prep` — Miami seasonal prep with named-storm ban (hallucination guard)
+- `family-kid-milestone` — developmental milestone analysis with safety disclaimers
+- `family-birthday-social` — gift suggestions + reciprocity check
+- `family-expense-parser` — amount/merchant extraction with numeric guard
+- `family-document-indexer` — vision-capable OCR + metadata extraction
+- `family-document-qa` — verbatim-passage semantic search (hallucination guard)
+- `family-weekly-digest` — composition skill with entity guard (verifyEntitiesExist)
+- `family-school-brief` — **removed** in P0
+
+### Storage
+- `family-documents` Storage bucket created with RLS policies (migration 20260425)
+
+### Database
+- Zero new schema migrations (all schemas pre-existed)
+
+### Tests
+- 9 new skill test suites — 57 total new tests
+- 8 new E2E specs (vendors, trips, hurricane, kids, expenses, digest, and more)
+- Hallucination guards tested on: hurricane-prep, document-indexer, document-qa, weekly-digest, expense-parser, travel, vendor-memory
+
 ## v20 — 2026-04-18
 
 **Second-brain reframe anchored on meal planning.**
