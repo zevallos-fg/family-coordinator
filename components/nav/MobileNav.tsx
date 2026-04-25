@@ -5,15 +5,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SpendIndicator } from "./SpendIndicator";
 
-const NAV_ITEMS = [
+const ALL_NAV = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/schedule", label: "Schedule" },
   { href: "/capture", label: "Capture" },
   { href: "/organized", label: "Organized" },
   { href: "/grocery", label: "Grocery" },
   { href: "/meal-plans", label: "Meal Plans" },
-  { href: "/receipts", label: "Receipts" },
   { href: "/caregiver", label: "Caregiver" },
+  { href: "/receipts", label: "Receipts" },
+  { href: "/vendors", label: "Vendors" },
+  { href: "/trips", label: "Trips" },
+  { href: "/hurricane", label: "Hurricane" },
+  { href: "/kids", label: "Kids" },
+  { href: "/expenses", label: "Expenses" },
+  { href: "/documents", label: "Documents" },
+  { href: "/digest", label: "Digest" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -21,7 +28,7 @@ export function MobileNav() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  const current = NAV_ITEMS.find(
+  const current = ALL_NAV.find(
     (item) => pathname === item.href || pathname.startsWith(item.href + "/")
   );
 
@@ -60,7 +67,7 @@ export function MobileNav() {
             </p>
           )}
           <div className="grid grid-cols-2 gap-1">
-            {NAV_ITEMS.map((item) => {
+            {ALL_NAV.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               return (
                 <Link
