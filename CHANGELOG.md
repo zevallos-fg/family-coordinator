@@ -1,5 +1,29 @@
 # Changelog
 
+## [33.0.0] — 2026-04-25
+
+**Dragnet grocery dedup — schema + resolver.** Additive schema migration bringing ingredient normalization, grocery dedup infrastructure, and meal tracking depth to the data model.
+
+### Added
+- `20260425_v33_dragnet_backfill.sql` — 6 new columns on `recipes`, 5 on `ingredients`, 3 on `meal_plan_entries`, 5 on `grocery_items`; 5 new tables (`ingredient_form_units`, `ingredient_resolution_log`, `meal_log`, `person_nutrition_targets`, `maintenance`); `pg_trgm` extension; RLS on all 5 new tables; 2 partial indexes on `grocery_items` for dedup queries
+- `20260425_v33_grocery_upsert_function.sql` — `fn_grocery_upsert` RPC function for atomic dedup-aware insert
+- `lib/grocery/strip-descriptors.ts` + `strip-descriptors.test.ts` — descriptor stripper utility (no LLM, regex-based)
+- `lib/grocery/resolve-ingredient.ts` — three-tier ingredient resolver (exact → fuzzy/pg_trgm → Haiku LLM)
+- `lib/grocery/resolve-ingredient.test.ts` — full unit test suite (using vi.hoisted pattern)
+- `lib/grocery/dedup.ts` — `addGroceryItem()` dedup-aware insert orchestrator
+- `skills/family-ingredient-resolver/` — Haiku skill for Tier 3 ingredient name resolution; 6 unit tests
+
+### Changed
+- `app/(app)/grocery/actions.ts` — `addGroceryItemFromText` routes through `addGroceryItem()` dedup path
+- `app/(app)/meal-plans/actions.ts` — meal plan save wires `cooked_status` and `cook_by`
+- `app/(app)/capture/actions.ts` — grocery captures routed through dedup path
+
+### Migrations applied
+- `20260425_v33_dragnet_backfill.sql` — additive schema (all 8 phase gates passed, zero data loss)
+- `20260425_v33_grocery_upsert_function.sql` — upsert RPC
+
+---
+
 ## [32.0.0] — 2026-04-19
 
 **Audit close-the-loop release.** All 23 findings from the April 19 adversarial audit resolved.

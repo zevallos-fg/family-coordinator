@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as recipeImporter from "@/skills/family-recipe-importer";
 import * as mealPlanner from "@/skills/family-meal-planner";
+import { addGroceryItem } from "@/lib/grocery/dedup";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -553,22 +554,49 @@ async function runPlanGeneration(
     await supabase.from("meal_plan_entries").insert(entryRows);
   }
 
-  // Write grocery delta items
-  const groceryRows = plan.groceryDelta
-    .filter(g => (g.quantityNeeded ?? 0) > 0 || g.quantityNeeded === null)
-    .map(g => ({
-      family_id: familyId,
-      name: g.quantityNeeded !== null && g.unit
-        ? `${g.name} (${g.quantityNeeded} ${g.unit})`
-        : g.name,
-      quantity: g.quantityNeeded !== null
-        ? `${g.quantityNeeded}${g.unit ? ` ${g.unit}` : ""}`
-        : null,
-      in_cart: false,
-    }));
+  // Resolve suggestedStore names to UUIDs (fixes silent store-drop bug)
+  const { data: storeList } = await supabase
+    .from("stores")
+    .select("id, name")
+    .eq("family_id", familyId);
+  const storeByName: Record<string, string> = {};
+  for (const s of storeList ?? []) {
+    storeByName[s.name.toLowerCase()] = s.id;
+  }
 
-  if (groceryRows.length > 0) {
-    await supabase.from("grocery_items").insert(groceryRows);
+  // Write grocery delta items via dedup orchestrator
+  const filteredDelta = plan.groceryDelta.filter(
+    (g) => (g.quantityNeeded ?? 0) > 0 || g.quantityNeeded === null
+  );
+
+  for (const g of filteredDelta) {
+    const resolvedStoreId = g.suggestedStore
+      ? (storeByName[g.suggestedStore.toLowerCase()] ?? null)
+      : null;
+
+    try {
+      await addGroceryItem({
+        rawName: g.name,
+        qtyValue: g.quantityNeeded !== null ? g.quantityNeeded : null,
+        qtyUnit: g.unit ?? null,
+        storeId: resolvedStoreId,
+        familyId,
+        userId,
+        createIfMissing: true,
+      });
+    } catch {
+      // Fallback: direct insert so we never silently drop grocery delta items
+      await supabase.from("grocery_items").insert({
+        family_id: familyId,
+        name: g.quantityNeeded !== null && g.unit
+          ? `${g.name} (${g.quantityNeeded} ${g.unit})`
+          : g.name,
+        quantity: g.quantityNeeded !== null
+          ? `${g.quantityNeeded}${g.unit ? ` ${g.unit}` : ""}`
+          : null,
+        in_cart: false,
+      });
+    }
   }
 
   revalidatePath("/meal-plans");

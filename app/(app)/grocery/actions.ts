@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as groceryParser from "@/skills/family-grocery-parser";
+import { addGroceryItem } from "@/lib/grocery/dedup";
 
 export async function addGroceryItemFromText(formData: FormData) {
   const text = (formData.get("text") as string)?.trim();
@@ -37,11 +38,21 @@ export async function addGroceryItemFromText(formData: FormData) {
   });
 
   if (!result.ok || !result.data) {
-    // Fallback: insert as-is with no store
-    await supabase.from("grocery_items").insert({
-      family_id: familyId,
-      name: text,
-    });
+    // Fallback: route through dedup even on skill failure
+    try {
+      await addGroceryItem({
+        rawName: text,
+        qtyValue: null,
+        qtyUnit: null,
+        storeId: null,
+        familyId,
+        userId: user.id,
+        createIfMissing: true,
+      });
+    } catch {
+      // Last resort: direct insert
+      await supabase.from("grocery_items").insert({ family_id: familyId, name: text });
+    }
     revalidatePath("/grocery");
     revalidatePath("/dashboard");
     return { ok: true, count: 1 };
@@ -52,19 +63,35 @@ export async function addGroceryItemFromText(formData: FormData) {
     return { ok: false, error: "No grocery items found in that text." };
   }
 
-  const rows = items.map((item) => ({
-    family_id: familyId,
-    name: item.name,
-    quantity: item.quantity !== null ? String(item.quantity) + (item.unit ? " " + item.unit : "") : null,
-    store_id: item.storeId,
-  }));
-
-  const { error } = await supabase.from("grocery_items").insert(rows);
-  if (error) return { ok: false, error: error.message };
+  // Route each parsed item through the dedup orchestrator
+  let count = 0;
+  for (const item of items) {
+    try {
+      await addGroceryItem({
+        rawName: item.name,
+        qtyValue: item.quantity !== null ? Number(item.quantity) : null,
+        qtyUnit: item.unit ?? null,
+        storeId: item.storeId ?? null,
+        familyId,
+        userId: user.id,
+        createIfMissing: true,
+      });
+      count++;
+    } catch {
+      // Fallback: direct insert so we never silently drop items
+      await supabase.from("grocery_items").insert({
+        family_id: familyId,
+        name: item.name,
+        quantity: item.quantity !== null ? String(item.quantity) + (item.unit ? " " + item.unit : "") : null,
+        store_id: item.storeId,
+      });
+      count++;
+    }
+  }
 
   revalidatePath("/grocery");
   revalidatePath("/dashboard");
-  return { ok: true, count: rows.length };
+  return { ok: true, count };
 }
 
 export async function toggleInCart(id: string, currentValue: boolean) {
