@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as captureRouter from "@/skills/family-capture-router";
+import { addGroceryItem } from "@/lib/grocery/dedup";
 
 export async function saveCapture(formData: FormData) {
   const text = (formData.get("text") as string)?.trim();
@@ -72,14 +73,29 @@ export async function saveCapture(formData: FormData) {
     return { ok: false, error: captureErr.message };
   }
 
-  // If grocery, split into grocery_items
+  // If grocery, route each item through the dedup orchestrator
   if (isGrocery && groceryItems.length > 0) {
-    const groceryRows = groceryItems.map((name: string) => ({
-      family_id: familyId,
-      name,
-      source_capture_id: capture?.id ?? null,
-    }));
-    await supabase.from("grocery_items").insert(groceryRows);
+    for (const name of groceryItems as string[]) {
+      try {
+        await addGroceryItem({
+          rawName: name,
+          qtyValue: null,
+          qtyUnit: null,
+          storeId: null,
+          familyId,
+          sourceCaptureId: capture?.id ?? undefined,
+          userId: user.id,
+          createIfMissing: true,
+        });
+      } catch {
+        // Fallback: direct insert so we never drop items
+        await supabase.from("grocery_items").insert({
+          family_id: familyId,
+          name,
+          source_capture_id: capture?.id ?? null,
+        });
+      }
+    }
   }
 
   revalidatePath("/capture");

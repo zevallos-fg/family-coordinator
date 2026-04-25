@@ -1,3 +1,4 @@
+Initialising login role...
 export type Json =
   | string
   | number
@@ -11,6 +12,31 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -757,33 +783,48 @@ export type Database = {
         Row: {
           completed_at: string | null
           created_at: string
+          dedup_group_id: string | null
           family_id: string
           id: string
           in_cart: boolean
+          ingredient_id: string | null
           name: string
+          qty_unit: string | null
+          qty_value: number | null
           quantity: string | null
+          requires_review: boolean
           source_capture_id: string | null
           store_id: string | null
         }
         Insert: {
           completed_at?: string | null
           created_at?: string
+          dedup_group_id?: string | null
           family_id: string
           id?: string
           in_cart?: boolean
+          ingredient_id?: string | null
           name: string
+          qty_unit?: string | null
+          qty_value?: number | null
           quantity?: string | null
+          requires_review?: boolean
           source_capture_id?: string | null
           store_id?: string | null
         }
         Update: {
           completed_at?: string | null
           created_at?: string
+          dedup_group_id?: string | null
           family_id?: string
           id?: string
           in_cart?: boolean
+          ingredient_id?: string | null
           name?: string
+          qty_unit?: string | null
+          qty_value?: number | null
           quantity?: string | null
+          requires_review?: boolean
           source_capture_id?: string | null
           store_id?: string | null
         }
@@ -793,6 +834,13 @@ export type Database = {
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "grocery_items_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
             referencedColumns: ["id"]
           },
           {
@@ -881,33 +929,134 @@ export type Database = {
           },
         ]
       }
+      ingredient_form_units: {
+        Row: {
+          created_at: string
+          equiv_qty: number
+          equiv_unit: string
+          form_name: string
+          ingredient_id: string
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          equiv_qty: number
+          equiv_unit: string
+          form_name: string
+          ingredient_id: string
+          source: string
+        }
+        Update: {
+          created_at?: string
+          equiv_qty?: number
+          equiv_unit?: string
+          form_name?: string
+          ingredient_id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_form_units_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ingredient_resolution_log: {
+        Row: {
+          cleaned_name: string
+          confidence: string
+          created_at: string
+          descriptors_extracted: string[] | null
+          family_id: string
+          id: string
+          raw_input: string
+          resolved_ingredient_id: string | null
+          reviewed_by_user: boolean
+        }
+        Insert: {
+          cleaned_name: string
+          confidence: string
+          created_at?: string
+          descriptors_extracted?: string[] | null
+          family_id: string
+          id?: string
+          raw_input: string
+          resolved_ingredient_id?: string | null
+          reviewed_by_user?: boolean
+        }
+        Update: {
+          cleaned_name?: string
+          confidence?: string
+          created_at?: string
+          descriptors_extracted?: string[] | null
+          family_id?: string
+          id?: string
+          raw_input?: string
+          resolved_ingredient_id?: string | null
+          reviewed_by_user?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_resolution_log_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredient_resolution_log_resolved_ingredient_id_fkey"
+            columns: ["resolved_ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ingredients: {
         Row: {
           aisle: string | null
           canonical_name: string
           created_at: string
           default_unit: string | null
+          density_g_per_ml: number | null
           family_id: string
           id: string
           name: string
+          nutrition_per_100g: Json | null
+          open_food_facts_barcode: string | null
+          preferred_store_id: string | null
+          usda_fdc_id: number | null
         }
         Insert: {
           aisle?: string | null
           canonical_name: string
           created_at?: string
           default_unit?: string | null
+          density_g_per_ml?: number | null
           family_id: string
           id?: string
           name: string
+          nutrition_per_100g?: Json | null
+          open_food_facts_barcode?: string | null
+          preferred_store_id?: string | null
+          usda_fdc_id?: number | null
         }
         Update: {
           aisle?: string | null
           canonical_name?: string
           created_at?: string
           default_unit?: string | null
+          density_g_per_ml?: number | null
           family_id?: string
           id?: string
           name?: string
+          nutrition_per_100g?: Json | null
+          open_food_facts_barcode?: string | null
+          preferred_store_id?: string | null
+          usda_fdc_id?: number | null
         }
         Relationships: [
           {
@@ -915,6 +1064,13 @@ export type Database = {
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredients_preferred_store_id_fkey"
+            columns: ["preferred_store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
             referencedColumns: ["id"]
           },
         ]
@@ -1062,30 +1218,155 @@ export type Database = {
           },
         ]
       }
+      maintenance: {
+        Row: {
+          cadence_days: number
+          created_at: string
+          family_id: string
+          id: string
+          item: string
+          last_done_at: string | null
+          next_due_at: string | null
+          notes: string | null
+        }
+        Insert: {
+          cadence_days: number
+          created_at?: string
+          family_id: string
+          id?: string
+          item: string
+          last_done_at?: string | null
+          next_due_at?: string | null
+          notes?: string | null
+        }
+        Update: {
+          cadence_days?: number
+          created_at?: string
+          family_id?: string
+          id?: string
+          item?: string
+          last_done_at?: string | null
+          next_due_at?: string | null
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maintenance_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meal_log: {
+        Row: {
+          date: string
+          family_id: string
+          id: string
+          ingredient_id: string | null
+          kid_id: string | null
+          logged_at: string
+          recipe_id: string | null
+          servings_consumed: number | null
+          slot: string
+          user_id: string | null
+        }
+        Insert: {
+          date: string
+          family_id: string
+          id?: string
+          ingredient_id?: string | null
+          kid_id?: string | null
+          logged_at?: string
+          recipe_id?: string | null
+          servings_consumed?: number | null
+          slot: string
+          user_id?: string | null
+        }
+        Update: {
+          date?: string
+          family_id?: string
+          id?: string
+          ingredient_id?: string | null
+          kid_id?: string | null
+          logged_at?: string
+          recipe_id?: string | null
+          servings_consumed?: number | null
+          slot?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meal_log_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meal_log_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meal_log_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meal_log_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meal_log_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meal_plan_entries: {
         Row: {
+          cook_by: string | null
+          cooked_status: string
           date: string
           id: string
           meal_plan_id: string
           meal_type: string
           notes: string | null
           recipe_id: string | null
+          servings_planned: number | null
         }
         Insert: {
+          cook_by?: string | null
+          cooked_status?: string
           date: string
           id?: string
           meal_plan_id: string
           meal_type: string
           notes?: string | null
           recipe_id?: string | null
+          servings_planned?: number | null
         }
         Update: {
+          cook_by?: string | null
+          cooked_status?: string
           date?: string
           id?: string
           meal_plan_id?: string
           meal_type?: string
           notes?: string | null
           recipe_id?: string | null
+          servings_planned?: number | null
         }
         Relationships: [
           {
@@ -1225,6 +1506,67 @@ export type Database = {
             columns: ["ingredient_id"]
             isOneToOne: false
             referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      person_nutrition_targets: {
+        Row: {
+          created_at: string
+          daily_kcal_target: number | null
+          family_id: string
+          id: string
+          kid_id: string | null
+          macro_split: Json | null
+          micronutrient_targets: Json | null
+          notes: string | null
+          start_date: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          daily_kcal_target?: number | null
+          family_id: string
+          id?: string
+          kid_id?: string | null
+          macro_split?: Json | null
+          micronutrient_targets?: Json | null
+          notes?: string | null
+          start_date: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          daily_kcal_target?: number | null
+          family_id?: string
+          id?: string
+          kid_id?: string | null
+          macro_split?: Json | null
+          micronutrient_targets?: Json | null
+          notes?: string | null
+          start_date?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_nutrition_targets_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_nutrition_targets_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_nutrition_targets_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -1376,42 +1718,60 @@ export type Database = {
           cook_time_min: number | null
           created_at: string
           created_by_user_id: string | null
+          cuisine: string | null
           description: string | null
           family_id: string
           id: string
           instructions: string | null
+          last_cooked_at: string | null
+          notes: string | null
           prep_time_min: number | null
+          rotation_status: string | null
           servings: number | null
+          source_image: string | null
           source_url: string | null
           tags: string[] | null
+          times_cooked: number
           title: string
         }
         Insert: {
           cook_time_min?: number | null
           created_at?: string
           created_by_user_id?: string | null
+          cuisine?: string | null
           description?: string | null
           family_id: string
           id?: string
           instructions?: string | null
+          last_cooked_at?: string | null
+          notes?: string | null
           prep_time_min?: number | null
+          rotation_status?: string | null
           servings?: number | null
+          source_image?: string | null
           source_url?: string | null
           tags?: string[] | null
+          times_cooked?: number
           title: string
         }
         Update: {
           cook_time_min?: number | null
           created_at?: string
           created_by_user_id?: string | null
+          cuisine?: string | null
           description?: string | null
           family_id?: string
           id?: string
           instructions?: string | null
+          last_cooked_at?: string | null
+          notes?: string | null
           prep_time_min?: number | null
+          rotation_status?: string | null
           servings?: number | null
+          source_image?: string | null
           source_url?: string | null
           tags?: string[] | null
+          times_cooked?: number
           title?: string
         }
         Relationships: [
@@ -1956,6 +2316,8 @@ export type Database = {
         Args: { target_family_id: string }
         Returns: boolean
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       [_ in never]: never
@@ -2084,6 +2446,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },
