@@ -194,21 +194,3 @@ export async function deleteGroceryItem(id: string) {
   revalidatePath("/dashboard");
   return { ok: true };
 }
-
-export async function updateGroceryStore(id: string, storeId: string | null) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { error } = await supabase
-    .from("grocery_items")
-    .update({ store_id: storeId })
-    .eq("id", id);
-
-  if (error) return { ok: false, error: error.message };
-
-  revalidatePath("/grocery");
-  return { ok: true };
-}

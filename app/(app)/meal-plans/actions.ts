@@ -662,14 +662,26 @@ export async function addRecipeAction(
   const { resolveIngredient } = await import("@/lib/grocery/resolve-ingredient");
   for (const ing of ingredients) {
     if (!ing.name.trim()) continue;
-    const resolved = await resolveIngredient({ rawName: ing.name, familyId, createIfMissing: true, userId: user.id });
+
+    const resolved = await resolveIngredient({
+      rawName: ing.name,
+      familyId,
+      createIfMissing: true,
+      userId: user.id,
+    });
+
     if (!resolved.ingredientId) continue;
+
+    const descriptorNotes = resolved.descriptors.length > 0
+      ? resolved.descriptors.join(", ")
+      : (ing.notes?.trim() || null);
+
     await supabase.from("recipe_ingredients").insert({
       recipe_id: newRecipe.id,
       ingredient_id: resolved.ingredientId,
       amount: ing.qty,
       unit: ing.unit?.trim() || null,
-      notes: resolved.descriptors.length > 0 ? resolved.descriptors.join(", ") : (ing.notes?.trim() || null),
+      notes: descriptorNotes,
     });
   }
 
