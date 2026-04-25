@@ -2,7 +2,7 @@
 
 ## [33.0.0] — 2026-04-25
 
-**Dragnet grocery dedup — schema + resolver.** Additive schema migration bringing ingredient normalization, grocery dedup infrastructure, and meal tracking depth to the data model.
+**Dragnet schema reinstatement, grocery dedup architecture, recipe manual entry, navigation repair.**
 
 ### Added
 - `20260425_v33_dragnet_backfill.sql` — 6 new columns on `recipes`, 5 on `ingredients`, 3 on `meal_plan_entries`, 5 on `grocery_items`; 5 new tables (`ingredient_form_units`, `ingredient_resolution_log`, `meal_log`, `person_nutrition_targets`, `maintenance`); `pg_trgm` extension; RLS on all 5 new tables; 2 partial indexes on `grocery_items` for dedup queries
@@ -13,14 +13,35 @@
 - `lib/grocery/dedup.ts` — `addGroceryItem()` dedup-aware insert orchestrator
 - `skills/family-ingredient-resolver/` — Haiku skill for Tier 3 ingredient name resolution; 6 unit tests
 
-### Changed
-- `app/(app)/grocery/actions.ts` — `addGroceryItemFromText` routes through `addGroceryItem()` dedup path
-- `app/(app)/meal-plans/actions.ts` — meal plan save wires `cooked_status` and `cook_by`
+### Frontend
+- `components/grocery/GroceryTable.tsx` — new flat table replacing `GroceryList`; sortable Item and Store columns; cluster row rendering for `requires_review` dedup groups; inline store dropdown; yellow "needs review" badge
+- `components/grocery/AddItemForm.tsx` — 300ms debounce merge preview (teal banner); "Add & merge" button label when merge detected; toast messages for inserted/merged/review_required actions
+- `components/meal-plans/RecipeImportForm.tsx` — "Manual" tab added (third tab); strict-required gates on title, servings, ingredients; live descriptor preview; ingredient repeater
+- `app/(app)/meal-plans/page.tsx` — Recipes + Pantry nav pills above week picker
+
+### Backend changes
+- `app/(app)/grocery/actions.ts` — `addGroceryItemFromText` routes through `addGroceryItem()` dedup path; returns `action` + `name` for toast; `updateGroceryStore` + `previewDedup` server actions added
+- `app/(app)/meal-plans/actions.ts` — meal plan save wires `cooked_status` and `cook_by`; `addRecipeAction` for manual recipe creation; store-drop bug fixed (suggestedStore resolved to UUID)
 - `app/(app)/capture/actions.ts` — grocery captures routed through dedup path
+- `app/(app)/grocery/page.tsx` — updated to use `GroceryTable`, query dedup columns, pass `familyId` to `AddItemForm`
+
+### Tests
+- `tests/integration/grocery-dedup.test.ts` — 5 integration tests for dedup orchestrator (vi.hoisted pattern)
+- `tests/e2e/grocery-table-sort.spec.ts` — Playwright spec for table headers and sort
+- `tests/e2e/grocery-manual-add-merge.spec.ts` — Playwright spec for add input and merge indicator
+- `tests/e2e/recipe-manual-entry.spec.ts` — Playwright spec for Manual tab, descriptor hint, validation
+- `tests/e2e/meal-plan-grocery-projection.spec.ts` — Playwright spec for nav pills and route rendering
 
 ### Migrations applied
 - `20260425_v33_dragnet_backfill.sql` — additive schema (all 8 phase gates passed, zero data loss)
 - `20260425_v33_grocery_upsert_function.sql` — upsert RPC
+
+### Test results
+```
+Test Files  17 passed | 12 skipped (29)
+     Tests  127 passed | 12 skipped (139)
+```
+Zero failures. 12 skipped = pre-existing `it.skip` stubs for v34 placeholder skills.
 
 ---
 
