@@ -1,4 +1,3 @@
-Initialising login role...
 export type Json =
   | string
   | number
@@ -12,31 +11,6 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
   }
   public: {
     Tables: {
@@ -2280,13 +2254,54 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      grocery_backfill_review: {
+        Row: {
+          confidence: string | null
+          id: string | null
+          name: string | null
+          proposed_ingredient_id: string | null
+          proposed_match: string | null
+          quantity: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_resolution_log_resolved_ingredient_id_fkey"
+            columns: ["proposed_ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       fn_accept_invite: { Args: { p_token: string }; Returns: string }
       fn_create_family_and_claim: {
         Args: { p_city?: string; p_name: string; p_timezone?: string }
         Returns: string
+      }
+      fn_grocery_upsert: {
+        Args: {
+          p_family_id: string
+          p_ingredient_id: string
+          p_qty_unit: string
+          p_qty_value: number
+          p_raw_name?: string
+          p_source_capture_id?: string
+          p_store_id: string
+        }
+        Returns: {
+          action: string
+          grocery_item_id: string
+        }[]
+      }
+      fn_ingredient_fuzzy_search: {
+        Args: { p_family_id: string; p_name: string; p_threshold?: number }
+        Returns: {
+          canonical_name: string
+          id: string
+          sim: number
+        }[]
       }
       fn_skill_get_monthly_spend: {
         Args: { target_family_id: string }
@@ -2446,9 +2461,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },

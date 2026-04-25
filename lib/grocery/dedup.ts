@@ -73,13 +73,15 @@ export async function addGroceryItem(input: DedupInput): Promise<DedupResult> {
   }
 
   // Step 4: Call the PG upsert function
+  // Generated types mark uuid params as non-nullable strings; cast to satisfy type
+  // checker while passing null at runtime (PG function handles null p_ingredient_id).
   const { data: upsertRows, error } = await supabase.rpc("fn_grocery_upsert", {
     p_family_id: familyId,
-    p_ingredient_id: ingredientId ?? null,
-    p_qty_value: qtyValue,
-    p_qty_unit: qtyUnit,
-    p_store_id: storeId ?? null,
-    p_source_capture_id: sourceCaptureId ?? null,
+    p_ingredient_id: (ingredientId ?? null) as string,
+    p_qty_value: qtyValue ?? 0,
+    p_qty_unit: qtyUnit ?? "",
+    p_store_id: (storeId ?? null) as string,
+    p_source_capture_id: sourceCaptureId ?? undefined,
     p_raw_name: rawName,
   });
 
