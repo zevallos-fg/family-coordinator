@@ -95,7 +95,7 @@ export async function resolveIngredient(input: ResolveInput): Promise<ResolveRes
     );
 
     if (skillResult.ok && skillResult.data) {
-      const { resolvedId, confidence } = skillResult.data;
+      const { resolvedId } = skillResult.data;
       if (resolvedId) {
         await writeLog(supabase, familyId, rawName, cleanedName, resolvedId, descriptors, "haiku");
         return {
