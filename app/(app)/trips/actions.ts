@@ -1,0 +1,209 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import * as Sentry from "@sentry/nextjs";
+
+import { createClient } from "@/lib/supabase/server";
+import { ok, err } from "@/lib/skill-action-result";
+import type { ActionResult } from "@/lib/skill-action-result";
+import { withRetry } from "@/lib/with-retry";
+import { run as runTravelSkill } from "@/skills/family-travel";
+
+async function getAuthedFamily() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("not signed in");
+
+  const { data: membership, error } = await supabase
+    .from("family_members")
+    .select("family_id, user_id")
+    .eq("user_id", user.id)
+    .order("joined_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !membership) throw new Error("no family found");
+  return { supabase, userId: user.id, familyId: membership.family_id };
+}
+
+export async function createTrip(
+  formData: FormData
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const { supabase, familyId, userId } = await getAuthedFamily();
+
+    const destination = (formData.get("destination") as string)?.trim();
+    const start_date = (formData.get("start_date") as string)?.trim();
+    const end_date = (formData.get("end_date") as string)?.trim();
+    const notes = (formData.get("notes") as string)?.trim() || null;
+
+    if (!destination) return err("invalid_input", "Destination is required.", "destination empty");
+    if (!start_date || !end_date) return err("invalid_input", "Dates are required.", "dates missing");
+
+    const { data: trip, error: tripError } = await supabase
+      .from("trips")
+      .insert({ family_id: familyId, destination, start_date, end_date, notes })
+      .select("id")
+      .single();
+
+    if (tripError) {
+      Sentry.captureException(tripError, { extra: { action: "createTrip" } });
+      return err("db_error", "Could not save trip.", tripError.message);
+    }
+
+    // Pull family members for skill input
+    const { data: members } = await supabase
+      .from("family_members")
+      .select("user_id, users(full_name)")
+      .eq("family_id", familyId);
+
+    // Fire skill to generate packing list + prep tasks
+    const household = {
+      adults: (members ?? [])
+        .map((m) => ({
+          name: (m.users as { full_name: string | null } | null)?.full_name ?? "Family member",
+        })),
+      kids: [] as Array<{ name: string; age_years: number }>,
+    };
+
+    const skillResult = await withRetry(() =>
+      runTravelSkill(
+        { destination, start_date, end_date, notes: notes ?? undefined, household },
+        { familyId, userId }
+      )
+    );
+
+    if (skillResult.ok && skillResult.data) {
+      // Insert packing items
+      const packingItems = skillResult.data.packing_list.map((item) => ({
+        trip_id: trip.id,
+        item: item.item,
+        notes: `owner:${item.owner}|category:${item.category}`,
+        packed: false,
+      }));
+
+      if (packingItems.length > 0) {
+        await supabase.from("trip_packing_items").insert(packingItems);
+      }
+
+      // Insert prep tasks
+      const tripStart = new Date(start_date);
+      const prepTasks = skillResult.data.prep_tasks.map((t) => {
+        const dueDate = new Date(tripStart);
+        dueDate.setDate(dueDate.getDate() - t.days_before_departure);
+        return {
+          family_id: familyId,
+          title: `[Trip: ${destination}] ${t.task}`,
+          description: `Prep task for trip to ${destination} (${start_date})`,
+          due_at: dueDate.toISOString(),
+          status: "pending",
+        };
+      });
+
+      if (prepTasks.length > 0) {
+        await supabase.from("tasks").insert(prepTasks);
+      }
+    }
+
+    revalidatePath("/trips");
+    return ok({ id: trip.id });
+  } catch (error) {
+    Sentry.captureException(error, { extra: { action: "createTrip" } });
+    return err("unknown", "An unexpected error occurred.", String(error));
+  }
+}
+
+export async function updateTrip(
+  id: string,
+  formData: FormData
+): Promise<ActionResult<void>> {
+  try {
+    const { supabase, familyId } = await getAuthedFamily();
+
+    const destination = (formData.get("destination") as string)?.trim();
+    const start_date = (formData.get("start_date") as string)?.trim();
+    const end_date = (formData.get("end_date") as string)?.trim();
+    const notes = (formData.get("notes") as string)?.trim() || null;
+
+    if (!destination) return err("invalid_input", "Destination is required.", "destination empty");
+
+    const { error } = await supabase
+      .from("trips")
+      .update({ destination, start_date, end_date, notes })
+      .eq("id", id)
+      .eq("family_id", familyId);
+
+    if (error) {
+      Sentry.captureException(error, { extra: { action: "updateTrip", id } });
+      return err("db_error", "Could not update trip.", error.message);
+    }
+
+    revalidatePath("/trips");
+    revalidatePath(`/trips/${id}`);
+    return ok(undefined as void);
+  } catch (error) {
+    Sentry.captureException(error, { extra: { action: "updateTrip" } });
+    return err("unknown", "An unexpected error occurred.", String(error));
+  }
+}
+
+export async function togglePackingItem(
+  item_id: string
+): Promise<ActionResult<void>> {
+  try {
+    const { supabase } = await getAuthedFamily();
+
+    // Get current packed state
+    const { data: item } = await supabase
+      .from("trip_packing_items")
+      .select("packed")
+      .eq("id", item_id)
+      .maybeSingle();
+
+    if (!item) return err("not_found", "Packing item not found.", `item ${item_id} not found`);
+
+    const { error } = await supabase
+      .from("trip_packing_items")
+      .update({ packed: !item.packed })
+      .eq("id", item_id);
+
+    if (error) {
+      Sentry.captureException(error, { extra: { action: "togglePackingItem", item_id } });
+      return err("db_error", "Could not update item.", error.message);
+    }
+
+    revalidatePath("/trips");
+    return ok(undefined as void);
+  } catch (error) {
+    Sentry.captureException(error, { extra: { action: "togglePackingItem" } });
+    return err("unknown", "An unexpected error occurred.", String(error));
+  }
+}
+
+export async function deleteTrip(id: string): Promise<ActionResult<void>> {
+  try {
+    const { supabase, familyId } = await getAuthedFamily();
+
+    // Cascade: delete packing items first
+    await supabase.from("trip_packing_items").delete().eq("trip_id", id);
+
+    const { error } = await supabase
+      .from("trips")
+      .delete()
+      .eq("id", id)
+      .eq("family_id", familyId);
+
+    if (error) {
+      Sentry.captureException(error, { extra: { action: "deleteTrip", id } });
+      return err("db_error", "Could not delete trip.", error.message);
+    }
+
+    revalidatePath("/trips");
+    return ok(undefined as void);
+  } catch (error) {
+    Sentry.captureException(error, { extra: { action: "deleteTrip" } });
+    return err("unknown", "An unexpected error occurred.", String(error));
+  }
+}
