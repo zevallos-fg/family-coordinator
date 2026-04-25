@@ -34,6 +34,16 @@
 - **Babel standalone compilation**: ~1-2s parse time on first load for 153KB file. Acceptable; replace with pre-compiled build if it grows past 250KB.
 - **v20 poll interval**: 30s for new sheets. May feel slow if two users are editing simultaneously. Consider event-driven invalidation when moving to Supabase.
 
+## Legitimate test skips
+
+These `it.skip` entries are intentional — they cover stub skills not yet implemented.
+Each has a SKIP-REASON comment in the test file.
+
+| Skip location | Skip reason | Ticket | Un-skip when |
+|---|---|---|---|
+| `skills/family-blind-spot-detector/tests.ts` | Skill is a placeholder stub with no business logic | T6 | T6 scheduled and skill implemented |
+| `skills/family-caregiver-employment/tests.ts` | Skill is a placeholder stub with no business logic | T8 | T8 scheduled and skill implemented |
+
 ## v34.0.0 — P0
 
 **family-school-brief — removed.** Skill stub deleted in v34 P0. No schema for school newsletters. Revisit when school inbox triage becomes priority.
