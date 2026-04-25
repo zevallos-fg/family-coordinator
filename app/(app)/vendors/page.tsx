@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { VendorTable } from "@/components/vendors/VendorTable";
@@ -43,12 +44,12 @@ export default async function VendorsPage() {
             Your household service providers and contractors.
           </p>
         </div>
-        <a
+        <Link
           href="/vendors/new"
           className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
         >
           + Add vendor
-        </a>
+        </Link>
       </div>
 
       {/* Memory search */}
@@ -74,12 +75,12 @@ export default async function VendorsPage() {
           title="No vendors yet"
           description="Add your plumber, HVAC tech, landscaper, and other household service providers."
           action={
-            <a
+            <Link
               href="/vendors/new"
               className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
             >
               Add your first vendor
-            </a>
+            </Link>
           }
         />
       )}

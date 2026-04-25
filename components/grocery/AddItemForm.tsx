@@ -23,14 +23,14 @@ export function AddItemForm({ familyId }: AddItemFormProps) {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!text.trim()) {
-      setMergePreview(null);
-      return;
-    }
     debounceRef.current = setTimeout(async () => {
+      if (!text.trim()) {
+        setMergePreview(null);
+        return;
+      }
       const result = await previewDedup(text.trim(), familyId);
       setMergePreview(result);
-    }, 300);
+    }, 0);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };

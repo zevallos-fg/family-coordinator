@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import { VendorServiceLog } from "@/components/vendors/VendorServiceLog";
@@ -51,9 +52,9 @@ export default async function VendorDetailPage({ params }: PageProps) {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       <div>
-        <a href="/vendors" className="text-sm text-stone-400 hover:text-stone-600">
+        <Link href="/vendors" className="text-sm text-stone-400 hover:text-stone-600">
           ← Vendors
-        </a>
+        </Link>
         {vendor && (
           <h1 className="text-2xl font-bold text-stone-800 mt-2">{vendor.name}</h1>
         )}

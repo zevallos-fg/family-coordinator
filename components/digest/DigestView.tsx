@@ -69,7 +69,7 @@ export function DigestView({ digests: initialDigests, currentWeek }: DigestViewP
             onClick={handleGenerate}
             className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
           >
-            Generate this week's digest
+            Generate this week&apos;s digest
           </button>
         )}
         {digests.length > 0 && (

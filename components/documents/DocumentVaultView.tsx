@@ -115,7 +115,7 @@ export function DocumentVaultView({ docs: initialDocs }: DocumentVaultViewProps)
       {searchResults !== null && !searching && (
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-stone-600">
-            Search results for: "{searchQuery}"
+            Search results for: &ldquo;{searchQuery}&rdquo;
           </h2>
           {searchResults.length === 0 ? (
             <p className="text-sm text-stone-400">

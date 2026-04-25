@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -55,9 +56,9 @@ export default async function TripDetailPage({ params }: PageProps) {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       <div>
-        <a href="/trips" className="text-sm text-stone-400 hover:text-stone-600">
+        <Link href="/trips" className="text-sm text-stone-400 hover:text-stone-600">
           ← Trips
-        </a>
+        </Link>
         {trip && (
           <>
             <h1 className="text-2xl font-bold text-stone-800 mt-2">{trip.destination}</h1>

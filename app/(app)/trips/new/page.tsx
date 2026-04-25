@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -32,9 +33,9 @@ export default function NewTripPage() {
   return (
     <main className="max-w-lg mx-auto px-4 py-8">
       <div className="mb-6">
-        <a href="/trips" className="text-sm text-stone-400 hover:text-stone-600">
+        <Link href="/trips" className="text-sm text-stone-400 hover:text-stone-600">
           ← Trips
-        </a>
+        </Link>
         <h1 className="text-xl font-bold text-stone-800 mt-2">Plan a Trip</h1>
         <p className="text-sm text-stone-400 mt-1">
           AI will generate a packing list and prep tasks after you save.
