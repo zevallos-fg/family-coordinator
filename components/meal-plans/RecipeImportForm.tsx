@@ -52,10 +52,12 @@ export function RecipeImportForm() {
     const errs: Record<string, string> = {};
     if (manualTitle.trim().length < 3) errs.title = "Title must be at least 3 characters";
     const servNum = Number(manualServings);
-    if (!manualServings || isNaN(servNum) || servNum < 1 || servNum > 20 || !Number.isInteger(servNum))
+    if (!manualServings || isNaN(servNum) || servNum < 1 || servNum > 20 || !Number.isInteger(servNum)) {
       errs.servings = "Servings must be a whole number between 1 and 20";
-    if (!manualIngredients.some((r) => r.name.trim() && r.unit.trim() && r.qty !== null))
+    }
+    if (!manualIngredients.some((r) => r.name.trim() && r.unit.trim() && r.qty !== null)) {
       errs.ingredients = "Add at least one complete ingredient (name, qty, and unit)";
+    }
     return errs;
   }
 
@@ -67,7 +69,8 @@ export function RecipeImportForm() {
 
   async function handleUrlSubmit(e: React.FormEvent) {
     e.preventDefault(); resetErrors();
-    const trimmed = url.trim(); if (!trimmed) return;
+    const trimmed = url.trim();
+    if (!trimmed) return;
     try { new URL(trimmed); } catch { setError("Enter a valid URL (e.g. https://allrecipes.com/recipe/...)"); return; }
     setLoading(true);
     try {
@@ -78,12 +81,15 @@ export function RecipeImportForm() {
   }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    resetErrors(); const file = e.target.files?.[0];
+    resetErrors();
+    const file = e.target.files?.[0];
     if (!file) { setPhotoFile(null); setPhotoPreview(null); return; }
     if (!SUPPORTED_PHOTO_TYPES.includes(file.type)) { setError("Photo must be JPEG, PNG, or WEBP"); setPhotoFile(null); setPhotoPreview(null); return; }
-    if (file.size > MAX_PHOTO_BYTES) { setError("Photo is larger than 4MB."); setPhotoFile(null); setPhotoPreview(null); return; }
+    if (file.size > MAX_PHOTO_BYTES) { setError("Photo is larger than 4MB. Try a smaller image."); setPhotoFile(null); setPhotoPreview(null); return; }
     setPhotoFile(file);
-    const reader = new FileReader(); reader.onload = (ev) => setPhotoPreview(ev.target?.result as string); reader.readAsDataURL(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
   }
 
   function clearPhoto() { setPhotoFile(null); setPhotoPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }
@@ -98,7 +104,9 @@ export function RecipeImportForm() {
       if (!res.ok) { setError(data.error ?? `Server returned ${res.status}`); return; }
       if (data.recipeId) router.push(`/meal-plans/recipes/${data.recipeId}`);
       else setError("Server returned an empty response");
-    } catch (err) { setError(err instanceof Error ? `Upload failed: ${err.message}` : "Upload failed"); } finally { setLoading(false); }
+    } catch (err) {
+      setError(err instanceof Error ? `Upload failed: ${err.message}` : "Upload failed with an unknown error");
+    } finally { setLoading(false); }
   }
 
   async function handleManualSubmit(e: React.FormEvent) {
@@ -109,9 +117,12 @@ export function RecipeImportForm() {
     try {
       const filledIngredients = manualIngredients.filter((r) => r.name.trim() && r.unit.trim() && r.qty !== null);
       const result = await addRecipeAction(manualTitle.trim(), Number(manualServings), filledIngredients, {
-        description: manualDescription.trim() || undefined, prepTimeMin: manualPrepTime ? Number(manualPrepTime) : null,
-        cookTimeMin: manualCookTime ? Number(manualCookTime) : null, cuisine: manualCuisine.trim() || undefined,
-        tags: manualTags.trim() || undefined, instructions: manualInstructions.trim() || undefined,
+        description: manualDescription.trim() || undefined,
+        prepTimeMin: manualPrepTime ? Number(manualPrepTime) : null,
+        cookTimeMin: manualCookTime ? Number(manualCookTime) : null,
+        cuisine: manualCuisine.trim() || undefined,
+        tags: manualTags.trim() || undefined,
+        instructions: manualInstructions.trim() || undefined,
       });
       if (result.error) setError(result.error);
       else if (result.recipeId) router.push(`/meal-plans/recipes/${result.recipeId}`);
@@ -140,7 +151,7 @@ export function RecipeImportForm() {
           <div>
             <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-1">Recipe URL</label>
             <Input id="url" type="url" placeholder="https://www.allrecipes.com/recipe/..." value={url} onChange={(e) => setUrl(e.target.value)} disabled={loading} className="w-full" />
-            <p className="mt-1.5 text-xs text-gray-500">Works with most recipe sites. If a site blocks the fetch, use From Photo instead.</p>
+            <p className="mt-1.5 text-xs text-gray-500">Works with most recipe sites. If a site blocks the fetch, use the From Photo tab instead.</p>
           </div>
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>}
           <Button type="submit" disabled={loading || !url.trim()} className="w-full">
@@ -180,7 +191,7 @@ export function RecipeImportForm() {
         <form onSubmit={handleManualSubmit} className="mt-6 space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Title <span className="text-red-500">*</span></label>
-            <input type="text" value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} placeholder="Recipe title" className={fieldCls("title")} disabled={loading} />
+            <input type="text" value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} placeholder="e.g. Grandma&apos;s Chicken Soup" className={fieldCls("title")} disabled={loading} />
             {manualTouched && manualErrors.title && <p className="text-xs text-red-600 mt-1">{manualErrors.title}</p>}
           </div>
           <div>

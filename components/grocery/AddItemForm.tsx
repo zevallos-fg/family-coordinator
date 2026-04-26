@@ -30,16 +30,14 @@ export function AddItemForm({ familyId }: AddItemFormProps) {
       }
       const result = await previewDedup(text.trim(), familyId);
       setMergePreview(result);
-    }, 300);
+    }, 0);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, familyId]);
 
   async function submit() {
     if (!text.trim()) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
     setStatus("parsing");
     setError(null);
 

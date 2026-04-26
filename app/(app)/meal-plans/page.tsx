@@ -90,10 +90,16 @@ export default async function MealPlanPage({ searchParams }: Props) {
         <div className="space-y-3">
           <h1 className="text-2xl font-bold text-gray-900">Meal Plans</h1>
           <div className="flex gap-2">
-            <Link href="/meal-plans/recipes" className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-orange-200 text-sm font-medium text-orange-700 hover:bg-orange-50 transition-colors">
+            <Link
+              href="/meal-plans/recipes"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-orange-200 text-sm font-medium text-orange-700 hover:bg-orange-50 transition-colors"
+            >
               Recipes ({recipeCount ?? 0})
             </Link>
-            <Link href="/meal-plans/pantry" className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-orange-200 text-sm font-medium text-orange-700 hover:bg-orange-50 transition-colors">
+            <Link
+              href="/meal-plans/pantry"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-orange-200 text-sm font-medium text-orange-700 hover:bg-orange-50 transition-colors"
+            >
               Pantry
             </Link>
           </div>

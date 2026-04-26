@@ -1,71 +1,68 @@
-# Tech Debt — Family Coordinator
-*Rewritten for v33.0.0 Next.js codebase baseline | 2026-04-25*
-*"No bandaid solutions. Proper infrastructure from the start; tech debt tracked here rather than accumulated silently."*
+# Tech Debt — Family Coordinator v20
+*Logged by autonomous build — 2026-04-18*
 
----
+## Architecture
+- **Modularization**: single-file HTML (v8.4 pattern) works for current scope. At ~150KB+ it's approaching maintainability limits. Component extraction to separate files + a build step would help. Trigger: next major feature addition.
+- **State management**: ad-hoc useState + prop drilling. When v20 is stable, consider useContext or Zustand for shared state (recipes, pantry, ingredients). Not needed yet — current prop chain is traceable.
+- **Apps Script row-per-record vs blob**: v8.4 sheets use JSON blobs in A1; v20 sheets use row-per-record. Two storage paradigms in one spreadsheet. Acceptable for now; unify if migrating to Supabase.
 
-## §1 Deferred from v33 Session A
+## Features deferred from v20 scope
+- **Tasks/Digests/Documents/Maintenance/MealLog/PersonNutritionTarget UX** — stubs with headers only. Schema exists; no UI.
+- **Calorie tracking UX** — nutrition data collected (barcode, USDA future, OPEN FoodFacts). Daily/weekly totals not surfaced.
+- **Structured per-step recipe timing** — methodSteps is prose. Per-step timing deferred.
+- **Voice recipe capture** — Mental Dump can catch meal ideas; recipe creation via voice deferred.
+- **Costco PDF receipts** — explicitly out of scope (§3g). Requires PDF parsing.
+- **Pregnancy-stage dietary filters UX** — dietaryTags schema ready; filter UI not built.
+- **Pantry-driven recipe suggestions UX** — schema ready (can query pantry + RecipeIngredients); UI not built.
+- **Restaurant/eating-out capture** — no flow exists.
+- **Family recipe guided entry (Yenny's memory)** — oral history capture deferred.
+- **Full automated recipe-notes summarization** — lite notes appended; auto-summarize to "current best version" deferred.
 
-### Rotation chip UI
-`recipes.rotation_status` column exists (`fresh | cooling | stale`). No UI surfaces or updates this value. Deferred until meal-logging feedback loop exists.
+## Technical gaps
+- **Recipe image dragnet to Drive**: `uploadBinary()` is in Apps Script but the v20 Add Recipe flow doesn't call it. Image is sent to Haiku for extraction but not archived to Drive. Fix: after Haiku returns, call Apps Script `uploadBinary` and store Drive file ID on Recipe.sourceImage.
+- **Barcode Haiku vision fallback**: `/extract-barcode-wrapper` endpoint deployed but not triggered in current barcode flow (no product image available from barcode decode alone). To complete: add "Scan package" step in barcode flow that takes a photo of the wrapper when Open Food Facts returns nothing.
+- **Grocery projection deduplication**: when a recipe is assigned to a meal slot, its ingredients are added to grocery list without checking for duplicates. Add dedup by ingredientId on projection.
+- **Meal plan slot "undo cooked"**: no reverse path from cooked→planned. Add long-press or swipe-to-undo.
+- **appsscript.json filename**: file is `appsscript.json` (correct per clasp). Legacy comment in build prompt said filename missing `.json` extension — not accurate, file is correct. Resolved.
+- **Apps Script legacy `action === "anthropic"` branch**: removed in v20 Code.gs. Confirmed before next deploy.
 
-### Pantry deduction trigger
-When `meal_plan_entries.cooked_status` flips to `cooked`, the pantry should auto-decrement used ingredients. Logic not implemented. Columns exist; trigger pending dedicated session.
+## Testing
+- **No automated tests** — Playwright E2E suite deferred. Manual test checklist in HANDOFF.md §21b.
+- **No unit tests for rotation engine** — pure function, easy to test. Add when test infrastructure exists.
 
-### Calorie / nutrition tracking UX
-`meal_log` + `person_nutrition_targets` stub tables created in v33 migration. No UI exists.
+## Performance
+- **Babel standalone compilation**: ~1-2s parse time on first load for 153KB file. Acceptable; replace with pre-compiled build if it grows past 250KB.
+- **v20 poll interval**: 30s for new sheets. May feel slow if two users are editing simultaneously. Consider event-driven invalidation when moving to Supabase.
 
-### Resolution log review surface
-`ingredient_resolution_log` collects every Tier-3 resolver call. No in-app UI to review or promote Tier-3 suggestions. `grocery_backfill_review` view exists for DB-level review.
+## Legitimate test skips
 
-### `ingredient_aliases` table
-Deferred until ≥100 Tier-3 entries accumulate in `ingredient_resolution_log`. Do not build ahead of corpus signal.
+These `it.skip` entries are intentional — they cover stub skills not yet implemented.
+Each has a SKIP-REASON comment in the test file.
 
-### `grocery_items.quantity` legacy text column deprecation
-Kept in v33 for rollback safety alongside new `qty_value numeric + qty_unit text`. Remove in v34 or v35 after confirming all read paths migrated.
+| Skip location | Skip reason | Ticket | Un-skip when |
+|---|---|---|---|
+| `skills/family-blind-spot-detector/tests.ts` | Skill is a placeholder stub with no business logic | T6 | T6 scheduled and skill implemented |
+| `skills/family-caregiver-employment/tests.ts` | Skill is a placeholder stub with no business logic | T8 | T8 scheduled and skill implemented |
 
-### Universal physics unit conversion in `addGroceryItem`
-`fn_grocery_upsert` currently clusters different-unit quantities for review. True cross-unit merging (cup↔ml, lb↔g) requires a conversion layer before calling the PG function. Build when `requires_review` queue has enough patterns.
+## v34.0.0 — P0
 
----
+**family-school-brief — removed.** Skill stub deleted in v34 P0. No schema for school newsletters. Revisit when school inbox triage becomes priority.
 
-## §2 Orphan skills awaiting decision (decide in v34)
+## v34.0.0 — Session B deferrals
 
-### `family-school-brief`
-Skill file exists. No schema. No UX. Options: build out (school newsletters → action items) or kill. Decide v34.
+### Composition opportunities (deferred to v35+)
+- Receipts → Expenses auto-conversion
+- Trips → Document Vault attachment
+- Vendors → Maintenance auto-prompt
 
-### `family-blind-spot-detector`
-Skill file exists. No schema. No UX. Options: integrate into Weekly Digest or kill. Decide v34.
+### Visual / design polish
+- Each v34 feature shipped with minimal-functional UX
+- No animations or advanced affordances
+- Dedicated UX session needed
 
----
+### Killed entirely
+- family-school-brief: removed in v34 P0. Revisit when school inbox becomes priority.
 
-## §3 Schema-and-skill UX activations queued for Session B
-
-| Feature | Note |
-|---|---|
-| **Vendors** | Full CRUD vendor list + service log. Schema + skill exist. |
-| **Trips** | Trip + packing list via family-travel skill. Schema + skill exist. |
-| **Hurricane / Seasonal Prep** | Checklist generation via family-hurricane-prep. Schema + skill exist. |
-| **Kid Milestones + Birthdays** | Milestone logging + gift suggestions. Schema + skills exist. |
-| **Expenses / Reimbursements** | Expense capture + reimbursement tracking. Schema + skill exist. |
-| **Document Vault** | Upload, index, Q&A via document-indexer + document-qa. Schema + skills exist. |
-| **Weekly Digest** | AI family brief. Skill + actions exist. |
-
----
-
-## §4 Known issues surfaced during v33 build
-
-### Playwright E2E requires authenticated session
-All E2E specs navigating to `/grocery`, `/meal-plans` redirect to `/login` without auth. Set up Playwright `storageState` auth fixture before v35 E2E expansion.
-
-### `vi.hoisted` requirement for integration tests
-Vitest mocking of `server-only` modules requires `vi.hoisted` declarations. Follow pattern in `tests/integration/grocery-dedup.test.ts` for all future integration tests.
-
----
-
-## §5 Out-of-scope reminders
-
-- **Budgeting replacement** — not Monarch/YNAB. Transaction categorization out of scope.
-- **Messaging replacement** — not a group chat platform.
-- **Clinical / diagnostic features** — no HIPAA-sensitive data or medication management.
-- **School portal replacement** — we ingest, we don't replicate the school portal.
+## Future migration path
+- **Supabase / Postgres**: when Google Sheets limits bind (~5M cells). Schema is designed for relational migration. Apps Script `weeklyBackup()` provides JSON snapshot for migration. All IDs are UUIDs.
+- **Obsidian integration**: for long-form/narrative content (family memory, decision log). Explicitly a separate system — not a v20 concern.
