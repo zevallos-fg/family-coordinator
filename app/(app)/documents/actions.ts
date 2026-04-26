@@ -293,3 +293,26 @@ export async function deleteDocument(id: string): Promise<ActionResult<void>> {
     return err("unknown", "An unexpected error occurred.", String(error));
   }
 }
+
+export async function getDocumentIndexingStatus(
+  document_id: string
+): Promise<ActionResult<{ indexed_at: string | null; tags: string[] | null }>> {
+  try {
+    const { supabase, familyId } = await getAuthedFamily();
+
+    const { data, error } = await supabase
+      .from("documents")
+      .select("indexed_at, tags")
+      .eq("id", document_id)
+      .eq("family_id", familyId)
+      .maybeSingle();
+
+    if (error) return err("db_error", "Could not fetch document status.", error.message);
+    if (!data) return err("not_found", "Document not found.", `id: ${document_id}`);
+
+    return ok({ indexed_at: data.indexed_at ?? null, tags: data.tags ?? null });
+  } catch (error) {
+    Sentry.captureException(error, { extra: { action: "getDocumentIndexingStatus", document_id } });
+    return err("unknown", "An unexpected error occurred.", String(error));
+  }
+}

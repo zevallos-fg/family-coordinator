@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { uploadDocument, queryDocuments } from "@/app/(app)/documents/actions";
+import { uploadDocument, queryDocuments, triggerIndexing, getDocumentIndexingStatus } from "@/app/(app)/documents/actions";
 import type { DocumentMatch } from "@/skills/family-document-qa";
 
 interface Document {
@@ -21,6 +21,9 @@ interface DocumentVaultViewProps {
   docs: Document[];
 }
 
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 30000;
+
 export function DocumentVaultView({ docs: initialDocs }: DocumentVaultViewProps) {
   const [docs, setDocs] = useState(initialDocs);
   const [uploading, setUploading] = useState(false);
@@ -29,7 +32,53 @@ export function DocumentVaultView({ docs: initialDocs }: DocumentVaultViewProps)
   const [searchResults, setSearchResults] = useState<DocumentMatch[] | null>(null);
   const [noMatchReason, setNoMatchReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [indexingFailed, setIndexingFailed] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const pollTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const stopPolling = useCallback((docId: string) => {
+    const interval = pollTimers.current.get(docId);
+    if (interval) { clearInterval(interval); pollTimers.current.delete(docId); }
+    const timeout = pollTimeouts.current.get(docId);
+    if (timeout) { clearTimeout(timeout); pollTimeouts.current.delete(docId); }
+  }, []);
+
+  const startPolling = useCallback((docId: string) => {
+    stopPolling(docId);
+
+    const interval = setInterval(async () => {
+      const result = await getDocumentIndexingStatus(docId);
+      if (!result.ok) return;
+      if (result.data.indexed_at) {
+        stopPolling(docId);
+        const { indexed_at, tags } = result.data;
+        setDocs((prev) =>
+          prev.map((d) =>
+            d.id === docId
+              ? { ...d, indexed_at: indexed_at!, tags: tags ?? d.tags }
+              : d
+          )
+        );
+      }
+    }, POLL_INTERVAL_MS);
+
+    const timeout = setTimeout(() => {
+      stopPolling(docId);
+      setIndexingFailed((prev) => new Set([...prev, docId]));
+    }, POLL_TIMEOUT_MS);
+
+    pollTimers.current.set(docId, interval);
+    pollTimeouts.current.set(docId, timeout);
+  }, [stopPolling]);
+
+  // Start polling for any unindexed docs on mount
+  useEffect(() => {
+    initialDocs.filter((d) => !d.indexed_at).forEach((d) => startPolling(d.id));
+    return () => {
+      pollTimers.current.forEach((_, id) => stopPolling(id));
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -47,7 +96,32 @@ export function DocumentVaultView({ docs: initialDocs }: DocumentVaultViewProps)
       return;
     }
 
-    window.location.reload();
+    // Add the new document optimistically and start polling for indexing
+    const newDoc: Document = {
+      id: result.data.id,
+      title: file.name.replace(/\.[^/.]+$/, ""),
+      doc_type: null,
+      tags: null,
+      file_url: "",
+      indexed_at: null,
+      file_size_bytes: file.size,
+      created_at: new Date().toISOString(),
+    };
+    setDocs((prev) => [newDoc, ...prev]);
+    startPolling(result.data.id);
+
+    // Reset file input
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  async function handleRetryIndexing(docId: string) {
+    setIndexingFailed((prev) => { const next = new Set(prev); next.delete(docId); return next; });
+    const result = await triggerIndexing(docId);
+    if (!result.ok) {
+      setError(result.error.userMessage);
+      return;
+    }
+    startPolling(docId);
   }
 
   async function handleSearch(e: React.FormEvent) {
@@ -171,13 +245,26 @@ export function DocumentVaultView({ docs: initialDocs }: DocumentVaultViewProps)
                   </p>
                 </div>
               </div>
-              {doc.indexed_at ? (
+              {indexingFailed.has(doc.id) ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                    Indexing failed
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); handleRetryIndexing(doc.id); }}
+                    className="text-xs text-amber-700 hover:underline font-medium"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : doc.indexed_at ? (
                 <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
                   Indexed
                 </span>
               ) : (
-                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
-                  Indexing...
+                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded animate-pulse">
+                  Indexing…
                 </span>
               )}
               {doc.tags && doc.tags.length > 0 && (
