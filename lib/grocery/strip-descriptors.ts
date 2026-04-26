@@ -31,7 +31,7 @@ export function stripDescriptors(input: string): StripResult {
   const descriptorsFound: string[] = [];
 
   // Normalize whitespace
-  let text = input.trim();
+  const text = input.trim();
 
   // Step 1: Handle comma-separated descriptor(s) after the primary name.
   // e.g. "garlic, minced"  "Garlic, MINCED and crushed"
