@@ -6,6 +6,27 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { generateDigest, convertBlindSpotToTask } from "@/app/(app)/digest/actions";
 import type { BlindSpot } from "@/skills/family-weekly-digest";
 
+interface DigestSection {
+  title: string;
+  body: string;
+  data_present: boolean;
+}
+
+interface LoadMember {
+  name: string;
+  action_count: number;
+  mention_count: number;
+}
+
+interface StructuredContent {
+  summary: string;
+  sections: DigestSection[];
+  load_attribution: {
+    members: LoadMember[];
+    observation: string;
+  };
+}
+
 interface Digest {
   id: string;
   week_start_date: string;
@@ -18,6 +39,49 @@ interface Digest {
 interface DigestViewProps {
   digests: Digest[];
   currentWeek: string;
+}
+
+function parseContent(raw: string): StructuredContent | null {
+  try {
+    const parsed = JSON.parse(raw) as StructuredContent;
+    if (parsed && typeof parsed === "object" && "sections" in parsed) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function LoadAttributionChart({ members, observation }: { members: LoadMember[]; observation: string }) {
+  if (!members || members.length === 0) return null;
+  const maxCount = Math.max(...members.map((m) => m.action_count), 1);
+
+  return (
+    <div className="p-4 border border-stone-200 rounded-xl space-y-3">
+      <h2 className="text-sm font-medium text-stone-600 uppercase tracking-wide">
+        Family Load
+      </h2>
+      <div className="space-y-2">
+        {members.map((member) => {
+          const pct = Math.round((member.action_count / maxCount) * 100);
+          return (
+            <div key={member.name} className="flex items-center gap-3">
+              <span className="text-xs text-stone-600 w-24 truncate shrink-0">{member.name}</span>
+              <div className="flex-1 bg-stone-100 rounded-full h-2">
+                <div
+                  className="bg-amber-500 h-2 rounded-full transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="text-xs text-stone-500 w-8 text-right shrink-0">{member.action_count}</span>
+            </div>
+          );
+        })}
+      </div>
+      {observation && (
+        <p className="text-xs text-stone-500 italic">{observation}</p>
+      )}
+    </div>
+  );
 }
 
 export function DigestView({ digests: initialDigests, currentWeek }: DigestViewProps) {
@@ -57,6 +121,7 @@ export function DigestView({ digests: initialDigests, currentWeek }: DigestViewP
   }
 
   const blindSpots = selectedDigest?.blind_spots as BlindSpot[] | null;
+  const structured = selectedDigest ? parseContent(selectedDigest.content) : null;
 
   return (
     <div className="space-y-6">
@@ -97,12 +162,31 @@ export function DigestView({ digests: initialDigests, currentWeek }: DigestViewP
       {/* Digest content */}
       {selectedDigest && !generating && (
         <div className="space-y-6">
-          {/* Markdown-rendered content */}
-          <div className="p-6 border border-stone-200 rounded-xl prose prose-sm max-w-none">
-            <pre className="whitespace-pre-wrap font-sans text-sm text-stone-700 leading-relaxed">
-              {selectedDigest.content}
-            </pre>
-          </div>
+          {structured ? (
+            <>
+              {/* Summary */}
+              <div className="p-5 border border-stone-200 rounded-xl bg-white">
+                <p className="text-sm text-stone-700 leading-relaxed whitespace-pre-wrap">
+                  {structured.summary}
+                </p>
+              </div>
+
+              {/* Sections — only data_present: true */}
+              {structured.sections.filter((s) => s.data_present).map((section, i) => (
+                <section key={i} className="border border-stone-100 rounded-xl p-4">
+                  <h2 className="text-sm font-semibold text-stone-700">{section.title}</h2>
+                  <p className="text-sm text-stone-600 mt-1 whitespace-pre-wrap">{section.body}</p>
+                </section>
+              ))}
+            </>
+          ) : (
+            // Legacy fallback for any non-JSON content
+            <div className="p-6 border border-stone-200 rounded-xl">
+              <pre className="whitespace-pre-wrap font-sans text-sm text-stone-700 leading-relaxed">
+                {selectedDigest.content}
+              </pre>
+            </div>
+          )}
 
           {/* Blind spots */}
           {blindSpots && blindSpots.length > 0 && (
@@ -140,11 +224,13 @@ export function DigestView({ digests: initialDigests, currentWeek }: DigestViewP
             </div>
           )}
 
-          {/* Load attribution */}
-          {(() => {
-            // Parse load attribution from content if not in blind_spots
-            return null;
-          })()}
+          {/* Load attribution chart */}
+          {structured?.load_attribution && (
+            <LoadAttributionChart
+              members={structured.load_attribution.members}
+              observation={structured.load_attribution.observation}
+            />
+          )}
 
           {/* Actions */}
           <div className="flex gap-2">

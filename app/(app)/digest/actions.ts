@@ -166,14 +166,9 @@ export async function generateDigest(
 
     const { summary, sections, blind_spots, load_attribution } = skillResult.data;
 
-    // Build markdown content
-    const content = [
-      `# Weekly Digest — ${week_start_date}`,
-      "",
-      summary,
-      "",
-      ...sections.map((s) => `## ${s.title}\n${s.body}`),
-    ].join("\n");
+    // Store structured output as JSON in the content column so the render
+    // layer can consume sections[] and load_attribution without a migration.
+    const content = JSON.stringify({ summary, sections, load_attribution });
 
     const { data: digest, error: insertError } = await supabase
       .from("digests")
