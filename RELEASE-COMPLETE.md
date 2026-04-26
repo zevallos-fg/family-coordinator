@@ -63,3 +63,26 @@
 - `docs/v33-evidence/phase-3-design.md` — frontend design spec
 - `docs/v33-evidence/phase-4.md` — test results
 - `docs/v33-evidence/pr-body.md` — PR description
+
+---
+
+## Path C close-out (2026-04-25)
+
+Two findings from post-cleanup audit fixed before merge:
+
+### F8 — Weekly Digest structured render
+- **Was:** digest content rendered as single prose blob; structured `sections[]` and `load_attribution` ignored (dead-code marker left in component)
+- **Fix:** `generateDigest` action now stores `JSON.stringify({ summary, sections, load_attribution })` in `content` column (no migration needed — 0 rows). `DigestView` parses JSON, renders sections filtered by `data_present`, renders `load_attribution` as horizontal bar chart. Dead-code marker removed.
+- **Commits:** `75416c1`
+
+### F7 — Document Vault polling
+- **Was:** `window.location.reload()` after upload; required manual refresh to see Indexing → Indexed transition
+- **Fix:** 2s `setInterval` polling via new `getDocumentIndexingStatus` server action. 30s timeout triggers "Indexing failed" + Retry button. Proper cleanup on unmount.
+- **Commits:** `659d4dc`
+
+### Sequencing
+- v33 PR #1 opened and merged via `gh pr merge --squash` at 2026-04-25
+- v34 rebased onto new main — Outcome B (5 conflict files, all mechanical, main wins)
+- 3 duplicate commits correctly dropped by git during rebase
+- v34 fixes applied on rebased branch
+- All gates clean: tsc 0 errors, lint 0 errors, 182 tests passing (2 documented skips)
