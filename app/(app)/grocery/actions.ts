@@ -65,9 +65,11 @@ export async function addGroceryItemFromText(formData: FormData) {
 
   // Route each parsed item through the dedup orchestrator
   let count = 0;
+  let lastAction: string | undefined;
+  let lastName: string | undefined;
   for (const item of items) {
     try {
-      await addGroceryItem({
+      const dedup = await addGroceryItem({
         rawName: item.name,
         qtyValue: item.quantity !== null ? Number(item.quantity) : null,
         qtyUnit: item.unit ?? null,
@@ -76,6 +78,8 @@ export async function addGroceryItemFromText(formData: FormData) {
         userId: user.id,
         createIfMissing: true,
       });
+      lastAction = dedup.action;
+      lastName = dedup.cleanedName || item.name;
       count++;
     } catch {
       // Fallback: direct insert so we never silently drop items
@@ -91,7 +95,70 @@ export async function addGroceryItemFromText(formData: FormData) {
 
   revalidatePath("/grocery");
   revalidatePath("/dashboard");
-  return { ok: true, count };
+  return { ok: true, count, action: count === 1 ? lastAction : undefined, name: count === 1 ? lastName : undefined };
+}
+
+export async function updateGroceryStore(id: string, storeId: string | null) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { error } = await supabase
+    .from("grocery_items")
+    .update({ store_id: storeId })
+    .eq("id", id);
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/grocery");
+  return { ok: true };
+}
+
+export async function previewDedup(
+  rawText: string,
+  familyId: string
+): Promise<{ willMerge: boolean; existingItem?: { name: string; qty_value: number | null; qty_unit: string | null } }> {
+  const { stripDescriptors } = await import("@/lib/grocery/strip-descriptors");
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { willMerge: false };
+
+  const { cleanedName } = stripDescriptors(rawText);
+  if (!cleanedName) return { willMerge: false };
+
+  const { data: exactMatch } = await supabase
+    .from("ingredients")
+    .select("id")
+    .eq("family_id", familyId)
+    .eq("canonical_name", cleanedName.toLowerCase())
+    .limit(1)
+    .maybeSingle();
+
+  if (!exactMatch) return { willMerge: false };
+
+  const { data: existing } = await supabase
+    .from("grocery_items")
+    .select("id, name, qty_value, qty_unit")
+    .eq("family_id", familyId)
+    .eq("ingredient_id", exactMatch.id)
+    .eq("in_cart", false)
+    .is("completed_at", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (!existing) return { willMerge: false };
+
+  return {
+    willMerge: true,
+    existingItem: {
+      name: existing.name,
+      qty_value: existing.qty_value,
+      qty_unit: existing.qty_unit,
+    },
+  };
 }
 
 export async function toggleInCart(id: string, currentValue: boolean) {

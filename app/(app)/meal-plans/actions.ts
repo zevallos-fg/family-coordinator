@@ -604,6 +604,79 @@ async function runPlanGeneration(
   return { planId: mealPlan.id };
 }
 
+// ── Manual recipe entry ───────────────────────────────────────────────────────
+
+export interface ManualIngredientRow {
+  name: string;
+  qty: number | null;
+  unit: string;
+  notes: string;
+}
+
+export async function addRecipeAction(
+  title: string,
+  servings: number,
+  ingredients: ManualIngredientRow[],
+  optional?: {
+    description?: string;
+    prepTimeMin?: number | null;
+    cookTimeMin?: number | null;
+    cuisine?: string;
+    tags?: string;
+    instructions?: string;
+  }
+): Promise<{ error?: string; recipeId?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const familyId = await getFamilyId(supabase, user.id);
+  if (!familyId) return { error: "No family found — complete onboarding first" };
+
+  const tags = optional?.tags
+    ? optional.tags.split(",").map((t) => t.trim()).filter(Boolean)
+    : null;
+
+  const { data: newRecipe, error: recipeErr } = await supabase
+    .from("recipes")
+    .insert({
+      family_id: familyId,
+      title: title.trim(),
+      description: optional?.description?.trim() || null,
+      servings,
+      prep_time_min: optional?.prepTimeMin ?? null,
+      cook_time_min: optional?.cookTimeMin ?? null,
+      cuisine: optional?.cuisine?.trim() || null,
+      tags: tags && tags.length > 0 ? tags : null,
+      instructions: optional?.instructions?.trim()
+        ? JSON.stringify([{ step: 1, text: optional.instructions.trim() }])
+        : null,
+      source_url: "",
+      created_by_user_id: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (recipeErr || !newRecipe) return { error: "Failed to save recipe" };
+
+  const { resolveIngredient } = await import("@/lib/grocery/resolve-ingredient");
+  for (const ing of ingredients) {
+    if (!ing.name.trim()) continue;
+    const resolved = await resolveIngredient({ rawName: ing.name, familyId, createIfMissing: true, userId: user.id });
+    if (!resolved.ingredientId) continue;
+    await supabase.from("recipe_ingredients").insert({
+      recipe_id: newRecipe.id,
+      ingredient_id: resolved.ingredientId,
+      amount: ing.qty,
+      unit: ing.unit?.trim() || null,
+      notes: resolved.descriptors.length > 0 ? resolved.descriptors.join(", ") : (ing.notes?.trim() || null),
+    });
+  }
+
+  revalidatePath("/meal-plans/recipes");
+  return { recipeId: newRecipe.id };
+}
+
 export async function swapMealEntryAction(entryId: string, newRecipeId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

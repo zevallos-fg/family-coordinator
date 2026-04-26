@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { GroceryList } from "@/components/grocery/GroceryList";
+import { GroceryTable } from "@/components/grocery/GroceryTable";
 import { AddItemForm } from "@/components/grocery/AddItemForm";
 import { StoreFilter } from "@/components/grocery/StoreFilter";
 
@@ -31,7 +31,7 @@ export default async function GroceryPage({ searchParams }: PageProps) {
   const [{ data: allItems }, { data: stores }] = await Promise.all([
     supabase
       .from("grocery_items")
-      .select("id, name, quantity, in_cart, store_id, stores(name)")
+      .select("id, name, quantity, qty_value, qty_unit, in_cart, store_id, dedup_group_id, requires_review, stores(name)")
       .eq("family_id", familyId)
       .is("completed_at", null)
       .order("created_at", { ascending: false }),
@@ -44,6 +44,10 @@ export default async function GroceryPage({ searchParams }: PageProps) {
 
   const items = (allItems ?? []).map((item) => ({
     ...item,
+    qty_value: item.qty_value ?? null,
+    qty_unit: item.qty_unit ?? null,
+    dedup_group_id: item.dedup_group_id ?? null,
+    requires_review: item.requires_review ?? false,
     stores: item.stores as { name: string } | null,
   }));
 
@@ -66,7 +70,7 @@ export default async function GroceryPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      <AddItemForm />
+      <AddItemForm familyId={familyId} />
 
       <Suspense fallback={null}>
         <StoreFilter stores={stores ?? []} />
@@ -77,7 +81,7 @@ export default async function GroceryPage({ searchParams }: PageProps) {
           <h2 className="text-xs font-medium text-stone-500 uppercase tracking-wide mb-2">
             To get
           </h2>
-          <GroceryList items={pending} />
+          <GroceryTable items={pending} stores={stores ?? []} />
         </div>
       )}
 
@@ -86,13 +90,13 @@ export default async function GroceryPage({ searchParams }: PageProps) {
           <h2 className="text-xs font-medium text-stone-500 uppercase tracking-wide mb-2">
             In cart
           </h2>
-          <GroceryList items={inCart} />
+          <GroceryTable items={inCart} stores={stores ?? []} />
         </div>
       )}
 
       {filtered.length === 0 && (
         <div className="text-center py-10 text-stone-400 bg-white rounded-xl border border-stone-200">
-          <p className="text-sm">Empty list</p>
+          <p className="text-sm">Nothing to buy yet</p>
           <p className="text-xs mt-1">Add items above or capture grocery notes in the Capture tab</p>
         </div>
       )}
