@@ -3,6 +3,8 @@
  * and the recipe title-case normalization (#9).
  */
 import { test, expect } from "@playwright/test";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { admin, fixtureFamilyId, ns, nsPattern } from "./helpers/fixture";
 
 // ─── #2 — Receipts upload a11y ────────────────────────────────────────────────
 test.describe("Receipts upload zone a11y", () => {
@@ -25,19 +27,47 @@ test.describe("Receipts upload zone a11y", () => {
 
 // ─── #9 — Recipe titles are in Title Case ─────────────────────────────────────
 test.describe("Recipe title case", () => {
+  let db: SupabaseClient;
+  let familyId: string;
+
+  test.beforeAll(async ({}, workerInfo) => {
+    db = admin();
+    familyId = fixtureFamilyId();
+    const title = ns(workerInfo.project.name, "Recipe Title Case");
+
+    await db.from("recipes").delete().eq("family_id", familyId).eq("title", title);
+    const { error } = await db.from("recipes").insert({ family_id: familyId, title });
+    if (error) throw error;
+  });
+
+  test.afterAll(async ({}, workerInfo) => {
+    if (!db || !familyId) return;
+    await db
+      .from("recipes")
+      .delete()
+      .eq("family_id", familyId)
+      .like("title", nsPattern(workerInfo.project.name, "Recipe Title Case"));
+  });
+
   test("recipe library shows Title Case titles (no all-lowercase)", async ({
     page,
   }) => {
     await page.goto("/meal-plans/recipes");
-    const recipeLinks = page.getByRole("link").filter({ hasText: /\w/ });
-    const count = await recipeLinks.count();
-    // Check that no visible recipe title is all-lowercase
+
+    // Recipe cards only — getByRole("link") also matched the "← Meal Plans" back
+    // link and the import CTA, so the check was landing on page furniture.
+    const recipeCards = page.locator(
+      'a[href^="/meal-plans/recipes/"]:not([href$="/import"])'
+    );
+
+    const count = await recipeCards.count();
+    // Without this the assertion is vacuous against an empty library.
+    expect(count, "expected at least the seeded recipe").toBeGreaterThan(0);
+
     for (let i = 0; i < Math.min(count, 5); i++) {
-      const text = await recipeLinks.nth(i).textContent();
-      if (text && text.length > 3) {
-        // Title should start with an uppercase letter
-        expect(text.trim()[0], `"${text}" should start uppercase`).toMatch(/[A-Z]/);
-      }
+      const title =
+        (await recipeCards.nth(i).getByRole("heading", { level: 3 }).textContent()) ?? "";
+      expect(title.trim()[0], `"${title.trim()}" should start uppercase`).toMatch(/[A-Z]/);
     }
   });
 });

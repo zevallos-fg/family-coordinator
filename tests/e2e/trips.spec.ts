@@ -5,9 +5,11 @@ test.describe("Trips feature", () => {
     await page.goto("/trips");
     await page.waitForLoadState("networkidle");
 
-    // Should have plan trip button
-    const planButton = page.locator('a[href="/trips/new"]');
+    // In the empty state the header CTA and the EmptyState CTA both point at
+    // /trips/new, so an href selector matches two links. Name the one under test.
+    const planButton = page.getByRole("link", { name: "+ Plan trip" });
     await expect(planButton).toBeVisible();
+    await expect(planButton).toHaveAttribute("href", "/trips/new");
   });
 
   test("new trip page renders form with required fields", async ({ page }) => {

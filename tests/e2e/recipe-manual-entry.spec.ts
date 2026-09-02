@@ -14,8 +14,9 @@ test.describe("Manual recipe entry", () => {
   test("clicking Manual tab shows the manual form", async ({ page }) => {
     await page.goto("/meal-plans/recipes/import");
     await page.getByRole("tab", { name: "Manual" }).click();
-    // Title field should appear
-    const titleField = page.getByPlaceholder(/Recipe title/i);
+    // The title field's placeholder is "e.g. Grandma's Chicken Soup"; the label
+    // beside it has no htmlFor, so there is no accessible label to target instead.
+    const titleField = page.getByPlaceholder(/e\.g\. Grandma/i);
     await expect(titleField).toBeVisible();
   });
 
@@ -34,7 +35,7 @@ test.describe("Manual recipe entry", () => {
     await page.goto("/meal-plans/recipes/import");
     await page.getByRole("tab", { name: "Manual" }).click();
     // Fill required fields
-    await page.getByPlaceholder(/Recipe title/i).fill("Test Soup");
+    await page.getByPlaceholder(/e\.g\. Grandma/i).fill("Test Soup");
     await page.locator('input[type="number"][min="1"]').first().fill("4");
     // Fill first ingredient with descriptor
     const nameInput = page.locator('input[placeholder="Ingredient name"]').first();
