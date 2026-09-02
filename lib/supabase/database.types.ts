@@ -1202,6 +1202,8 @@ export type Database = {
           last_done_at: string | null
           next_due_at: string | null
           notes: string | null
+          owner_user_id: string | null
+          start_date: string
         }
         Insert: {
           cadence_days: number
@@ -1212,6 +1214,8 @@ export type Database = {
           last_done_at?: string | null
           next_due_at?: string | null
           notes?: string | null
+          owner_user_id?: string | null
+          start_date?: string
         }
         Update: {
           cadence_days?: number
@@ -1222,6 +1226,8 @@ export type Database = {
           last_done_at?: string | null
           next_due_at?: string | null
           notes?: string | null
+          owner_user_id?: string | null
+          start_date?: string
         }
         Relationships: [
           {
@@ -1229,6 +1235,13 @@ export type Database = {
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -1432,6 +1445,341 @@ export type Database = {
             columns: ["kid_id"]
             isOneToOne: false
             referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memory_corrections: {
+        Row: {
+          correction_type: string
+          family_id: string
+          generator_pattern: string | null
+          id: string
+          occurred_at: string
+          recorded_at: string
+          recorded_by_user_id: string | null
+          resulting_fact_id: string | null
+          resulting_lexicon_id: string | null
+          subject_label: string | null
+          what_is_true: string
+          what_was_said: string
+        }
+        Insert: {
+          correction_type: string
+          family_id: string
+          generator_pattern?: string | null
+          id?: string
+          occurred_at: string
+          recorded_at?: string
+          recorded_by_user_id?: string | null
+          resulting_fact_id?: string | null
+          resulting_lexicon_id?: string | null
+          subject_label?: string | null
+          what_is_true: string
+          what_was_said: string
+        }
+        Update: {
+          correction_type?: string
+          family_id?: string
+          generator_pattern?: string | null
+          id?: string
+          occurred_at?: string
+          recorded_at?: string
+          recorded_by_user_id?: string | null
+          resulting_fact_id?: string | null
+          resulting_lexicon_id?: string | null
+          subject_label?: string | null
+          what_is_true?: string
+          what_was_said?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_corrections_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_corrections_recorded_by_user_id_fkey"
+            columns: ["recorded_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_corrections_resulting_fact_id_fkey"
+            columns: ["resulting_fact_id"]
+            isOneToOne: false
+            referencedRelation: "memory_facts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_corrections_resulting_fact_id_fkey"
+            columns: ["resulting_fact_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_facts_current"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_corrections_resulting_lexicon_id_fkey"
+            columns: ["resulting_lexicon_id"]
+            isOneToOne: false
+            referencedRelation: "memory_lexicon"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_corrections_resulting_lexicon_id_fkey"
+            columns: ["resulting_lexicon_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_current"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_corrections_resulting_lexicon_id_fkey"
+            columns: ["resulting_lexicon_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_stale"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memory_decisions: {
+        Row: {
+          context: string | null
+          created_at: string
+          decided_at: string
+          decided_by_user_id: string | null
+          decision: string
+          due_at: string | null
+          family_id: string
+          id: string
+          lifecycle_at: string | null
+          lifecycle_ref: string | null
+          lifecycle_state: string | null
+          owner_user_id: string | null
+          source: string
+          source_ref: string | null
+          supersedes_decision_id: string | null
+        }
+        Insert: {
+          context?: string | null
+          created_at?: string
+          decided_at: string
+          decided_by_user_id?: string | null
+          decision: string
+          due_at?: string | null
+          family_id: string
+          id?: string
+          lifecycle_at?: string | null
+          lifecycle_ref?: string | null
+          lifecycle_state?: string | null
+          owner_user_id?: string | null
+          source?: string
+          source_ref?: string | null
+          supersedes_decision_id?: string | null
+        }
+        Update: {
+          context?: string | null
+          created_at?: string
+          decided_at?: string
+          decided_by_user_id?: string | null
+          decision?: string
+          due_at?: string | null
+          family_id?: string
+          id?: string
+          lifecycle_at?: string | null
+          lifecycle_ref?: string | null
+          lifecycle_state?: string | null
+          owner_user_id?: string | null
+          source?: string
+          source_ref?: string | null
+          supersedes_decision_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_decisions_decided_by_user_id_fkey"
+            columns: ["decided_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_supersedes_decision_id_fkey"
+            columns: ["supersedes_decision_id"]
+            isOneToOne: false
+            referencedRelation: "memory_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_supersedes_decision_id_fkey"
+            columns: ["supersedes_decision_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_decisions_open"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memory_facts: {
+        Row: {
+          assertion_type: string
+          certainty: string
+          fact_json: Json | null
+          fact_key: string
+          fact_value: string | null
+          family_id: string
+          id: string
+          note: string | null
+          observed_at: string
+          recorded_at: string
+          recorded_by_user_id: string | null
+          source: string
+          source_ref: string | null
+          subject_id: string | null
+          subject_label: string
+          subject_type: string
+        }
+        Insert: {
+          assertion_type?: string
+          certainty?: string
+          fact_json?: Json | null
+          fact_key: string
+          fact_value?: string | null
+          family_id: string
+          id?: string
+          note?: string | null
+          observed_at: string
+          recorded_at?: string
+          recorded_by_user_id?: string | null
+          source?: string
+          source_ref?: string | null
+          subject_id?: string | null
+          subject_label: string
+          subject_type: string
+        }
+        Update: {
+          assertion_type?: string
+          certainty?: string
+          fact_json?: Json | null
+          fact_key?: string
+          fact_value?: string | null
+          family_id?: string
+          id?: string
+          note?: string | null
+          observed_at?: string
+          recorded_at?: string
+          recorded_by_user_id?: string | null
+          source?: string
+          source_ref?: string | null
+          subject_id?: string | null
+          subject_label?: string
+          subject_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_facts_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_facts_recorded_by_user_id_fkey"
+            columns: ["recorded_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memory_lexicon: {
+        Row: {
+          confirmed_by_user_id: string | null
+          created_at: string
+          family_id: string
+          id: string
+          last_confirmed_at: string
+          means: string
+          never_assume: string | null
+          scope: string | null
+          supersedes_id: string | null
+          term: string
+          why_it_matters: string | null
+        }
+        Insert: {
+          confirmed_by_user_id?: string | null
+          created_at?: string
+          family_id: string
+          id?: string
+          last_confirmed_at: string
+          means: string
+          never_assume?: string | null
+          scope?: string | null
+          supersedes_id?: string | null
+          term: string
+          why_it_matters?: string | null
+        }
+        Update: {
+          confirmed_by_user_id?: string | null
+          created_at?: string
+          family_id?: string
+          id?: string
+          last_confirmed_at?: string
+          means?: string
+          never_assume?: string | null
+          scope?: string | null
+          supersedes_id?: string | null
+          term?: string
+          why_it_matters?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_lexicon_confirmed_by_user_id_fkey"
+            columns: ["confirmed_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "memory_lexicon"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_current"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_stale"
             referencedColumns: ["id"]
           },
         ]
@@ -1819,6 +2167,47 @@ export type Database = {
             columns: ["to_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reminder_log: {
+        Row: {
+          channel: string
+          due_on: string
+          external_ref: string | null
+          family_id: string
+          id: string
+          sent_at: string
+          source_id: string
+          source_table: string
+        }
+        Insert: {
+          channel: string
+          due_on: string
+          external_ref?: string | null
+          family_id: string
+          id?: string
+          sent_at?: string
+          source_id: string
+          source_table: string
+        }
+        Update: {
+          channel?: string
+          due_on?: string
+          external_ref?: string | null
+          family_id?: string
+          id?: string
+          sent_at?: string
+          source_id?: string
+          source_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reminder_log_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
             referencedColumns: ["id"]
           },
         ]
@@ -2273,9 +2662,357 @@ export type Database = {
           },
         ]
       }
+      v_family_memory: {
+        Row: {
+          as_of: string | null
+          detail: string | null
+          family_id: string | null
+          kind: string | null
+          needs_attention: boolean | null
+          source_id: string | null
+          source_table: string | null
+          statement: string | null
+          subject: string | null
+        }
+        Relationships: []
+      }
+      v_memory_decisions_open: {
+        Row: {
+          age: string | null
+          context: string | null
+          created_at: string | null
+          decided_at: string | null
+          decided_by_user_id: string | null
+          decision: string | null
+          due_at: string | null
+          family_id: string | null
+          id: string | null
+          lifecycle_at: string | null
+          lifecycle_ref: string | null
+          lifecycle_state: string | null
+          overdue: boolean | null
+          owner_user_id: string | null
+          source: string | null
+          source_ref: string | null
+          supersedes_decision_id: string | null
+        }
+        Insert: {
+          age?: never
+          context?: string | null
+          created_at?: string | null
+          decided_at?: string | null
+          decided_by_user_id?: string | null
+          decision?: string | null
+          due_at?: string | null
+          family_id?: string | null
+          id?: string | null
+          lifecycle_at?: string | null
+          lifecycle_ref?: string | null
+          lifecycle_state?: string | null
+          overdue?: never
+          owner_user_id?: string | null
+          source?: string | null
+          source_ref?: string | null
+          supersedes_decision_id?: string | null
+        }
+        Update: {
+          age?: never
+          context?: string | null
+          created_at?: string | null
+          decided_at?: string | null
+          decided_by_user_id?: string | null
+          decision?: string | null
+          due_at?: string | null
+          family_id?: string | null
+          id?: string | null
+          lifecycle_at?: string | null
+          lifecycle_ref?: string | null
+          lifecycle_state?: string | null
+          overdue?: never
+          owner_user_id?: string | null
+          source?: string | null
+          source_ref?: string | null
+          supersedes_decision_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_decisions_decided_by_user_id_fkey"
+            columns: ["decided_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_supersedes_decision_id_fkey"
+            columns: ["supersedes_decision_id"]
+            isOneToOne: false
+            referencedRelation: "memory_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_decisions_supersedes_decision_id_fkey"
+            columns: ["supersedes_decision_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_decisions_open"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_memory_facts_current: {
+        Row: {
+          assertion_type: string | null
+          certainty: string | null
+          fact_json: Json | null
+          fact_key: string | null
+          fact_value: string | null
+          family_id: string | null
+          id: string | null
+          note: string | null
+          observed_at: string | null
+          recorded_at: string | null
+          recorded_by_user_id: string | null
+          source: string | null
+          source_ref: string | null
+          subject_id: string | null
+          subject_label: string | null
+          subject_type: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_facts_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_facts_recorded_by_user_id_fkey"
+            columns: ["recorded_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_memory_lexicon_current: {
+        Row: {
+          confirmed_by_user_id: string | null
+          created_at: string | null
+          family_id: string | null
+          id: string | null
+          last_confirmed_at: string | null
+          means: string | null
+          needs_reconfirm: boolean | null
+          never_assume: string | null
+          scope: string | null
+          supersedes_id: string | null
+          term: string | null
+          why_it_matters: string | null
+        }
+        Insert: {
+          confirmed_by_user_id?: string | null
+          created_at?: string | null
+          family_id?: string | null
+          id?: string | null
+          last_confirmed_at?: string | null
+          means?: string | null
+          needs_reconfirm?: never
+          never_assume?: string | null
+          scope?: string | null
+          supersedes_id?: string | null
+          term?: string | null
+          why_it_matters?: string | null
+        }
+        Update: {
+          confirmed_by_user_id?: string | null
+          created_at?: string | null
+          family_id?: string | null
+          id?: string | null
+          last_confirmed_at?: string | null
+          means?: string | null
+          needs_reconfirm?: never
+          never_assume?: string | null
+          scope?: string | null
+          supersedes_id?: string | null
+          term?: string | null
+          why_it_matters?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_lexicon_confirmed_by_user_id_fkey"
+            columns: ["confirmed_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "memory_lexicon"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_current"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_stale"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_memory_lexicon_stale: {
+        Row: {
+          confirmed_by_user_id: string | null
+          created_at: string | null
+          family_id: string | null
+          id: string | null
+          last_confirmed_at: string | null
+          means: string | null
+          needs_reconfirm: boolean | null
+          never_assume: string | null
+          scope: string | null
+          supersedes_id: string | null
+          term: string | null
+          why_it_matters: string | null
+        }
+        Insert: {
+          confirmed_by_user_id?: string | null
+          created_at?: string | null
+          family_id?: string | null
+          id?: string | null
+          last_confirmed_at?: string | null
+          means?: string | null
+          needs_reconfirm?: never
+          never_assume?: string | null
+          scope?: string | null
+          supersedes_id?: string | null
+          term?: string | null
+          why_it_matters?: string | null
+        }
+        Update: {
+          confirmed_by_user_id?: string | null
+          created_at?: string | null
+          family_id?: string | null
+          id?: string | null
+          last_confirmed_at?: string | null
+          means?: string | null
+          needs_reconfirm?: never
+          never_assume?: string | null
+          scope?: string | null
+          supersedes_id?: string | null
+          term?: string | null
+          why_it_matters?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_lexicon_confirmed_by_user_id_fkey"
+            columns: ["confirmed_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "memory_lexicon"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_current"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_lexicon_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "v_memory_lexicon_stale"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_reminders_pending: {
+        Row: {
+          bucket: string | null
+          days_until: number | null
+          detail: string | null
+          due_on: string | null
+          family_id: string | null
+          item: string | null
+          kind: string | null
+          owner_user_id: string | null
+          recurring: boolean | null
+          source_id: string | null
+          source_table: string | null
+        }
+        Relationships: []
+      }
+      v_whats_due: {
+        Row: {
+          bucket: string | null
+          days_until: number | null
+          detail: string | null
+          due_on: string | null
+          family_id: string | null
+          item: string | null
+          kind: string | null
+          owner_user_id: string | null
+          recurring: boolean | null
+          source_id: string | null
+          source_table: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       fn_accept_invite: { Args: { p_token: string }; Returns: string }
+      fn_chore_done: {
+        Args: { p_chore_id: string; p_done_on?: string }
+        Returns: {
+          done_on: string
+          item: string
+          next_due_at: string
+        }[]
+      }
       fn_create_family_and_claim: {
         Args: { p_city?: string; p_name: string; p_timezone?: string }
         Returns: string
@@ -2303,6 +3040,20 @@ export type Database = {
           sim: number
         }[]
       }
+      fn_memory_recall: {
+        Args: { p_limit?: number; p_query: string; target_family_id: string }
+        Returns: {
+          as_of: string
+          detail: string
+          kind: string
+          needs_attention: boolean
+          score: number
+          source_id: string
+          source_table: string
+          statement: string
+          subject: string
+        }[]
+      }
       fn_skill_get_monthly_spend: {
         Args: { target_family_id: string }
         Returns: number
@@ -2326,6 +3077,14 @@ export type Database = {
           p_usage_id: string
         }
         Returns: undefined
+      }
+      fn_task_done: {
+        Args: { p_task_id: string }
+        Returns: {
+          completed_at: string
+          status: string
+          title: string
+        }[]
       }
       fn_user_in_family: {
         Args: { target_family_id: string }
@@ -2351,12 +3110,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2380,11 +3139,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2405,11 +3164,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2430,11 +3189,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2447,11 +3206,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

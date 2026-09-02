@@ -32,7 +32,7 @@ export default async function AppLayout({
       <div className="sm:hidden">
         <MobileNav />
       </div>
-      <main className="max-w-6xl mx-auto px-4 py-6">{children}</main>
+      <main className="max-w-6xl mx-auto px-4 py-6 pb-24 sm:pb-6">{children}</main>
     </div>
   );
 }
