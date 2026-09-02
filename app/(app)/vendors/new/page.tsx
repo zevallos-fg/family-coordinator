@@ -1,7 +1,12 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { VendorForm } from "@/components/vendors/VendorForm";
 
 export default function NewVendorPage() {
+  const router = useRouter();
+
   return (
     <main className="max-w-lg mx-auto px-4 py-8">
       <div className="mb-6">
@@ -13,7 +18,7 @@ export default function NewVendorPage() {
       <VendorForm
         mode="create"
         onSuccess={(id) => {
-          window.location.href = `/vendors/${id}`;
+          router.push(`/vendors/${id}`);
         }}
       />
     </main>
