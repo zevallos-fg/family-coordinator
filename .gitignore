@@ -37,3 +37,6 @@ supabase/.branches/
 /test-results/
 /blob-report/
 /playwright/.cache/
+
+# Playwright auth fixture (session cookies + test family ids)
+tests/e2e/.auth/
