@@ -56,7 +56,10 @@ export function WeekPicker({
           type="button"
           onClick={goToToday}
           disabled={onDefaultWeek}
-          aria-label="Jump to default week"
+          // WCAG 2.5.3 Label in Name: the accessible name has to start with the
+          // visible text, or voice control ("click This week") cannot reach the
+          // button and a screen reader announces something the screen never says.
+          aria-label="This week — jump to the default week"
           className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border border-stone-200 text-stone-500 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           This week
