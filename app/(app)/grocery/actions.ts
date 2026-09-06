@@ -32,6 +32,15 @@ export async function addGroceryItemFromText(formData: FormData) {
     .select("id, name")
     .eq("family_id", familyId);
 
+  // The form's remembered store. Only a fallback: anything the text names ("at Costco")
+  // wins. Validated against this family's stores so a stale or foreign id is ignored
+  // rather than written.
+  const requestedStoreId = (formData.get("defaultStoreId") as string) || null;
+  const defaultStoreId =
+    requestedStoreId && (stores ?? []).some((s) => s.id === requestedStoreId)
+      ? requestedStoreId
+      : null;
+
   const result = await withSkillContext(groceryParser.run, {
     text,
     stores: stores ?? [],
@@ -44,14 +53,16 @@ export async function addGroceryItemFromText(formData: FormData) {
         rawName: text,
         qtyValue: null,
         qtyUnit: null,
-        storeId: null,
+        storeId: defaultStoreId,
         familyId,
         userId: user.id,
         createIfMissing: true,
       });
     } catch {
       // Last resort: direct insert
-      await supabase.from("grocery_items").insert({ family_id: familyId, name: text });
+      await supabase
+        .from("grocery_items")
+        .insert({ family_id: familyId, name: text, store_id: defaultStoreId });
     }
     revalidatePath("/grocery");
     revalidatePath("/dashboard");
@@ -73,7 +84,7 @@ export async function addGroceryItemFromText(formData: FormData) {
         rawName: item.name,
         qtyValue: item.quantity !== null ? Number(item.quantity) : null,
         qtyUnit: item.unit ?? null,
-        storeId: item.storeId ?? null,
+        storeId: item.storeId ?? defaultStoreId,
         familyId,
         userId: user.id,
         createIfMissing: true,
@@ -87,7 +98,7 @@ export async function addGroceryItemFromText(formData: FormData) {
         family_id: familyId,
         name: item.name,
         quantity: item.quantity !== null ? String(item.quantity) + (item.unit ? " " + item.unit : "") : null,
-        store_id: item.storeId,
+        store_id: item.storeId ?? defaultStoreId,
       });
       count++;
     }

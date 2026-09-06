@@ -70,7 +70,7 @@ export default async function GroceryPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      <AddItemForm familyId={familyId} />
+      <AddItemForm familyId={familyId} stores={stores ?? []} />
 
       <Suspense fallback={null}>
         <StoreFilter stores={stores ?? []} />
