@@ -12,13 +12,17 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return Response.json({ spend: null });
 
-  const { data: membership } = await supabase
+  const { data: membership, error: membershipError } = await supabase
     .from("family_members")
     .select("family_id")
     .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
 
+  if (membershipError) {
+    console.error("[api/spend] membership lookup failed", membershipError.message);
+    return Response.json({ spend: null, unavailable: true }, { status: 503 });
+  }
   if (!membership) return Response.json({ spend: null });
 
   const cacheKey = membership.family_id;
@@ -27,11 +31,23 @@ export async function GET() {
     return Response.json({ spend: cached.value, cached: true });
   }
 
-  const { data: cents } = await supabase.rpc("fn_skill_get_monthly_spend", {
+  const { data: cents, error } = await supabase.rpc("fn_skill_get_monthly_spend", {
     target_family_id: membership.family_id,
   });
 
-  const spend = (Number(cents ?? 0) / 100).toFixed(2);
+  // A spend query that fails used to report $0.00 of $10.00 and cache it for a
+  // minute. This is a budget control: failing toward "plenty left" is the one
+  // direction it must never fail in, and caching that answer made a transient
+  // error look like a healthy month for as long as the TTL held.
+  if (error || cents === null) {
+    console.error("[api/spend] could not read monthly spend", {
+      familyId: membership.family_id,
+      error: error?.message ?? "rpc returned null",
+    });
+    return Response.json({ spend: null, unavailable: true }, { status: 503 });
+  }
+
+  const spend = (Number(cents) / 100).toFixed(2);
   spendCache.set(cacheKey, { value: spend, expiresAt: Date.now() + CACHE_TTL_MS });
 
   return Response.json({ spend, cached: false });
