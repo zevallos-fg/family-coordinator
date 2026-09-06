@@ -5,11 +5,10 @@ import { admin as adminClient, fixtureFamilyId } from "./helpers/fixture";
 /**
  * The caregiver share link, end to end.
  *
- * NOT YET RUN. These require migration 20260906_caregiver_share_tokens, which is
- * written and dry-run but not applied — the functions they exercise do not exist
- * in production yet. The SQL half was verified by the dry run (mint, read,
- * submit, and a bad token correctly refused, all rolled back); this is the half
- * that needs the schema to be real. They run the moment the migration lands.
+ * The migration is applied, so these run. Six tests: a cookieless browser reads
+ * the brief, a recap submitted from it reaches shift_recaps, the raw shift id
+ * opens nothing, the URL is shown once, and revoked and expired links both die
+ * with the same sentence.
  *
  * The old behaviour these replace: /caregiver-view/<shift uuid>, which 404'd for
  * every caregiver because the anon client cannot see through RLS, and a recap
@@ -61,17 +60,33 @@ test.afterAll(async () => {
   await wipe();
 });
 
+/**
+ * Only this project's rows. Both Playwright projects run this file at once
+ * against one fixture family, and a family-wide delete here destroyed the other
+ * project's shift mid-test — which passed alone and failed in the suite, the
+ * same shape as the ambiguous locator in baby-lane.spec.ts. Everything is
+ * reachable from the tagged caregiver, so nothing needs to be deleted by family.
+ */
 async function wipe() {
-  const { data: shifts } = await admin
-    .from("caregiver_shifts")
+  const { data: caregivers } = await admin
+    .from("caregivers")
     .select("id")
-    .eq("family_id", familyId);
-  for (const s of shifts ?? []) {
-    await admin.from("shift_briefs").delete().eq("shift_id", s.id);
-    await admin.from("shift_recaps").delete().eq("shift_id", s.id);
+    .eq("family_id", familyId)
+    .ilike("name", tag);
+
+  for (const c of caregivers ?? []) {
+    const { data: shifts } = await admin
+      .from("caregiver_shifts")
+      .select("id")
+      .eq("caregiver_id", c.id);
+    for (const s of shifts ?? []) {
+      await admin.from("shift_briefs").delete().eq("shift_id", s.id);
+      await admin.from("shift_recaps").delete().eq("shift_id", s.id);
+      await admin.from("baby_share_links").delete().eq("shift_id", s.id);
+    }
+    await admin.from("caregiver_shifts").delete().eq("caregiver_id", c.id);
   }
-  await admin.from("baby_share_links").delete().eq("family_id", familyId);
-  await admin.from("caregiver_shifts").delete().eq("family_id", familyId);
+
   await admin.from("caregivers").delete().eq("family_id", familyId).ilike("name", tag);
 }
 
