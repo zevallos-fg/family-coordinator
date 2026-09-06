@@ -349,6 +349,46 @@ async function main() {
     });
   }
 
+  // ---- Upstream errors are not 200 -----------------------------------------
+  // The regression that matters. An invalid key must read as a failure, not as an
+  // empty success. Uses the deliberately invalid ANTHROPIC_KEY from [env.dev.vars],
+  // so this reproduces the exact production condition; Anthropic does not bill a
+  // request it rejects for authentication.
+  if (!token) {
+    skip("UPSTREAM: an Anthropic error is not returned as HTTP 200", "no fixture session");
+  } else {
+    await check("UPSTREAM: an Anthropic error is not returned as HTTP 200", async () => {
+      const { res, body } = await post("/", {
+        token,
+        body: {
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 16,
+          messages: [{ role: "user", content: "hi" }],
+        },
+      });
+
+      assert(
+        res.status !== 200,
+        "upstream error came back as HTTP 200 — this is the four-month silent-failure bug"
+      );
+      assert(
+        res.headers.get("X-Upstream-Error") === "anthropic",
+        `missing X-Upstream-Error, got "${res.headers.get("X-Upstream-Error")}"`
+      );
+      // Our own auth gate also answers 401. It always sends WWW-Authenticate and
+      // never reaches the upstream handler, so the two must stay distinguishable.
+      assert(
+        res.headers.get("WWW-Authenticate") === null,
+        "upstream error carried WWW-Authenticate — indistinguishable from our auth gate"
+      );
+      assert(
+        body?.error?.type === "authentication_error",
+        `expected Anthropic's error body to survive, got ${JSON.stringify(body).slice(0, 120)}`
+      );
+      return `HTTP ${res.status} + X-Upstream-Error: anthropic, reason preserved`;
+    });
+  }
+
   // ---- /fetch-html target pinning ------------------------------------------
   if (!token) {
     skip("FETCH: only allowlisted https origins are reachable", "no fixture session");
