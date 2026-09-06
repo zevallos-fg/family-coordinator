@@ -26,7 +26,7 @@ export default async function ScheduleUploadPage({ searchParams }: Props) {
 
       <p className="text-sm text-stone-500">
         Upload a screenshot of your shared family calendar. Claude will extract events
-        and assign Leo&apos;s care duties for each day. Red-colored events are ignored.
+        and assign care duties for each day. Red-colored events are ignored.
       </p>
 
       <UploadForm weekOf={weekStr} />
