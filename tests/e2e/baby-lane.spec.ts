@@ -209,8 +209,11 @@ test("a share link reads anonymously, shows its URL once, and dies on revoke", a
   // A public page must carry no app shell and no way into the family's data.
   await expect(anonPage.getByRole("navigation")).toHaveCount(0);
 
-  // Dismissing the box is the last time that URL is ever displayed.
-  await page.getByRole("button", { name: "Done" }).click();
+  // Scoped to the share box. Unscoped, this matched a second button: the sheet
+  // opens over /now, and a chore row there is labelled "Mark <item> done", which
+  // an accessible-name lookup for "Done" also matches. It only collided while
+  // now.spec.ts had its chore seeded, so it passed alone and failed in the suite.
+  await page.getByTestId("fresh-share-url").getByRole("button", { name: "Done" }).click();
   await expect(page.getByTestId("fresh-share-url")).toHaveCount(0);
   await expect(page.getByText(shareUrl)).toHaveCount(0);
 
