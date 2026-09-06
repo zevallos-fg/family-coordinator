@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { generateChecklist, markItemDone, markItemNA } from "@/app/(app)/hurricane/actions";
+import { isChecklistSettled, type ChecklistStatus } from "@/lib/db/enums";
 
 interface ChecklistItem {
   id: string;
@@ -64,7 +65,7 @@ export function HurricaneChecklist({ items: initialItems, showGenerateButton }: 
 
   async function handleDone(id: string) {
     setItems((prev) =>
-      prev.map((item) => item.id === id ? { ...item, status: "completed" } : item)
+      prev.map((item) => item.id === id ? { ...item, status: "done" satisfies ChecklistStatus } : item)
     );
     const result = await markItemDone(id);
     if (!result.ok) setError(result.error.userMessage);
@@ -72,7 +73,7 @@ export function HurricaneChecklist({ items: initialItems, showGenerateButton }: 
 
   async function handleNA(id: string) {
     setItems((prev) =>
-      prev.map((item) => item.id === id ? { ...item, status: "n_a" } : item)
+      prev.map((item) => item.id === id ? { ...item, status: "na" satisfies ChecklistStatus } : item)
     );
     const result = await markItemNA(id);
     if (!result.ok) setError(result.error.userMessage);
@@ -102,7 +103,7 @@ export function HurricaneChecklist({ items: initialItems, showGenerateButton }: 
           </h3>
           {categoryItems.map((item) => {
             const { priority, label } = parsePriorityCategory(item.item_text);
-            const isDone = item.status === "completed" || item.status === "n_a";
+            const isDone = isChecklistSettled(item.status);
             const colorClass = PRIORITY_COLORS[priority] ?? PRIORITY_COLORS.medium;
 
             return (

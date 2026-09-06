@@ -136,7 +136,16 @@ export async function POST(request: Request) {
       }));
 
     if (ingredientRows.length > 0) {
-      await supabase.from("recipe_ingredients").insert(ingredientRows);
+      const { error: ingError } = await supabase
+        .from("recipe_ingredients")
+        .insert(ingredientRows);
+      if (ingError) {
+        console.error("import-from-photo: ingredients insert failed", ingError.message);
+        return NextResponse.json(
+          { recipeId: newRecipe.id, warning: "Recipe saved, but its ingredients could not be." },
+          { status: 207 }
+        );
+      }
     }
 
     return NextResponse.json({ recipeId: newRecipe.id });

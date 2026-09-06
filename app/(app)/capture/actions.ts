@@ -42,13 +42,18 @@ export async function saveCapture(formData: FormData) {
   });
 
   if (!result.ok || !result.data) {
-    // Skill failed — still save the capture without routing
-    await supabase.from("captures").insert({
+    // Skill failed — still save the capture without routing. This is the last
+    // copy of something the user may have spoken once, so if even the plain
+    // insert fails they have to be told rather than shown a tick.
+    const { error: fallbackError } = await supabase.from("captures").insert({
       family_id: familyId,
       text,
       voice_transcription: voiceTranscription,
       created_by_user_id: user.id,
     });
+    if (fallbackError) {
+      return { ok: false, error: "Couldn't save that. Try again?" };
+    }
     revalidatePath("/capture");
     revalidatePath("/organized");
     return { ok: true, routed: false };
@@ -74,6 +79,7 @@ export async function saveCapture(formData: FormData) {
   }
 
   // If grocery, route each item through the dedup orchestrator
+  const droppedItems: string[] = [];
   if (isGrocery && groceryItems.length > 0) {
     for (const name of groceryItems as string[]) {
       try {
@@ -88,12 +94,14 @@ export async function saveCapture(formData: FormData) {
           createIfMissing: true,
         });
       } catch {
-        // Fallback: direct insert so we never drop items
-        await supabase.from("grocery_items").insert({
+        // Fallback: direct insert so we never drop items — which only holds if
+        // the fallback's own error is read.
+        const { error: itemError } = await supabase.from("grocery_items").insert({
           family_id: familyId,
           name,
           source_capture_id: capture?.id ?? null,
         });
+        if (itemError) droppedItems.push(name);
       }
     }
   }
@@ -102,5 +110,16 @@ export async function saveCapture(formData: FormData) {
   revalidatePath("/organized");
   revalidatePath("/grocery");
   revalidatePath("/dashboard");
+
+  // The capture itself is saved either way; naming what did not reach the list
+  // is the difference between a partial success and a lie.
+  if (droppedItems.length > 0) {
+    return {
+      ok: true,
+      routed: true,
+      isGrocery,
+      warning: `Saved, but these didn't reach your grocery list: ${droppedItems.join(", ")}.`,
+    };
+  }
   return { ok: true, routed: true, isGrocery };
 }

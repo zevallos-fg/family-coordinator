@@ -255,18 +255,28 @@ export async function addReceiptItemsToPantryAction(
       .eq("ingredient_id", ingredientId)
       .maybeSingle();
 
-    if (existingPantry) {
-      const newAmount = (existingPantry.amount ?? 0) + (item.amount ?? 1);
-      await supabase
-        .from("pantry_items")
-        .update({ amount: newAmount, updated_at: new Date().toISOString() })
-        .eq("id", existingPantry.id);
-    } else {
-      await supabase.from("pantry_items").insert({
-        family_id: familyId,
-        ingredient_id: ingredientId,
-        amount: item.amount ?? 1,
+    // addedCount used to increment whether or not the write landed, so the
+    // "N items added to pantry" confirmation counted attempts, not rows.
+    const { error: pantryError } = existingPantry
+      ? await supabase
+          .from("pantry_items")
+          .update({
+            amount: (existingPantry.amount ?? 0) + (item.amount ?? 1),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingPantry.id)
+      : await supabase.from("pantry_items").insert({
+          family_id: familyId,
+          ingredient_id: ingredientId,
+          amount: item.amount ?? 1,
+        });
+
+    if (pantryError) {
+      console.error("[receipts] pantry write failed", {
+        ingredientId,
+        error: pantryError.message,
       });
+      continue;
     }
 
     addedCount++;

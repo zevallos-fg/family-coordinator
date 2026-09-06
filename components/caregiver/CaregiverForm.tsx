@@ -3,14 +3,12 @@
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CAREGIVER_ROLES, CAREGIVER_ROLE_LABEL } from "@/lib/db/enums";
 
-const CAREGIVER_ROLES = [
-  { value: "nanny", label: "Nanny" },
-  { value: "grandparent", label: "Grandparent" },
-  { value: "daycare", label: "Daycare" },
-  { value: "au_pair", label: "Au Pair" },
-  { value: "other", label: "Other" },
-];
+// Was a local list that included "au_pair" — a value caregivers.role has never
+// accepted, so choosing it crashed the page. The options now come from the same
+// module the server action validates against, which is the only way the two can
+// stay in step.
 
 interface CaregiverFormProps {
   action: (formData: FormData) => Promise<void>;
@@ -63,9 +61,9 @@ export function CaregiverForm({
           defaultValue={defaultValues?.role ?? "nanny"}
           className="w-full rounded-md border border-foreground/20 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-foreground/20"
         >
-          {CAREGIVER_ROLES.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
+          {CAREGIVER_ROLES.map((role) => (
+            <option key={role} value={role}>
+              {CAREGIVER_ROLE_LABEL[role]}
             </option>
           ))}
         </select>

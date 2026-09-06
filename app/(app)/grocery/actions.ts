@@ -59,10 +59,14 @@ export async function addGroceryItemFromText(formData: FormData) {
         createIfMissing: true,
       });
     } catch {
-      // Last resort: direct insert
-      await supabase
+      // Last resort: direct insert. If this fails too the item is genuinely gone,
+      // and saying "added" would be the one outcome worse than an error.
+      const { error: lastResortError } = await supabase
         .from("grocery_items")
         .insert({ family_id: familyId, name: text, store_id: defaultStoreId });
+      if (lastResortError) {
+        return { ok: false, error: "Couldn't add that item. Try again?" };
+      }
     }
     revalidatePath("/grocery");
     revalidatePath("/dashboard");
@@ -76,6 +80,7 @@ export async function addGroceryItemFromText(formData: FormData) {
 
   // Route each parsed item through the dedup orchestrator
   let count = 0;
+  const dropped: string[] = [];
   let lastAction: string | undefined;
   let lastName: string | undefined;
   for (const item of items) {
@@ -93,20 +98,37 @@ export async function addGroceryItemFromText(formData: FormData) {
       lastName = dedup.cleanedName || item.name;
       count++;
     } catch {
-      // Fallback: direct insert so we never silently drop items
-      await supabase.from("grocery_items").insert({
+      // Fallback: direct insert so we never silently drop items. The count used
+      // to increment whether or not this insert worked, so "3 items added" could
+      // mean one item added and two lost.
+      const { error: fallbackError } = await supabase.from("grocery_items").insert({
         family_id: familyId,
         name: item.name,
         quantity: item.quantity !== null ? String(item.quantity) + (item.unit ? " " + item.unit : "") : null,
         store_id: item.storeId ?? defaultStoreId,
       });
-      count++;
+      if (fallbackError) dropped.push(item.name);
+      else count++;
     }
   }
 
   revalidatePath("/grocery");
   revalidatePath("/dashboard");
-  return { ok: true, count, action: count === 1 ? lastAction : undefined, name: count === 1 ? lastName : undefined };
+
+  if (dropped.length > 0 && count === 0) {
+    return { ok: false, error: `Couldn't add ${dropped.join(", ")}. Try again?` };
+  }
+
+  return {
+    ok: true,
+    count,
+    action: count === 1 ? lastAction : undefined,
+    name: count === 1 ? lastName : undefined,
+    warning:
+      dropped.length > 0
+        ? `These didn't make it onto the list: ${dropped.join(", ")}.`
+        : undefined,
+  };
 }
 
 export async function updateGroceryStore(id: string, storeId: string | null) {

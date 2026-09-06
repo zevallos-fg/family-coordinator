@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { toTitleCase } from "@/lib/format/titleCase";
+import { parseCaregiverRole, CAREGIVER_ROLES } from "@/lib/db/enums";
 import { withSkillContext } from "@/lib/skill-action";
 import { run as runBriefSkill } from "@/skills/family-caregiver-brief";
 import { run as runRecapSkill } from "@/skills/family-caregiver-recap";
@@ -40,10 +41,22 @@ export async function createCaregiver(formData: FormData) {
   const phone = formData.get("phone") as string | null;
   const notes = formData.get("notes") as string | null;
 
+  // Title-casing the ROLE is what broke this action for every caregiver ever
+  // added: caregivers.role is CHECK-constrained to lowercase values, so `Nanny`
+  // was refused and the throw below rendered a blank server-error page. Display
+  // casing lives in CAREGIVER_ROLE_LABEL and nowhere near the stored value.
+  // The NAME is a proper noun and is still title-cased — that part was fine.
+  const storedRole = parseCaregiverRole(role);
+  if (!storedRole) {
+    throw new Error(
+      `role must be one of ${CAREGIVER_ROLES.join(", ")} (received ${JSON.stringify(role)})`
+    );
+  }
+
   const { error } = await supabase.from("caregivers").insert({
     family_id: familyId,
     name: toTitleCase(name.trim()),
-    role: toTitleCase(role.trim()),
+    role: storedRole,
     email: email?.trim() || null,
     phone: phone?.trim() || null,
     notes: notes?.trim() || null,
@@ -57,11 +70,18 @@ export async function createCaregiver(formData: FormData) {
 export async function updateCaregiver(id: string, formData: FormData) {
   const { supabase, familyId } = await getAuthedFamily();
 
+  const editedRole = parseCaregiverRole(formData.get("role"));
+  if (!editedRole) {
+    throw new Error(
+      `role must be one of ${CAREGIVER_ROLES.join(", ")} (received ${JSON.stringify(formData.get("role"))})`
+    );
+  }
+
   const { error } = await supabase
     .from("caregivers")
     .update({
-      name: (formData.get("name") as string).trim(),
-      role: (formData.get("role") as string).trim(),
+      name: toTitleCase((formData.get("name") as string).trim()),
+      role: editedRole,
       email: (formData.get("email") as string | null)?.trim() || null,
       phone: (formData.get("phone") as string | null)?.trim() || null,
       notes: (formData.get("notes") as string | null)?.trim() || null,
@@ -296,8 +316,15 @@ export async function generateBrief(
     return { ok: false, error: result.error?.message ?? "Brief generation failed" };
   }
 
-  // Remove old brief and insert fresh
-  await supabase.from("shift_briefs").delete().eq("shift_id", shiftId);
+  // Remove old brief and insert fresh. The delete's error is read: leaving the
+  // previous brief in place would mean the caregiver reads yesterday's notes
+  // while the screen says the brief was regenerated.
+  const { error: clearErr } = await supabase
+    .from("shift_briefs")
+    .delete()
+    .eq("shift_id", shiftId);
+  if (clearErr) return { ok: false, error: clearErr.message };
+
   const { error: insertErr } = await supabase.from("shift_briefs").insert({
     shift_id: shiftId,
     content: result.data.content,
@@ -345,11 +372,15 @@ export async function parseRecap(
     return { ok: false, error: recapResult.error?.message ?? "Parse failed" };
   }
 
-  await supabase
+  const { error: recapUpdateErr } = await supabase
     .from("shift_recaps")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .update({ structured_log: recapResult.data.structuredData as any })
     .eq("id", recap.id);
+
+  // The parse is the whole point of the action; silently keeping the raw text
+  // would look identical to never having pressed the button.
+  if (recapUpdateErr) return { ok: false, error: recapUpdateErr.message };
 
   // Update kid state from recap
   if (shift.kid_names && shift.kid_names.length > 0) {
@@ -371,7 +402,7 @@ export async function parseRecap(
       });
 
       if (kidStateResult.ok && kidStateResult.data) {
-        await supabase
+        const { error: kidErr } = await supabase
           .from("kids")
           .update({
             notes: kidStateResult.data.updatedNotes,
@@ -380,6 +411,15 @@ export async function parseRecap(
           })
           .eq("id", kid.id)
           .eq("family_id", familyId);
+
+        // Secondary to the recap parse, which has already succeeded — so this
+        // does not fail the action, but it stops being invisible.
+        if (kidErr) {
+          console.error("[parseRecap] kid state update failed", {
+            kidId: kid.id,
+            error: kidErr.message,
+          });
+        }
       }
     }
   }

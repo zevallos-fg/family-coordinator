@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ok, err } from "@/lib/skill-action-result";
 import type { ActionResult } from "@/lib/skill-action-result";
 import { withRetry } from "@/lib/with-retry";
+import type { Database } from "@/lib/supabase/database.types";
 import { run as runTravelSkill } from "@/skills/family-travel";
 
 async function getAuthedFamily() {
@@ -75,6 +76,11 @@ export async function createTrip(
       )
     );
 
+    // The trip row exists from here on. Anything below that fails is a partial
+    // result, not a failed action — so it is reported as a warning and never
+    // swallowed. Both of these inserts used to discard their error entirely.
+    const lost: string[] = [];
+
     if (skillResult.ok && skillResult.data) {
       // Insert packing items
       const packingItems = skillResult.data.packing_list.map((item) => ({
@@ -85,12 +91,24 @@ export async function createTrip(
       }));
 
       if (packingItems.length > 0) {
-        await supabase.from("trip_packing_items").insert(packingItems);
+        const { error: packingError } = await supabase
+          .from("trip_packing_items")
+          .insert(packingItems);
+        if (packingError) {
+          Sentry.captureException(packingError, {
+            extra: { action: "createTrip", stage: "packing_items", tripId: trip.id },
+          });
+          lost.push("the packing list");
+        }
       }
 
       // Insert prep tasks
       const tripStart = new Date(start_date);
-      const prepTasks = skillResult.data.prep_tasks.map((t) => {
+      // Annotated with the table's Insert type, not inferred: inside a .map()
+      // with no contextual type a string literal widens to `string` and the enum
+      // catches nothing. This is the row that was being silently discarded.
+      const prepTasks: Database["public"]["Tables"]["tasks"]["Insert"][] =
+        skillResult.data.prep_tasks.map((t) => {
         const dueDate = new Date(tripStart);
         dueDate.setDate(dueDate.getDate() - t.days_before_departure);
         return {
@@ -98,17 +116,32 @@ export async function createTrip(
           title: `[Trip: ${destination}] ${t.task}`,
           description: `Prep task for trip to ${destination} (${start_date})`,
           due_at: dueDate.toISOString(),
-          status: "pending",
-        };
-      });
+          // 'pending' is not one of the four values tasks.status accepts, so every
+          // prep task a trip has ever generated was rejected — and, because the
+          // insert's error went unread, rejected in complete silence.
+          status: "open",
+          };
+        });
 
       if (prepTasks.length > 0) {
-        await supabase.from("tasks").insert(prepTasks);
+        const { error: tasksError } = await supabase.from("tasks").insert(prepTasks);
+        if (tasksError) {
+          Sentry.captureException(tasksError, {
+            extra: { action: "createTrip", stage: "prep_tasks", tripId: trip.id },
+          });
+          lost.push("the prep tasks");
+        }
       }
     }
 
     revalidatePath("/trips");
-    return ok({ id: trip.id });
+    revalidatePath("/now");
+    return ok(
+      { id: trip.id },
+      lost.length > 0
+        ? `Trip saved, but ${lost.join(" and ")} could not be saved. Try regenerating from the trip page.`
+        : undefined
+    );
   } catch (error) {
     Sentry.captureException(error, { extra: { action: "createTrip" } });
     return err("unknown", "An unexpected error occurred.", String(error));
@@ -186,8 +219,17 @@ export async function deleteTrip(id: string): Promise<ActionResult<void>> {
   try {
     const { supabase, familyId } = await getAuthedFamily();
 
-    // Cascade: delete packing items first
-    await supabase.from("trip_packing_items").delete().eq("trip_id", id);
+    // Cascade: delete packing items first. Read the error — if the children
+    // survive, the parent delete below fails on the FK and the user is told the
+    // trip could not be deleted with no clue why.
+    const { error: childError } = await supabase
+      .from("trip_packing_items")
+      .delete()
+      .eq("trip_id", id);
+    if (childError) {
+      Sentry.captureException(childError, { extra: { action: "deleteTrip", stage: "packing_items", id } });
+      return err("db_error", "Could not delete this trip's packing list.", childError.message);
+    }
 
     const { error } = await supabase
       .from("trips")

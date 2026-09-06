@@ -175,11 +175,20 @@ export async function logVendorService(
       return err("db_error", "Could not log service.", error.message);
     }
 
-    // Update last_used_at on vendor
-    await supabase
+    // Update last_used_at on vendor. Denormalised from vendor_services with no
+    // trigger behind it, so when this silently fails the vendor page reads
+    // "LAST USED — Never" directly above the service that was just logged.
+    const { error: stampError } = await supabase
       .from("vendors")
-      .update({ last_used_at: new Date().toISOString() })
-      .eq("id", vendor_id);
+      .update({ last_used_at: service_date })
+      .eq("id", vendor_id)
+      .eq("family_id", familyId);
+
+    if (stampError) {
+      Sentry.captureException(stampError, {
+        extra: { action: "logVendorService", stage: "last_used_at", vendor_id },
+      });
+    }
 
     revalidatePath(`/vendors/${vendor_id}`);
     revalidatePath("/vendors");

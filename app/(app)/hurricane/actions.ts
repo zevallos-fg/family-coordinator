@@ -8,6 +8,8 @@ import { ok, err } from "@/lib/skill-action-result";
 import type { ActionResult } from "@/lib/skill-action-result";
 import { withRetry } from "@/lib/with-retry";
 import { run as runHurricaneSkill } from "@/skills/family-hurricane-prep";
+import { isChecklistSettled, type ChecklistStatus } from "@/lib/db/enums";
+import type { Database } from "@/lib/supabase/database.types";
 
 async function getAuthedFamily() {
   const supabase = await createClient();
@@ -78,17 +80,25 @@ export async function generateChecklist(): Promise<
 
     // Compute due dates from offset
     const today = new Date();
-    const rows = checklist_items.map((item) => {
+    // Annotated with the table's own Insert type rather than inferred: inside a
+    // .map() with no contextual type, `status: "open" satisfies ChecklistStatus`
+    // still widens to string and the enum buys nothing. This way the compiler
+    // checks every column, not just the one we remembered to think about.
+    const rows: Database["public"]["Tables"]["seasonal_checklists"]["Insert"][] =
+      checklist_items.map((item) => {
       const dueDate = new Date(today);
       dueDate.setDate(dueDate.getDate() + item.due_by_offset_days);
       return {
         family_id: familyId,
         item_text: `[${item.priority.toUpperCase()}][${item.category}] ${item.text}`,
         season: `${HURRICANE_SEASON}_${season_phase}`,
-        status: "pending",
+        // seasonal_checklists.status accepts open | done | na. This wrote
+        // "pending", so generation could never store a single row: the whole
+        // feature was inert from the first line it ever tried to insert.
+        status: "open",
         due_by_date: dueDate.toISOString().split("T")[0],
-      };
-    });
+        };
+      });
 
     const { error: insertError } = await supabase
       .from("seasonal_checklists")
@@ -113,7 +123,7 @@ export async function markItemDone(item_id: string): Promise<ActionResult<void>>
 
     const { error } = await supabase
       .from("seasonal_checklists")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .update({ status: "done" satisfies ChecklistStatus, completed_at: new Date().toISOString() })
       .eq("id", item_id);
 
     if (error) {
@@ -135,7 +145,7 @@ export async function markItemNA(item_id: string): Promise<ActionResult<void>> {
 
     const { error } = await supabase
       .from("seasonal_checklists")
-      .update({ status: "n_a" })
+      .update({ status: "na" satisfies ChecklistStatus })
       .eq("id", item_id);
 
     if (error) {
@@ -183,9 +193,11 @@ export async function getCurrentSeasonProgress(): Promise<
       });
     }
 
-    const done = items.filter((i) => i.status === "completed" || i.status === "n_a");
+    // Both filters used to test for "completed"/"n_a" — values the column cannot
+    // hold — so every percentage on this page was pinned regardless of progress.
+    const done = items.filter((i) => isChecklistSettled(i.status));
     const critical = items.filter((i) => i.item_text.includes("[CRITICAL]"));
-    const criticalDone = critical.filter((i) => i.status === "completed" || i.status === "n_a");
+    const criticalDone = critical.filter((i) => isChecklistSettled(i.status));
 
     // Extract season phase from season field
     const seasonPhase = items[0]?.season.replace(`${HURRICANE_SEASON}_`, "") ?? null;
