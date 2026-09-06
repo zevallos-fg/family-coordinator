@@ -9,6 +9,7 @@ const REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 
 export function SpendIndicator() {
   const [spend, setSpend] = useState<string | null>(moduleCache?.value ?? null);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -21,15 +22,27 @@ export function SpendIndicator() {
       }
       try {
         const res = await fetch("/api/spend");
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const value = data.spend ?? null;
+        if (cancelled) return;
+        const data = await res.json().catch(() => null);
+
+        // The route answers 503 when it could not read the spend. Showing the
+        // last known figure then would be a stale number wearing a live label,
+        // and showing $0.00 would be worse — so say the budget is unreadable.
+        if (!res.ok || data?.unavailable) {
+          setUnavailable(true);
+          return;
+        }
+
+        const value = data?.spend ?? null;
         if (value !== null) {
           moduleCache = { value, fetchedAt: Date.now() };
         }
-        if (!cancelled) setSpend(value);
+        setUnavailable(false);
+        setSpend(value);
       } catch {
-        // silently fail — spend indicator is non-critical
+        // Offline or the request never landed. Not the same as the server saying
+        // it cannot read the budget, so this stays quiet rather than alarming.
+        if (!cancelled) setUnavailable(false);
       }
     }
 
@@ -40,6 +53,14 @@ export function SpendIndicator() {
       clearInterval(id);
     };
   }, []);
+
+  if (unavailable) {
+    return (
+      <span className="text-xs text-amber-700 tabular-nums" title="The monthly AI spend could not be read">
+        spend unavailable
+      </span>
+    );
+  }
 
   if (spend === null) return null;
 

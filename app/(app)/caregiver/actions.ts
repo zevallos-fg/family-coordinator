@@ -268,11 +268,36 @@ export async function generateBrief(
   }> = [];
 
   if (kidNames.length > 0) {
-    const { data: kids } = await supabase
+    const { data: kids, error: kidsError } = await supabase
       .from("kids")
       .select("name, birth_date, notes, food_favorites, food_aversions")
       .eq("family_id", familyId)
       .in("name", kidNames);
+
+    // This read carries the allergies and food aversions. `kids ?? []` meant a
+    // failed query produced a brief that simply did not mention them, generated
+    // it through a paid model call, stored it, and handed it to whoever is
+    // looking after the children this afternoon. A brief that is silently
+    // missing a child's aversions is worse than no brief, so refuse to make one.
+    if (kidsError) {
+      return {
+        ok: false,
+        error:
+          "Couldn't read the kids' profiles, so the brief would be missing their notes and food aversions. Nothing was generated — try again.",
+      };
+    }
+
+    // Same reasoning for a partial answer: a name we asked about and did not get
+    // back is a child the brief would quietly omit.
+    const returned = new Set((kids ?? []).map((k) => k.name));
+    const missing = kidNames.filter((n) => !returned.has(n));
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        error: `No profile found for ${missing.join(", ")}, so the brief would leave them out. Add them under Kids first.`,
+      };
+    }
+
     kidsData = kids ?? [];
   }
 
@@ -283,12 +308,20 @@ export async function generateBrief(
     .limit(1)
     .maybeSingle();
 
-  const { data: openTasks } = await supabase
+  const { data: openTasks, error: tasksError } = await supabase
     .from("tasks")
     .select("title, due_at")
     .eq("family_id", familyId)
     .is("completed_at", null)
     .limit(5);
+
+  if (tasksError) {
+    return {
+      ok: false,
+      error:
+        "Couldn't read today's tasks, so the brief would be missing them. Nothing was generated — try again.",
+    };
+  }
 
   const caregiverInfo = shift.caregivers as { name: string; role: string } | null;
 

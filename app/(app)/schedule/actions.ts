@@ -40,16 +40,33 @@ export async function processScreenshot(formData: FormData) {
   const base64 = Buffer.from(bytes).toString("base64");
 
   // Fetch family members to know who is in the schedule
-  const { data: members } = await supabase
+  const { data: members, error: membersError } = await supabase
     .from("family_members")
     .select("users(full_name)")
     .eq("family_id", membership.family_id);
+
+  // These names are what the model matches calendar entries against, and the
+  // result is written straight into schedule_entries. A failed read used to fall
+  // through `?? []` to a hardcoded ["Fernando", "Yenny"] — so a transient error
+  // produced a week of duties attributed to two people it had guessed, for any
+  // family, with nothing on screen to say so.
+  if (membersError) {
+    return {
+      ok: false,
+      error: "Couldn't read who is in your family, so the schedule would be assigned to the wrong people. Nothing was changed.",
+    };
+  }
 
   const knownNames = (members ?? [])
     .map((m) => (m.users as { full_name: string | null } | null)?.full_name)
     .filter(Boolean) as string[];
 
-  if (knownNames.length === 0) knownNames.push("Fernando", "Yenny");
+  if (knownNames.length === 0) {
+    return {
+      ok: false,
+      error: "No family members have a name set yet, so there is nobody to assign duties to. Add names in Settings first.",
+    };
+  }
 
   const result = await withSkillContext(scheduleReconciler.run, {
     imageBase64: base64,
