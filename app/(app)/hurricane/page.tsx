@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { HurricaneChecklist } from "@/components/hurricane/HurricaneChecklist";
+import { isChecklistSettled } from "@/lib/db/enums";
 
 const HURRICANE_SEASON = "hurricane_2026";
 
@@ -47,9 +48,9 @@ export default async function HurricanePage() {
   const { items, error } = await getHurricaneData();
 
   const seasonPhase = items[0]?.season.replace(`${HURRICANE_SEASON}_`, "") ?? null;
-  const done = items.filter((i) => i.status === "completed" || i.status === "n_a");
+  const done = items.filter((i) => isChecklistSettled(i.status));
   const critical = items.filter((i) => i.item_text.includes("[CRITICAL]"));
-  const criticalDone = critical.filter((i) => i.status === "completed" || i.status === "n_a");
+  const criticalDone = critical.filter((i) => isChecklistSettled(i.status));
   const overallPct = items.length > 0 ? Math.round((done.length / items.length) * 100) : 0;
   const criticalPct = critical.length > 0 ? Math.round((criticalDone.length / critical.length) * 100) : 100;
 
