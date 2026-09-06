@@ -227,6 +227,46 @@ describe("resolveIngredient", () => {
       expect(result.ingredientId).toBe(newId);
       expect(result.newlyCreated).toBe(true);
     });
+
+    it("refuses to create when the candidate list could not be read", async () => {
+      // The bug this guards: `allIngredients ?? []` meant a failed candidate
+      // query skipped Tier 3 and fell straight into Tier 4, which creates a NEW
+      // ingredient — so a transient error permanently forked the family's
+      // canonical list, and did it again on every retry.
+      const insert = vi.fn().mockReturnThis();
+
+      mockFrom.mockImplementation((table: string) => {
+        if (table === "ingredients") {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            order: vi
+              .fn()
+              .mockResolvedValue({ data: null, error: { message: "connection reset" } }),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            insert,
+            single: vi.fn().mockResolvedValue({ data: { id: "never" }, error: null }),
+          };
+        }
+        return { insert: vi.fn().mockResolvedValue({ data: null, error: null }) };
+      });
+
+      const result = await resolveIngredient({
+        rawName: "exotic spice",
+        familyId: FAMILY_ID,
+        createIfMissing: true,
+        userId: USER_ID,
+      });
+
+      expect(result.ingredientId).toBeNull();
+      expect(result.newlyCreated).toBe(false);
+      expect(result.confidence).toBe("unmatched");
+      // Nothing was written to `ingredients`. The grocery item still reaches the
+      // list — fn_grocery_upsert takes a null ingredient id — it is just not
+      // linked to an ingredient that may well already exist.
+      expect(insert).not.toHaveBeenCalled();
+    });
   });
 
   describe("resolution log", () => {
