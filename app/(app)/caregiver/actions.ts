@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { toTitleCase } from "@/lib/format/titleCase";
 import { parseCaregiverRole, CAREGIVER_ROLES } from "@/lib/db/enums";
+import { shareRpc } from "@/lib/caregiver-share";
 import { withSkillContext } from "@/lib/skill-action";
 import { run as runBriefSkill } from "@/skills/family-caregiver-brief";
 import { run as runRecapSkill } from "@/skills/family-caregiver-recap";
@@ -428,39 +429,61 @@ export async function parseRecap(
   return { ok: true };
 }
 
-// ─── Recap submission (called from caregiver-view — no auth required) ─────────
-// Uses anon Supabase client. RLS on shift_recaps must allow anon insert.
-// POSTBUILD: Add HMAC token verification.
+// ─── Caregiver share links ───────────────────────────────────────────────────
 
-export async function submitRecap(
+/**
+ * Mint a link a caregiver can actually open.
+ *
+ * Replaces submitRecap and the raw-shift-UUID URL it went with. That pair carried
+ * a note saying "RLS on shift_recaps must allow anon insert" — it never did, so
+ * the public page 404'd for every caregiver and the recap form could not save.
+ *
+ * fn_share_create is NOT security definer: the insert is checked by the share
+ * table's own RLS, so this can only mint links for the caller's own family, and
+ * the function verifies the shift belongs to that family rather than trusting the
+ * pair it was handed.
+ */
+export async function createShiftShareLink(
   shiftId: string,
-  text: string
-): Promise<{ ok: boolean; error?: string; alreadySubmitted?: boolean }> {
-  const supabase = await createClient();
+  hours = 72
+): Promise<{ ok: true; url: string; expiresAt: string } | { ok: false; error: string }> {
+  const { supabase, familyId } = await getAuthedFamily();
 
-  const { data: shift } = await supabase
+  const { data: shift, error: shiftError } = await supabase
     .from("caregiver_shifts")
-    .select("id")
+    .select("id, caregivers(name)")
     .eq("id", shiftId)
+    .eq("family_id", familyId)
     .maybeSingle();
 
-  if (!shift) return { ok: false, error: "Shift not found" };
+  if (shiftError) return { ok: false, error: shiftError.message };
+  if (!shift) return { ok: false, error: "Shift not found." };
 
-  const { data: existing } = await supabase
-    .from("shift_recaps")
-    .select("id")
-    .eq("shift_id", shiftId)
-    .maybeSingle();
+  const caregiverName =
+    (shift.caregivers as { name: string } | null)?.name ?? "Caregiver";
 
-  if (existing) return { ok: true, alreadySubmitted: true };
-
-  const { error } = await supabase.from("shift_recaps").insert({
-    shift_id: shiftId,
-    transcription: text.trim(),
-    structured_log: null,
+  const { data, error } = await shareRpc(supabase).rpc("fn_share_create", {
+    p_family_id: familyId,
+    p_label: caregiverName,
+    p_scope: "caregiver_shift",
+    p_hours: hours,
+    p_shift_id: shiftId,
   });
 
-  if (error) return { ok: false, error: error.message };
+  const row = data?.[0];
+  if (error || !row) {
+    return { ok: false, error: error?.message ?? "Could not create the link." };
+  }
 
-  return { ok: true };
+  const { headers } = await import("next/headers");
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const origin = host ? `${proto}://${host}` : "";
+
+  return {
+    ok: true,
+    url: `${origin}/caregiver-view/${row.token}`,
+    expiresAt: row.expires_at,
+  };
 }
