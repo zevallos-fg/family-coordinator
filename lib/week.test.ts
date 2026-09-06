@@ -6,6 +6,8 @@ import {
   formatWeekParam,
   clampWeek,
   addDays,
+  isCurrentWeek,
+  weekLabel,
 } from "./week";
 
 // Helper: build a local-noon Date from an ISO date string to avoid UTC drift in tests
@@ -96,5 +98,49 @@ describe("clampWeek", () => {
     const clamped = clampWeek(tooEarly, today, 4);
     // anchor = Apr 20, -4 weeks = Mar 23
     expect(formatWeekParam(clamped)).toBe(formatWeekParam(addDays(d("2026-04-20"), -4 * 7)));
+  });
+});
+
+describe("weekLabel — naming the week you are actually looking at", () => {
+  // Sunday. defaultPlanWeek jumps to Monday the 7th from here, which is exactly
+  // when "this week" stopped being true.
+  const sunday = d("2026-09-06");
+
+  it("calls the week containing today 'this week'", () => {
+    expect(weekLabel(d("2026-08-31"), sunday)).toBe("this week");
+  });
+
+  it("calls the planning week 'next week' on a Sunday", () => {
+    const planning = defaultPlanWeek(sunday);
+    expect(formatWeekParam(planning)).toBe("2026-09-07");
+    expect(weekLabel(planning, sunday)).toBe("next week");
+  });
+
+  it("names anything further out by its dates", () => {
+    expect(weekLabel(d("2026-09-21"), sunday)).toBe("the week of Sep 21 — 27");
+    expect(weekLabel(d("2026-08-17"), sunday)).toBe("the week of Aug 17 — 23");
+  });
+
+  it("handles last week", () => {
+    expect(weekLabel(d("2026-08-24"), sunday)).toBe("last week");
+  });
+
+  it("snaps a mid-week date to its Monday before comparing", () => {
+    // Thursday of the current week is still "this week".
+    expect(weekLabel(d("2026-09-03"), sunday)).toBe("this week");
+  });
+});
+
+describe("isCurrentWeek", () => {
+  it("is false for the planning week on Friday through Sunday", () => {
+    for (const day of ["2026-09-04", "2026-09-05", "2026-09-06"]) {
+      expect(isCurrentWeek(defaultPlanWeek(d(day)), d(day))).toBe(false);
+    }
+  });
+
+  it("is true for the planning week Monday through Thursday", () => {
+    for (const day of ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"]) {
+      expect(isCurrentWeek(defaultPlanWeek(d(day)), d(day))).toBe(true);
+    }
   });
 });

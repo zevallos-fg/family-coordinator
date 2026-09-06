@@ -88,7 +88,7 @@ export default async function KidMilestonesPage({ params }: PageProps) {
       {milestones.length === 0 && (
         <EmptyState
           title="No milestones logged yet"
-          description="Use the form above to log Leo's first milestone."
+          description={`Use the form above to log ${kid.name}'s first milestone.`}
         />
       )}
 

@@ -6,7 +6,7 @@ import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
 import { ShiftCard } from "@/components/caregiver/ShiftCard";
 import { CaregiverList } from "@/components/caregiver/CaregiverList";
 import { QuickBriefModal } from "@/components/caregiver/QuickBriefModal";
-import { parseWeekParam, formatWeekParam, addDays } from "@/lib/week";
+import { parseWeekParam, formatWeekParam, addDays, weekLabel } from "@/lib/week";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
@@ -34,6 +34,10 @@ export default async function CaregiverHubPage({ searchParams }: Props) {
   const today = new Date();
   const selectedWeek = parseWeekParam(weekParam ?? null, today);
   const weekStr = formatWeekParam(selectedWeek);
+  // defaultPlanWeek jumps to next Monday from Friday onward, so on Fri/Sat/Sun
+  // this page opens on a week that is not the one we are in. Saying "this week"
+  // over it told you nothing was scheduled on days when something was.
+  const shownWeek = weekLabel(selectedWeek, today);
 
   if (!weekParam) {
     redirect(`/caregiver?week=${weekStr}`);
@@ -125,7 +129,7 @@ export default async function CaregiverHubPage({ searchParams }: Props) {
       {/* Shifts section — week-scoped */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-medium">Shifts this week</h2>
+          <h2 className="text-base font-medium">Shifts {shownWeek}</h2>
           {hasKids && hasCaregivers && (
             <Link href={`/caregiver/shifts/new?week=${weekStr}`}>
               <Button variant="outline">
@@ -137,7 +141,7 @@ export default async function CaregiverHubPage({ searchParams }: Props) {
         {shiftsWithStatus.length === 0 ? (
           <p className="text-sm text-foreground/40">
             {hasKids && hasCaregivers
-              ? "No shifts scheduled for this week."
+              ? `No shifts scheduled for ${shownWeek}.`
               : "Add caregivers and kids first, then schedule shifts."}
           </p>
         ) : (

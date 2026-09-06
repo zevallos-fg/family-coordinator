@@ -23,6 +23,7 @@ const MORE = [
   { href: "/documents", label: "Documents" },
   { href: "/expenses", label: "Expenses" },
   { href: "/receipts", label: "Receipts" },
+  { href: "/barcode", label: "Scan barcode" },
   { href: "/vendors", label: "Vendors" },
   { href: "/trips", label: "Trips" },
   { href: "/hurricane", label: "Hurricane" },

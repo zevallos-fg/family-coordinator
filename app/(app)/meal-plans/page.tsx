@@ -4,7 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
 import { MealPlanWeek } from "@/components/meal-plans/MealPlanWeek";
 import { MealPlanGenerateClient } from "@/components/meal-plans/MealPlanGenerateClient";
-import { parseWeekParam, formatWeekParam, formatWeekRange } from "@/lib/week";
+import {
+  parseWeekParam,
+  formatWeekParam,
+  formatWeekRange,
+  weekLabel as describeWeek,
+} from "@/lib/week";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
@@ -82,6 +87,10 @@ export default async function MealPlanPage({ searchParams }: Props) {
 
   const recipes = (allRecipes ?? []).map((r) => ({ id: r.id, title: r.title }));
   const weekLabel = formatWeekRange(selectedWeek);
+  // Named rather than assumed: from Friday this page opens on next week, and
+  // "no meal plan yet for this week" was hiding a plan that existed for the week
+  // we were actually in.
+  const shownWeek = describeWeek(selectedWeek, today);
 
   return (
     <main className="min-h-screen bg-amber-50/30">
@@ -136,7 +145,7 @@ export default async function MealPlanPage({ searchParams }: Props) {
               <h2 className="text-lg font-semibold text-gray-800">
                 Week of {weekLabel}
               </h2>
-              <p className="text-sm text-gray-400 mt-0.5">No meal plan yet for this week.</p>
+              <p className="text-sm text-gray-400 mt-0.5">No meal plan yet for {shownWeek}.</p>
             </div>
             <MealPlanGenerateClient
               weekOf={weekStr}
