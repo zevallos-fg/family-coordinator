@@ -1,13 +1,38 @@
 // Family Coordinator v20 — Cloudflare Worker
-// Routes: / (legacy passthrough v8.4), /parse-grocery, /extract-recipe-url,
-//         /extract-recipe-image, /extract-barcode-wrapper,
+// Routes: / (passthrough, used by skills/_lib/runner.ts), /parse-grocery,
+//         /extract-recipe-url, /extract-recipe-image, /extract-barcode-wrapper,
 //         /parse-receipt-photo, /parse-receipt-email, /fetch-html
+//
+// Every route spends ANTHROPIC_KEY. All of them therefore require a verified
+// Supabase access token belonging to a real user of this project; see auth.js.
+// There is no unauthenticated path other than the CORS preflight and /health.
+
+import { AuthError, verifyAccessToken } from "./auth.js";
+import { enforceRateLimit, RateLimitError } from "./ratelimit.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const GROCERY_MODEL = "claude-sonnet-4-20250514"; // retained per §2b eval (16/20 fail)
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+// The only models this proxy will pay for. Before this list, `model` came
+// straight from the request body on seven of the eight routes, so any caller
+// could name the most expensive model available to the key.
+//
+// GROCERY_MODEL is deliberately a different Sonnet from the SONNET_MODEL the app
+// uses elsewhere (claude-sonnet-4-6). It stays pinned: the §2b eval result that
+// justifies Sonnet for grocery parsing (16/20 fail on Haiku) was measured against
+// claude-sonnet-4-20250514, and re-pointing it would invalidate that finding
+// without re-running the eval. Flagged, not changed.
+const ALLOWED_MODELS = new Set([
+  "claude-haiku-4-5-20251001", // HAIKU_MODEL in skills/_lib/runner.ts
+  "claude-sonnet-4-6", // SONNET_MODEL in skills/_lib/runner.ts
+  GROCERY_MODEL,
+]);
+
+// Highest max_tokens any skill asks for is 4000 (skills/*/index.ts).
+const MAX_TOKENS_CAP = 4096;
 
 const ALLOWED_FETCH_DOMAINS = [
   "nytimes.com", "cooking.nytimes.com", "seriouseats.com", "foodnetwork.com",
@@ -94,19 +119,158 @@ Return ONLY valid JSON. No markdown. No prose.
 Receipt:
 ${content.slice(0, 40000)}`;
 
-function corsHeaders(origin) {
-  return {
-    "Access-Control-Allow-Origin": origin || "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
+// Vercel project: family-coordinator, team zevallos-fgs-projects.
+// Preview URLs are generated per deployment and per branch, so they are matched
+// by shape rather than listed. Both patterns are anchored and pin the team suffix,
+// so `family-coordinator-evil.vercel.app` (a project someone else owns) does not
+// match.
+const ALLOWED_ORIGINS = new Set([
+  "https://family-coordinator.vercel.app",
+  "https://family-coordinator-git-main-zevallos-fgs-projects.vercel.app",
+]);
+const PREVIEW_ORIGIN_RE =
+  /^https:\/\/family-coordinator-(git-)?[a-z0-9-]+-zevallos-fgs-projects\.vercel\.app$/;
+const DEV_ORIGIN_RE = /^http:\/\/localhost:\d+$/;
+
+/**
+ * Resolve the origin this response may be shared with, or null.
+ *
+ * Returning null (rather than "*") for an unrecognised origin is the point: the
+ * previous version echoed whatever Origin it was sent, which is the same as
+ * having no policy at all.
+ *
+ * Note this is a browser control only. It stops a random web page from calling
+ * the proxy with a signed-in user's token; it does nothing against curl. The
+ * bearer check in auth.js is what actually protects the key.
+ */
+function allowedOrigin(origin, env) {
+  if (!origin) return null; // Non-browser caller (the skills runner). No CORS needed.
+  if (ALLOWED_ORIGINS.has(origin)) return origin;
+  if (PREVIEW_ORIGIN_RE.test(origin)) return origin;
+  if (env?.ALLOW_LOCALHOST_ORIGIN === "true" && DEV_ORIGIN_RE.test(origin)) return origin;
+  return null;
 }
 
-function jsonResp(data, status, origin) {
+function corsHeaders(origin) {
+  const headers = {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+  // Omitted entirely when the origin is not allowed, so the browser blocks it.
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+}
+
+function jsonResp(data, status, origin, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status: status || 200,
-    headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+    headers: { "Content-Type": "application/json", ...corsHeaders(origin), ...extraHeaders },
   });
+}
+
+/**
+ * Validate the model/max_tokens a caller asked for.
+ *
+ * Applied to the passthrough route and to the named routes alike, because until
+ * now both took `model` from the body.
+ */
+function checkModel(model) {
+  const chosen = model || DEFAULT_MODEL;
+  if (!ALLOWED_MODELS.has(chosen)) {
+    throw new BadRequest(`model not allowed: ${chosen}`);
+  }
+  return chosen;
+}
+
+function checkMaxTokens(maxTokens) {
+  if (maxTokens === undefined || maxTokens === null) {
+    throw new BadRequest("max_tokens required");
+  }
+  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > MAX_TOKENS_CAP) {
+    throw new BadRequest(`max_tokens must be an integer between 1 and ${MAX_TOKENS_CAP}`);
+  }
+  return maxTokens;
+}
+
+class BadRequest extends Error {
+  constructor(message) {
+    super(message);
+    this.status = 400;
+  }
+}
+
+class Forbidden extends Error {
+  constructor(message) {
+    super(message);
+    this.status = 403;
+  }
+}
+
+/** Is this host on the recipe-site allowlist? */
+function isAllowlistedHost(url) {
+  const hostname = url.hostname.replace(/^www\./, "");
+  return ALLOWED_FETCH_DOMAINS.some((d) => hostname === d || hostname.endsWith("." + d));
+}
+
+const MAX_FETCH_REDIRECTS = 2;
+
+/**
+ * Fetch an allowlisted recipe page, re-checking the allowlist on every hop.
+ *
+ * Following redirects automatically made the allowlist advisory: an allowlisted
+ * domain could bounce the request anywhere, including at a cloud metadata address
+ * or an internal host, and the worker would have fetched it and handed back the
+ * body. Same class of hole as the model allowlist — a check applied once to a
+ * value that changes afterwards.
+ *
+ * Three rules: every hop is re-checked against the allowlist, a redirect may not
+ * cross origins, and the chain is capped.
+ */
+async function fetchAllowlistedHTML(targetUrl) {
+  let current;
+  try {
+    current = new URL(targetUrl);
+  } catch {
+    throw new BadRequest("invalid url");
+  }
+  if (current.protocol !== "https:") throw new Forbidden("only https is allowed");
+  if (!isAllowlistedHost(current)) throw new Forbidden("domain not allowlisted");
+
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(current, {
+      redirect: "manual",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible)" },
+    });
+
+    if (res.status < 300 || res.status >= 400) return res.text();
+
+    if (hop >= MAX_FETCH_REDIRECTS) {
+      throw new Forbidden(`too many redirects (limit ${MAX_FETCH_REDIRECTS})`);
+    }
+
+    const location = res.headers.get("Location");
+    if (!location) throw new Forbidden("redirect without a Location header");
+
+    let next;
+    try {
+      next = new URL(location, current); // Relative Location values are legal.
+    } catch {
+      throw new Forbidden("redirect to an unparseable location");
+    }
+
+    // Cross-origin is refused outright, so a site can redirect within itself
+    // (http→https, /recipe → /recipes/123) but cannot hand us off elsewhere.
+    // The allowlist is re-checked anyway rather than relied on transitively.
+    if (next.origin !== current.origin) {
+      throw new Forbidden(`redirect crosses origin: ${current.origin} -> ${next.origin}`);
+    }
+    if (next.protocol !== "https:") throw new Forbidden("redirect leaves https");
+    if (!isAllowlistedHost(next)) throw new Forbidden("redirect target not allowlisted");
+
+    current = next;
+  }
 }
 
 async function callAnthropic(apiKey, body) {
@@ -131,26 +295,69 @@ function extractJSON(text) {
 
 export default {
   async fetch(request, env) {
-    const origin = request.headers.get("Origin") || "*";
+    const origin = allowedOrigin(request.headers.get("Origin"), env);
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/\/$/, "") || "/";
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders(origin) });
-    }
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405, headers: corsHeaders(origin) });
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    const path = new URL(request.url).pathname.replace(/\/$/, "") || "/";
+    // Liveness only. Says nothing about configuration, and spends nothing.
+    if (request.method === "GET" && path === "/health") {
+      return jsonResp({ ok: true }, 200, origin);
+    }
+
+    if (request.method !== "POST") {
+      return jsonResp({ error: "method not allowed" }, 405, origin);
+    }
+
+    // ---- Authentication gate ------------------------------------------------
+    // Ahead of routing and ahead of reading the body, so no route can be added
+    // later that quietly sits in front of it.
+    let caller;
+    try {
+      caller = await verifyAccessToken(request.headers.get("Authorization"), env.SUPABASE_URL);
+    } catch (err) {
+      if (!(err instanceof AuthError)) throw err;
+      return jsonResp({ error: err.message }, err.status, origin, {
+        "WWW-Authenticate": 'Bearer realm="family-coordinator-proxy"',
+      });
+    }
 
     try {
-      // Legacy passthrough — v8.4 sends full Anthropic body to root path
+      await enforceRateLimit(env.RATE_LIMIT, caller.userId, {
+        allowMissingKv: env.ALLOW_MISSING_KV === "true",
+      });
+    } catch (err) {
+      if (!(err instanceof RateLimitError)) throw err;
+      return jsonResp({ error: err.message }, 429, origin, {
+        "Retry-After": String(err.retryAfterSeconds),
+      });
+    }
+
+    try {
+      // Passthrough — the caller supplies a full Anthropic body.
+      //
+      // NOT removed, despite being labelled a v8.4 legacy route: this is the only
+      // route the live Next.js app uses. skills/_lib/runner.ts posts here, and all
+      // 23 skills go through it. Deleting it would take the whole skills layer down.
+      //
+      // What made it dangerous was that the body was forwarded verbatim, so the
+      // caller chose the model and max_tokens. Both are now checked, and the shape
+      // is pinned to a messages request rather than passed straight through.
       if (path === "/") {
         const body = await request.json();
-        const data = await callAnthropic(env.ANTHROPIC_KEY, body);
-        return new Response(JSON.stringify(data), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+        if (!body || typeof body !== "object" || !Array.isArray(body.messages)) {
+          return jsonResp({ error: "messages array required" }, 400, origin);
+        }
+        const data = await callAnthropic(env.ANTHROPIC_KEY, {
+          model: checkModel(body.model),
+          max_tokens: checkMaxTokens(body.max_tokens),
+          messages: body.messages,
+          ...(body.system ? { system: body.system } : {}),
         });
+        return jsonResp(data, 200, origin);
       }
 
       if (path === "/parse-grocery") {
@@ -168,7 +375,7 @@ export default {
         const { html, model } = await request.json();
         if (!html) return jsonResp({ error: "html required" }, 400, origin);
         const data = await callAnthropic(env.ANTHROPIC_KEY, {
-          model: model || DEFAULT_MODEL,
+          model: checkModel(model),
           max_tokens: 4000,
           messages: [{ role: "user", content: PROMPT_EXTRACT_RECIPE_URL(html) }],
         });
@@ -184,7 +391,7 @@ export default {
         if (!imageBase64 || !mimeType) return jsonResp({ error: "imageBase64 and mimeType required" }, 400, origin);
         if (imageBase64.length > MAX_IMAGE_BYTES * 1.37) return jsonResp({ error: "image exceeds 4MB" }, 413, origin);
         const data = await callAnthropic(env.ANTHROPIC_KEY, {
-          model: model || DEFAULT_MODEL,
+          model: checkModel(model),
           max_tokens: 4000,
           messages: [{
             role: "user",
@@ -206,7 +413,7 @@ export default {
         if (!imageBase64 || !mimeType) return jsonResp({ error: "imageBase64 and mimeType required" }, 400, origin);
         if (imageBase64.length > MAX_IMAGE_BYTES * 1.37) return jsonResp({ error: "image exceeds 4MB" }, 413, origin);
         const data = await callAnthropic(env.ANTHROPIC_KEY, {
-          model: model || DEFAULT_MODEL,
+          model: checkModel(model),
           max_tokens: 1000,
           messages: [{
             role: "user",
@@ -228,7 +435,7 @@ export default {
         if (!imageBase64 || !mimeType) return jsonResp({ error: "imageBase64 and mimeType required" }, 400, origin);
         if (imageBase64.length > MAX_IMAGE_BYTES * 1.37) return jsonResp({ error: "image exceeds 4MB" }, 413, origin);
         const data = await callAnthropic(env.ANTHROPIC_KEY, {
-          model: model || DEFAULT_MODEL,
+          model: checkModel(model),
           max_tokens: 2000,
           messages: [{
             role: "user",
@@ -250,7 +457,7 @@ export default {
         const content = html || emailText;
         if (!content) return jsonResp({ error: "html or text required" }, 400, origin);
         const data = await callAnthropic(env.ANTHROPIC_KEY, {
-          model: model || DEFAULT_MODEL,
+          model: checkModel(model),
           max_tokens: 2000,
           messages: [{ role: "user", content: PROMPT_PARSE_RECEIPT_EMAIL(content) }],
         });
@@ -264,20 +471,25 @@ export default {
       if (path === "/fetch-html") {
         const { url: targetUrl } = await request.json();
         if (!targetUrl) return jsonResp({ error: "url required" }, 400, origin);
-        let hostname;
-        try { hostname = new URL(targetUrl).hostname.replace(/^www\./, ""); }
-        catch { return jsonResp({ error: "invalid url" }, 400, origin); }
-        const allowed = ALLOWED_FETCH_DOMAINS.some(d => hostname === d || hostname.endsWith("." + d));
-        if (!allowed) return jsonResp({ error: "domain not allowlisted" }, 403, origin);
-        const pageRes = await fetch(targetUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible)" } });
-        const html = await pageRes.text();
-        return jsonResp({ html: html.slice(0, 500000) }, 200, origin);
+        try {
+          const html = await fetchAllowlistedHTML(targetUrl);
+          return jsonResp({ html: html.slice(0, 500000) }, 200, origin);
+        } catch (err) {
+          if (err instanceof BadRequest) return jsonResp({ error: err.message }, 400, origin);
+          if (err instanceof Forbidden) return jsonResp({ error: err.message }, 403, origin);
+          throw err;
+        }
       }
 
       return jsonResp({ error: "not found" }, 404, origin);
 
     } catch (err) {
-      return jsonResp({ error: err.message }, 500, origin);
+      // Rejections we raised ourselves carry the status the caller should see.
+      // Anything else is ours, and its message is not shown: an upstream error
+      // string can carry request detail that does not belong in a client response.
+      if (err instanceof BadRequest) return jsonResp({ error: err.message }, 400, origin);
+      console.error("proxy failure", path, caller.userId, err);
+      return jsonResp({ error: "internal error" }, 500, origin);
     }
   },
 };

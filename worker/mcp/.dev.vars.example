@@ -1,0 +1,10 @@
+# Copy to .dev.vars (gitignored) and fill in. Never commit real values.
+#
+# There is no signing secret here any more. The Worker exchanges a stored refresh
+# token for an access token, so the only Supabase credential it needs is the
+# public anon key.
+SUPABASE_ANON_KEY=<Dashboard - Settings - API - anon public key>
+CONNECTOR_TOKEN_MAP={"<connector-token>":"<supabase auth user uuid>"}
+
+# Harness-only: the connector token the acceptance suite presents.
+TEST_CONNECTOR_TOKEN=<the same connector-token as above>

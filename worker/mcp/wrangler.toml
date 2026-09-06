@@ -1,0 +1,38 @@
+# Family Co AI — remote MCP server.
+#
+# Deliberately a SEPARATE Worker from ../wrangler.toml (aged-dust-551a). That one
+# holds ANTHROPIC_KEY; secrets are per-Worker in Cloudflare, so keeping these
+# apart means the AI-parsing routes cannot reach this Worker's stored refresh
+# tokens and this Worker cannot reach the Anthropic key.
+name = "familyco-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[vars]
+# Non-secret. The one project this Worker may talk to; enforced in code, and the
+# only Supabase origin any request is allowed to reach.
+SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
+
+# Secrets — set with `wrangler secret put <NAME>`, never committed:
+#   SUPABASE_ANON_KEY    public anon key; required as the `apikey` header. Not a
+#                        privilege: on its own it is role=anon and RLS-bound.
+#   CONNECTOR_TOKEN_MAP  JSON: {"<connector-token>":"<supabase auth user uuid>"}
+#
+# Explicitly NOT set here, and the code has no path that would use one:
+#   SUPABASE_SERVICE_ROLE_KEY, any Supabase PAT, and — since the switch to
+#   refresh tokens — SUPABASE_JWT_SECRET. That secret could sign a
+#   role:"service_role" token and bypass RLS entirely, so holding it was as
+#   powerful as holding the service-role key. This Worker can no longer mint a
+#   token at all; it can only present one it was given.
+
+# Per-user refresh tokens (refresh:<uuid>) and short-lived cached access tokens
+# (access:<uuid>). Create with:
+#   wrangler kv namespace create TOKENS
+# then paste the returned id below.
+#
+# This is the Worker's most sensitive store: a refresh token is a standing
+# credential for one user. It is scoped to that user, carries no elevated role,
+# and Fernando revokes it by signing her out.
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

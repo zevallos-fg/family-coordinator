@@ -1,0 +1,20 @@
+{
+  // The Workers runtime is not the Next.js runtime: it has KVNamespace and no DOM.
+  // The repo tsconfig excludes `worker`, so this is what typechecks these files.
+  //
+  //   npm i -D @cloudflare/workers-types   (in this directory)
+  //   npx tsc --noEmit
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*.ts"]
+}
