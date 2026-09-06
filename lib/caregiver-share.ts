@@ -1,65 +1,37 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/database.types";
 
 /**
- * Typed access to the three share RPCs that migration
- * 20260906_caregiver_share_tokens adds.
+ * What is left of the temporary module.
  *
- * TEMPORARY, and deliberately small. `supabase gen types` can only describe
- * functions that exist, and that migration is not applied yet — so until it is,
- * these shapes are written by hand and the client is cast in exactly one place.
- * The moment the migration lands, regenerate database.types.ts and delete this
- * file: the generated types will describe all three, and the enum work in PR #9
- * is the whole argument for not keeping a hand-maintained copy around.
+ * The cast is gone: migration 20260906_caregiver_share_tokens is applied and
+ * `supabase gen types` now describes fn_share_read_shift, fn_share_submit_recap
+ * and the five-argument fn_share_create, so the call sites are typed by the
+ * generated file like everything else. That was the promise in the comment this
+ * replaces, and it is kept.
  *
- * Nothing here weakens anything. The functions are SECURITY DEFINER and take the
- * token as their only identifier; this module just stops the call sites from
- * being `as any`.
+ * Two things survive, both of which the generator genuinely cannot know.
  */
 
-export interface SharedShift {
-  label: string;
-  caregiver_name: string;
-  caregiver_role: string;
+type GeneratedRow =
+  Database["public"]["Functions"]["fn_share_read_shift"]["Returns"][number];
+
+/**
+ * `gen types` types every column of a RETURNS TABLE as non-null, because a
+ * function's signature carries no nullability. Four of these come from LEFT JOINs
+ * and one from a nullable column, so they very much can be null — and treating
+ * `brief_content` as a guaranteed string is how a shift with no brief yet becomes
+ * a blank panel instead of "no brief has been generated yet".
+ */
+export type SharedShift = Omit<
+  GeneratedRow,
+  "brief_content" | "brief_generated_at" | "recap_transcription" | "recap_submitted_at" | "kid_names"
+> & {
   kid_names: string[] | null;
-  start_at: string;
-  end_at: string;
   brief_content: string | null;
   brief_generated_at: string | null;
   recap_transcription: string | null;
   recap_submitted_at: string | null;
-}
-
-export interface MintedShareLink {
-  token: string;
-  expires_at: string;
-}
-
-/** The narrow surface this module needs, so the cast below is one line wide. */
-type ShareRpcClient = {
-  rpc(
-    fn: "fn_share_read_shift",
-    args: { p_token: string }
-  ): PromiseLike<{ data: SharedShift[] | null; error: { message: string } | null }>;
-  rpc(
-    fn: "fn_share_submit_recap",
-    args: { p_token: string; p_text: string }
-  ): PromiseLike<{ data: string | null; error: { message: string } | null }>;
-  rpc(
-    fn: "fn_share_create",
-    args: {
-      p_family_id: string;
-      p_label: string;
-      p_scope: string;
-      p_hours: number;
-      p_shift_id: string;
-    }
-  ): PromiseLike<{ data: MintedShareLink[] | null; error: { message: string } | null }>;
 };
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function shareRpc(client: SupabaseClient<any, any, any>): ShareRpcClient {
-  return client as unknown as ShareRpcClient;
-}
 
 /**
  * Postgres raises one exception for not-found, expired and revoked alike — the

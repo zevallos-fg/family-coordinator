@@ -6,7 +6,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { toTitleCase } from "@/lib/format/titleCase";
 import { parseCaregiverRole, CAREGIVER_ROLES } from "@/lib/db/enums";
-import { shareRpc } from "@/lib/caregiver-share";
 import { withSkillContext } from "@/lib/skill-action";
 import { run as runBriefSkill } from "@/skills/family-caregiver-brief";
 import { run as runRecapSkill } from "@/skills/family-caregiver-recap";
@@ -462,7 +461,7 @@ export async function createShiftShareLink(
   const caregiverName =
     (shift.caregivers as { name: string } | null)?.name ?? "Caregiver";
 
-  const { data, error } = await shareRpc(supabase).rpc("fn_share_create", {
+  const { data, error } = await supabase.rpc("fn_share_create", {
     p_family_id: familyId,
     p_label: caregiverName,
     p_scope: "caregiver_shift",

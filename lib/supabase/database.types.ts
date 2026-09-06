@@ -265,6 +265,7 @@ export type Database = {
           last_viewed_at: string | null
           revoked_at: string | null
           scope: string
+          shift_id: string | null
           token: string
           view_count: number
           window_hours: number
@@ -279,6 +280,7 @@ export type Database = {
           last_viewed_at?: string | null
           revoked_at?: string | null
           scope: string
+          shift_id?: string | null
           token: string
           view_count?: number
           window_hours?: number
@@ -293,6 +295,7 @@ export type Database = {
           last_viewed_at?: string | null
           revoked_at?: string | null
           scope?: string
+          shift_id?: string | null
           token?: string
           view_count?: number
           window_hours?: number
@@ -310,6 +313,13 @@ export type Database = {
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_share_links_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "caregiver_shifts"
             referencedColumns: ["id"]
           },
         ]
@@ -3433,6 +3443,7 @@ export type Database = {
           p_hours?: number
           p_label: string
           p_scope: string
+          p_shift_id?: string
         }
         Returns: {
           expires_at: string
@@ -3450,7 +3461,26 @@ export type Database = {
           started_at: string
         }[]
       }
+      fn_share_read_shift: {
+        Args: { p_token: string }
+        Returns: {
+          brief_content: string
+          brief_generated_at: string
+          caregiver_name: string
+          caregiver_role: string
+          end_at: string
+          kid_names: string[]
+          label: string
+          recap_submitted_at: string
+          recap_transcription: string
+          start_at: string
+        }[]
+      }
       fn_share_revoke: { Args: { p_id: string }; Returns: boolean }
+      fn_share_submit_recap: {
+        Args: { p_text: string; p_token: string }
+        Returns: string
+      }
       fn_skill_get_monthly_spend: {
         Args: { target_family_id: string }
         Returns: number
