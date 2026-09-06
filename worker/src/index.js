@@ -2,6 +2,12 @@
 // Routes: / (passthrough, used by skills/_lib/runner.ts), /parse-grocery,
 //         /extract-recipe-url, /extract-recipe-image, /extract-barcode-wrapper,
 //         /parse-receipt-photo, /parse-receipt-email, /fetch-html
+//
+// Every route spends ANTHROPIC_KEY. All of them therefore require a verified
+// Supabase access token belonging to a real user of this project; see auth.js.
+// There is no unauthenticated path other than the CORS preflight and /health.
+
+import { AuthError, verifyAccessToken } from "./auth.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -120,10 +126,10 @@ function corsHeaders(origin) {
   };
 }
 
-function jsonResp(data, status, origin) {
+function jsonResp(data, status, origin, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status: status || 200,
-    headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+    headers: { "Content-Type": "application/json", ...corsHeaders(origin), ...extraHeaders },
   });
 }
 
@@ -182,14 +188,34 @@ export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "*";
 
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/\/$/, "") || "/";
+
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders(origin) });
-    }
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405, headers: corsHeaders(origin) });
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    const path = new URL(request.url).pathname.replace(/\/$/, "") || "/";
+    // Liveness only. Says nothing about configuration, and spends nothing.
+    if (request.method === "GET" && path === "/health") {
+      return jsonResp({ ok: true }, 200, origin);
+    }
+
+    if (request.method !== "POST") {
+      return jsonResp({ error: "method not allowed" }, 405, origin);
+    }
+
+    // ---- Authentication gate ------------------------------------------------
+    // Ahead of routing and ahead of reading the body, so no route can be added
+    // later that quietly sits in front of it.
+    let caller;
+    try {
+      caller = await verifyAccessToken(request.headers.get("Authorization"), env.SUPABASE_URL);
+    } catch (err) {
+      if (!(err instanceof AuthError)) throw err;
+      return jsonResp({ error: err.message }, err.status, origin, {
+        "WWW-Authenticate": 'Bearer realm="family-coordinator-proxy"',
+      });
+    }
 
     try {
       // Passthrough — the caller supplies a full Anthropic body.
@@ -339,8 +365,12 @@ export default {
       return jsonResp({ error: "not found" }, 404, origin);
 
     } catch (err) {
+      // Rejections we raised ourselves carry the status the caller should see.
+      // Anything else is ours, and its message is not shown: an upstream error
+      // string can carry request detail that does not belong in a client response.
       if (err instanceof BadRequest) return jsonResp({ error: err.message }, 400, origin);
-      return jsonResp({ error: err.message }, 500, origin);
+      console.error("proxy failure", path, caller.userId, err);
+      return jsonResp({ error: "internal error" }, 500, origin);
     }
   },
 };
