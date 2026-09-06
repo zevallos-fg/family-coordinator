@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ok, err } from "@/lib/skill-action-result";
 import type { ActionResult } from "@/lib/skill-action-result";
 import { withRetry } from "@/lib/with-retry";
-import type { TaskStatus } from "@/lib/db/enums";
+import type { Database } from "@/lib/supabase/database.types";
 import { run as runTravelSkill } from "@/skills/family-travel";
 
 async function getAuthedFamily() {
@@ -104,7 +104,11 @@ export async function createTrip(
 
       // Insert prep tasks
       const tripStart = new Date(start_date);
-      const prepTasks = skillResult.data.prep_tasks.map((t) => {
+      // Annotated with the table's Insert type, not inferred: inside a .map()
+      // with no contextual type a string literal widens to `string` and the enum
+      // catches nothing. This is the row that was being silently discarded.
+      const prepTasks: Database["public"]["Tables"]["tasks"]["Insert"][] =
+        skillResult.data.prep_tasks.map((t) => {
         const dueDate = new Date(tripStart);
         dueDate.setDate(dueDate.getDate() - t.days_before_departure);
         return {
@@ -115,9 +119,9 @@ export async function createTrip(
           // 'pending' is not one of the four values tasks.status accepts, so every
           // prep task a trip has ever generated was rejected — and, because the
           // insert's error went unread, rejected in complete silence.
-          status: "open" satisfies TaskStatus,
-        };
-      });
+          status: "open",
+          };
+        });
 
       if (prepTasks.length > 0) {
         const { error: tasksError } = await supabase.from("tasks").insert(prepTasks);

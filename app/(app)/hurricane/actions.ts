@@ -9,6 +9,7 @@ import type { ActionResult } from "@/lib/skill-action-result";
 import { withRetry } from "@/lib/with-retry";
 import { run as runHurricaneSkill } from "@/skills/family-hurricane-prep";
 import { isChecklistSettled, type ChecklistStatus } from "@/lib/db/enums";
+import type { Database } from "@/lib/supabase/database.types";
 
 async function getAuthedFamily() {
   const supabase = await createClient();
@@ -79,7 +80,12 @@ export async function generateChecklist(): Promise<
 
     // Compute due dates from offset
     const today = new Date();
-    const rows = checklist_items.map((item) => {
+    // Annotated with the table's own Insert type rather than inferred: inside a
+    // .map() with no contextual type, `status: "open" satisfies ChecklistStatus`
+    // still widens to string and the enum buys nothing. This way the compiler
+    // checks every column, not just the one we remembered to think about.
+    const rows: Database["public"]["Tables"]["seasonal_checklists"]["Insert"][] =
+      checklist_items.map((item) => {
       const dueDate = new Date(today);
       dueDate.setDate(dueDate.getDate() + item.due_by_offset_days);
       return {
@@ -89,10 +95,10 @@ export async function generateChecklist(): Promise<
         // seasonal_checklists.status accepts open | done | na. This wrote
         // "pending", so generation could never store a single row: the whole
         // feature was inert from the first line it ever tried to insert.
-        status: "open" satisfies ChecklistStatus,
+        status: "open",
         due_by_date: dueDate.toISOString().split("T")[0],
-      };
-    });
+        };
+      });
 
     const { error: insertError } = await supabase
       .from("seasonal_checklists")
