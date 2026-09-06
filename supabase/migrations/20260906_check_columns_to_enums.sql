@@ -26,14 +26,23 @@
 -- are handled in steps 3 and 3b — v_reminders_pending, which sits on top of
 -- v_whats_due, and idx_tasks_owner, whose partial-index predicate compares
 -- status to text and fails the ALTER with an error naming neither.
-
-begin;
+--
+-- No explicit BEGIN/COMMIT: the Supabase migration runner wraps each file in one
+-- transaction, and nesting one inside it would either be rejected or commit
+-- early. Everything below therefore succeeds together or not at all.
 
 -- ── 1. The types ─────────────────────────────────────────────────────────────
 -- Values only, lower_snake, never displayed. Display casing lives in
 -- lib/db/enums.ts — putting it on the value is what broke createCaregiver.
 
-create type public.caregiver_role     as enum ('nanny', 'grandparent', 'daycare', 'other');
+-- 'au_pair' is new. It was offered by the caregiver form for as long as the form
+-- existed and the CHECK never accepted it, so no row can be using it and nothing
+-- needs backfilling. Folded in here as agreed rather than run as a second DDL
+-- change against the same column — and included in CREATE TYPE rather than a
+-- following ALTER TYPE ... ADD VALUE, because the type is being created in this
+-- transaction and Postgres forbids USING a value added by ALTER TYPE within the
+-- same transaction that added it. Same end state, one statement, no caveat.
+create type public.caregiver_role     as enum ('nanny', 'grandparent', 'daycare', 'au_pair', 'other');
 create type public.medical_event_type as enum ('checkup', 'illness', 'vaccine', 'question', 'other');
 create type public.checklist_status   as enum ('open', 'done', 'na');
 create type public.task_status        as enum ('open', 'in_progress', 'done', 'cancelled');
@@ -51,7 +60,7 @@ begin
     into bad_count, bad_values
   from (
     select role  as value from public.caregivers
-     where role not in ('nanny', 'grandparent', 'daycare', 'other')
+     where role not in ('nanny', 'grandparent', 'daycare', 'au_pair', 'other')
     union all
     select event_type from public.medical_events
      where event_type not in ('checkup', 'illness', 'vaccine', 'question', 'other')
@@ -244,8 +253,6 @@ begin
   return query select t.title, t.status::text from public.tasks t where t.id = p_task_id;
 end $function$;
 
-commit;
-
 -- PostgREST caches the schema, and the new column types will not appear in its
 -- OpenAPI output — or in `supabase gen types` — until it reloads.
 notify pgrst, 'reload schema';
@@ -263,6 +270,7 @@ notify pgrst, 'reload schema';
 --       alter column role type text using role::text,
 --       add constraint caregivers_role_check
 --         check (role = any (array['nanny','grandparent','daycare','other']));
+--       -- note: rolling back drops au_pair, so reconcile any row using it first
 --
 --     alter table public.medical_events
 --       alter column event_type type text using event_type::text,
