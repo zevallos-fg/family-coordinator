@@ -2,24 +2,31 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { generateBrief, parseRecap } from "@/app/(app)/caregiver/actions";
+import {
+  generateBrief,
+  parseRecap,
+  createShiftShareLink,
+} from "@/app/(app)/caregiver/actions";
 
 interface BriefPreviewProps {
   shiftId: string;
   brief: { content: string; generated_at: string } | null;
   recap: { transcription: string | null; structured_log: object | null; submitted_at: string } | null;
-  origin: string;
 }
 
-export function BriefPreview({ shiftId, brief, recap, origin }: BriefPreviewProps) {
+export function BriefPreview({ shiftId, brief, recap }: BriefPreviewProps) {
   const [generating, setGenerating] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentBrief, setCurrentBrief] = useState(brief);
   const [currentRecap, setCurrentRecap] = useState(recap);
-
-  const shareUrl = `${origin}/caregiver-view/${shiftId}`;
+  const [minting, setMinting] = useState(false);
+  // Shown once, on creation, and never again. The token IS the credential, so
+  // re-displaying it would turn revocation into theatre.
+  const [freshLink, setFreshLink] = useState<{ url: string; expiresAt: string } | null>(
+    null
+  );
 
   async function handleGenerate() {
     setGenerating(true);
@@ -46,10 +53,28 @@ export function BriefPreview({ shiftId, brief, recap, origin }: BriefPreviewProp
     setParsing(false);
   }
 
-  async function handleCopyLink() {
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleCreateLink() {
+    setMinting(true);
+    setError(null);
+    const result = await createShiftShareLink(shiftId);
+    setMinting(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setFreshLink({ url: result.url, expiresAt: result.expiresAt });
+  }
+
+  async function handleCopy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Blocked outside a secure context, and on iOS outside a user gesture. The
+      // URL is on screen either way, so say so rather than fail silently.
+      setError("Couldn't copy — select the link and copy it by hand.");
+    }
   }
 
   return (
@@ -65,11 +90,34 @@ export function BriefPreview({ shiftId, brief, recap, origin }: BriefPreviewProp
         </Button>
 
         {currentBrief && (
-          <Button variant="outline" onClick={handleCopyLink}>
-            {copied ? "Copied!" : "Copy caregiver link"}
+          <Button variant="outline" onClick={handleCreateLink} disabled={minting}>
+            {minting ? "Creating…" : "Create caregiver link"}
           </Button>
         )}
       </div>
+
+      {freshLink && (
+        <div
+          data-testid="fresh-caregiver-link"
+          className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3"
+        >
+          <p className="text-xs font-medium text-amber-900">
+            Copy this now — it is not shown again. Expires{" "}
+            {new Date(freshLink.expiresAt).toLocaleString()}.
+          </p>
+          <p className="break-all rounded-lg bg-white px-2 py-1.5 font-mono text-[11px] text-foreground/70">
+            {freshLink.url}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => handleCopy(freshLink.url)}>
+              {copied ? "Copied!" : "Copy link"}
+            </Button>
+            <Button variant="outline" onClick={() => setFreshLink(null)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -79,14 +127,16 @@ export function BriefPreview({ shiftId, brief, recap, origin }: BriefPreviewProp
             <span className="text-xs text-foreground/50">
               Generated {new Date(currentBrief.generated_at).toLocaleString()}
             </span>
-            <a
-              href={shareUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-amber-700 underline"
-            >
-              Preview as caregiver →
-            </a>
+            {freshLink && (
+              <a
+                href={freshLink.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-amber-700 underline"
+              >
+                Open as caregiver →
+              </a>
+            )}
           </div>
           <div className="p-4">
             <pre className="text-sm whitespace-pre-wrap font-sans text-foreground/80">

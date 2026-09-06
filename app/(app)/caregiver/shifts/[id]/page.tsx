@@ -1,6 +1,5 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { BriefPreview } from "@/components/caregiver/BriefPreview";
 import { Button } from "@/components/ui/button";
@@ -60,11 +59,6 @@ export default async function ShiftDetailPage({ params }: Props) {
       .maybeSingle(),
   ]);
 
-  const headersList = await headers();
-  const host = headersList.get("host") ?? "localhost:3000";
-  const proto = host.startsWith("localhost") ? "http" : "https";
-  const origin = `${proto}://${host}`;
-
   const caregiverInfo = shift.caregivers as { name: string; role: string } | null;
 
   return (
@@ -107,7 +101,6 @@ export default async function ShiftDetailPage({ params }: Props) {
         shiftId={id}
         brief={brief ?? null}
         recap={recap ? { ...recap, structured_log: recap.structured_log as object | null } : null}
-        origin={origin}
       />
 
       {/* Danger zone */}
