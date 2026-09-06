@@ -1,13 +1,25 @@
-name: Playwright E2E
+name: CI
+
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
 
+# The e2e suite runs against one shared fixture family in a single Supabase
+# project, so two runs at once would wipe each other's rows — the same
+# cross-talk that turned two PRs red locally. Serialise every run in the repo,
+# and queue rather than cancel, so a merge to main is never skipped.
+concurrency:
+  group: e2e-fixture-family
+  cancel-in-progress: false
+
 jobs:
-  test:
-    timeout-minutes: 20
+  # Everything that needs no credentials, so a PR still gets a real signal even
+  # if the secrets below are ever missing or rotated. Runs first and fast.
+  checks:
+    name: types, lint, unit
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,23 +28,70 @@ jobs:
           node-version: 20
           cache: "npm"
       - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      # A ratchet, not a ceiling. 99 is exactly what main carries today (76 of
+      # them no-floating-supabase-error), so the count can fall and cannot
+      # climb. Lower this number as they go; when it reaches zero the rule
+      # becomes "error" and this flag comes out.
+      - name: Lint
+        run: npx eslint app components lib skills --max-warnings 99
+      - name: Unit tests
+        run: npm run test
+
+  e2e:
+    name: playwright
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    needs: checks
+    # The build embeds NEXT_PUBLIC_* at compile time, and the webServer and the
+    # Playwright globalSetup both need these at run time. Declaring them on the
+    # job rather than on one step is the fix for the original failure: they were
+    # passed to `npm run build` only, so `npm run test:e2e` started a server with
+    # no Supabase config and every request died with "Your project's URL and Key
+    # are required to create a Supabase client!".
+    #
+    # Sentry and PostHog are deliberately absent. A CI run must not write into
+    # real error tracking or product analytics, and must not upload a source map
+    # for every pull request.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      # Four minutes of install and build, to arrive at a server that cannot
+      # boot, is how this workflow spent every run for months while reporting
+      # nothing but a red X. Say what is actually wrong, in one second.
+      - name: Require the Supabase secrets
+        run: |
+          # Actions runs this with `bash -eo pipefail`, so `[ -z x ] && y` would
+          # fail the step on its own falsiness. An if is the only safe form.
+          missing=""
+          for name in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
+            if [ -z "${!name}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — the e2e suite cannot run without them. Set them with: gh secret set <NAME>"
+            exit 1
+          fi
+          echo "All three Supabase secrets are present."
+
+      - run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
       - name: Build
         run: npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          NEXT_PUBLIC_WORKER_URL: ${{ secrets.NEXT_PUBLIC_WORKER_URL }}
-          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
-          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
       - name: Run Playwright tests
         run: npm run test:e2e
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

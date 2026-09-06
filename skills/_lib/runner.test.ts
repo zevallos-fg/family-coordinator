@@ -100,7 +100,7 @@ describe("callSkill — upstream failures are loud", () => {
     const result = await callSkill(opts, ctx);
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("unreachable");
+    if (result.ok || !result.error) throw new Error("unreachable");
     expect(result.error.code).toBe("api_error");
     // The upstream reason has to survive into the message, or the operator is
     // left guessing which of several things broke.
@@ -165,7 +165,7 @@ describe("callSkill — upstream failures are loud", () => {
     const result = await callSkill(opts, ctx);
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("unreachable");
+    if (result.ok || !result.error) throw new Error("unreachable");
     // Names the upstream, so a 401 here is not mistaken for the proxy's own
     // auth gate rejecting the session.
     expect(result.error.message).toContain("anthropic");
