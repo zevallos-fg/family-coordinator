@@ -1,5 +1,5 @@
 // Returns the Monday of the week containing d (local calendar dates).
-function startOfWeek(d: Date): Date {
+export function startOfWeek(d: Date): Date {
   const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
   const diff = day === 0 ? -6 : 1 - day;
   const monday = new Date(d);
@@ -64,4 +64,35 @@ export function clampWeek(
   if (target.getTime() < min.getTime()) return min;
   if (target.getTime() > max.getTime()) return max;
   return target;
+}
+
+/**
+ * How far the shown week sits from the one we are living in.
+ *
+ * defaultPlanWeek jumps to next Monday from Friday onward, which is the right
+ * default for planning and the wrong thing to call "this week". Three days out of
+ * seven, /caregiver, /meal-plans and /schedule were showing next week under
+ * headings that said "this week" and empty states that said nothing was
+ * scheduled — on days when something was happening that afternoon.
+ */
+export function weekOffset(weekStart: Date, today: Date = new Date()): number {
+  const a = startOfWeek(weekStart).getTime();
+  const b = startOfWeek(today).getTime();
+  return Math.round((a - b) / (7 * 24 * 60 * 60 * 1000));
+}
+
+export function isCurrentWeek(weekStart: Date, today: Date = new Date()): boolean {
+  return weekOffset(weekStart, today) === 0;
+}
+
+/**
+ * Names the week the way a person would, for use inside a sentence:
+ * "this week", "next week", "last week", or a dated range for anything further.
+ */
+export function weekLabel(weekStart: Date, today: Date = new Date()): string {
+  const offset = weekOffset(weekStart, today);
+  if (offset === 0) return "this week";
+  if (offset === 1) return "next week";
+  if (offset === -1) return "last week";
+  return `the week of ${formatWeekRange(startOfWeek(weekStart))}`;
 }

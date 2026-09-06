@@ -9,6 +9,8 @@ interface DutyRow {
 
 interface WeekViewProps {
   duties: DutyRow[];
+  /** "this week", "next week", "the week of Sep 21 — 27" — see lib/week. */
+  weekLabel?: string;
 }
 
 function groupByDate(duties: DutyRow[]) {
@@ -28,13 +30,13 @@ function formatDate(isoDate: string) {
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-export function WeekView({ duties }: WeekViewProps) {
+export function WeekView({ duties, weekLabel = "this week" }: WeekViewProps) {
   const grouped = groupByDate(duties);
 
   if (grouped.length === 0) {
     return (
       <div className="text-center py-12 text-stone-400">
-        <p className="text-sm">No schedule for this week yet</p>
+        <p className="text-sm">No schedule for {weekLabel} yet</p>
       </div>
     );
   }
