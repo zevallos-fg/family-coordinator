@@ -54,11 +54,24 @@ export async function createTrip(
       return err("db_error", "Could not save trip.", tripError.message);
     }
 
-    // Pull family members for skill input
-    const { data: members } = await supabase
+    // Pull family members for skill input. `?? []` here meant a failed read
+    // produced a packing list for a household of zero adults — written to
+    // trip_packing_items, through a paid model call, with the trip looking fine.
+    const { data: members, error: membersError } = await supabase
       .from("family_members")
       .select("user_id, users(full_name)")
       .eq("family_id", familyId);
+
+    if (membersError) {
+      Sentry.captureException(membersError, {
+        extra: { action: "createTrip", stage: "members", tripId: trip.id },
+      });
+      revalidatePath("/trips");
+      return ok(
+        { id: trip.id },
+        "Trip saved, but we couldn't read who is travelling, so no packing list was generated. Open the trip to try again."
+      );
+    }
 
     // Fire skill to generate packing list + prep tasks
     const household = {

@@ -77,11 +77,35 @@ export async function resolveIngredient(input: ResolveInput): Promise<ResolveRes
 
   // ── Tier 3: Haiku skill ────────────────────────────────────────────────────
   // Load all candidates for this family for Haiku to reason over
-  const { data: allIngredients } = await supabase
+  const { data: allIngredients, error: candidatesError } = await supabase
     .from("ingredients")
     .select("id, canonical_name")
     .eq("family_id", familyId)
     .order("canonical_name");
+
+  // This read is the only thing standing between a typo and a duplicate row.
+  // With `?? []` a failed query skipped Tier 3 and fell into Tier 4, which
+  // creates a NEW ingredient — so a transient error permanently forked the
+  // family's canonical list, and did it again on every retry.
+  //
+  // Bail out to unmatched instead. Nothing is lost: fn_grocery_upsert takes a
+  // null ingredient id, so the item still reaches the list; it just is not
+  // linked to an ingredient that may well already exist.
+  if (candidatesError) {
+    console.error("[resolveIngredient] candidate load failed — refusing to create a possible duplicate", {
+      familyId,
+      rawName,
+      error: candidatesError.message,
+    });
+    await writeLog(supabase, familyId, rawName, cleanedName, null, descriptors, "unmatched");
+    return {
+      ingredientId: null,
+      confidence: "unmatched",
+      cleanedName,
+      descriptors,
+      newlyCreated: false,
+    };
+  }
 
   const candidates = (allIngredients ?? []).map((r) => ({
     id: r.id,
