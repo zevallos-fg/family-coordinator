@@ -6,14 +6,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { formatPhone } from "@/lib/format/phone";
 import { deleteWithUndo } from "@/lib/undo";
+import { CAREGIVER_ROLE_LABEL, type CaregiverRole } from "@/lib/db/enums";
 
-const ROLE_LABELS: Record<string, string> = {
-  nanny: "Nanny",
-  grandparent: "Grandparent",
-  daycare: "Daycare",
-  au_pair: "Au Pair",
-  other: "Caregiver",
-};
 
 interface Caregiver {
   id: string;
@@ -98,7 +92,7 @@ export function CaregiverList({ caregivers }: { caregivers: Caregiver[] }) {
             <div className="flex items-center gap-2">
               <span className="font-medium">{c.name}</span>
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                {ROLE_LABELS[c.role] ?? c.role}
+                {CAREGIVER_ROLE_LABEL[c.role as CaregiverRole] ?? c.role}
               </span>
             </div>
             {c.phone && (
