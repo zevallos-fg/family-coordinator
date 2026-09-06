@@ -37,6 +37,9 @@ type BabyData = {
   links: ShareLink[];
 };
 
+/** The two scopes this sheet owns. caregiver_shift links live in the same table. */
+const BABY_SCOPES = ["contractions", "baby_today"];
+
 /** Timer types only. Diaper's ended_at is null forever, so it is never "open". */
 const OPEN_TYPES = ["feed", "sleep", "pump", "contraction"];
 
@@ -95,6 +98,10 @@ async function loadBabyData(familyId: string): Promise<BabyData> {
       .from("baby_share_links")
       .select("*")
       .eq("family_id", familyId)
+      // The table is shared with caregiver-shift links now. Without this filter
+      // the baby sheet listed those too — under a raw "caregiver_shift" label,
+      // with a Revoke button that would kill a nanny's link from the baby lane.
+      .in("scope", BABY_SCOPES)
       .is("revoked_at", null)
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: false }),

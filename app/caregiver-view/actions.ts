@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { shareRpc, isDeadLink } from "@/lib/caregiver-share";
+import { isDeadLink } from "@/lib/caregiver-share";
 
 /**
  * The one write a caregiver can make, and the first time they have been able to
@@ -25,7 +25,7 @@ export async function submitSharedRecap(
   }
 
   const supabase = await createClient();
-  const { data, error } = await shareRpc(supabase).rpc("fn_share_submit_recap", {
+  const { data, error } = await supabase.rpc("fn_share_submit_recap", {
     p_token: token,
     p_text: text.trim(),
   });

@@ -19,7 +19,16 @@ const KID_NAME = "E2E Baby (chromium)";
 
 async function wipe() {
   await admin.from("baby_events").delete().eq("family_id", familyId);
-  await admin.from("baby_share_links").delete().eq("family_id", familyId);
+  // Only the baby lane's links. A family-wide delete here also took out the
+  // caregiver share links that caregiver-share.spec.ts had just minted, which
+  // showed up as an intermittent failure over there rather than here.
+  // shift_id is the clean discriminator: a baby link never carries one, and a
+  // caregiver link always does — the CHECK constraint guarantees both halves.
+  await admin
+    .from("baby_share_links")
+    .delete()
+    .eq("family_id", familyId)
+    .is("shift_id", null);
   await admin.from("kids").delete().eq("family_id", familyId).eq("name", KID_NAME);
 }
 

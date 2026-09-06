@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { RecapForm } from "@/components/caregiver/RecapForm";
-import { shareRpc } from "@/lib/caregiver-share";
+import type { SharedShift } from "@/lib/caregiver-share";
 
 interface Props {
   params: Promise<{ token: string }>;
@@ -32,11 +32,12 @@ export default async function CaregiverViewPage({ params }: Props) {
   const { token } = await params;
   const supabase = await createClient();
 
-  const { data, error } = await shareRpc(supabase).rpc("fn_share_read_shift", {
+  const { data, error } = await supabase.rpc("fn_share_read_shift", {
     p_token: token,
   });
 
-  const shift = data?.[0];
+  // Cast narrows nullability the generator cannot express, not the shape.
+  const shift = data?.[0] as SharedShift | undefined;
 
   if (error || !shift) {
     // Not-found, expired and revoked all render the same sentence, because the
