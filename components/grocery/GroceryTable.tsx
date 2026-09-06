@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { toggleInCart, deleteGroceryItem, updateGroceryStore } from "@/app/(app)/grocery/actions";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { toggleInCart, updateGroceryStore } from "@/app/(app)/grocery/actions";
+import { deleteWithUndo } from "@/lib/undo";
 
 interface Store {
   id: string;
@@ -43,14 +46,44 @@ function SortChevron({ field, sortField, sortDir }: { field: SortField; sortFiel
 }
 
 export function GroceryTable({ items, stores }: GroceryTableProps) {
+  const router = useRouter();
   const [optimistic, setOptimistic] = useState<Record<string, boolean>>({});
-  const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  // Removed on tap, before the network is touched. Undo takes ids back out.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // Rows brought back by Undo that the server hasn't re-sent yet. Without this the
+  // row would vanish for a round trip after the user asked for it back.
+  const [resurrected, setResurrected] = useState<Map<string, GroceryItem>>(new Map());
+  const [storeOverride, setStoreOverride] = useState<Record<string, string | null>>({});
   const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [, startTransition] = useTransition();
 
-  if (items.length === 0) {
+  const refresh = () => startTransition(() => router.refresh());
+
+  function hide(ids: string[]) {
+    setHidden((prev) => new Set([...prev, ...ids]));
+    setResurrected((prev) => {
+      const next = new Map(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  }
+
+  function show(rows: GroceryItem[]) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      rows.forEach((r) => next.delete(r.id));
+      return next;
+    });
+    setResurrected((prev) => {
+      const next = new Map(prev);
+      rows.forEach((r) => next.set(r.id, r));
+      return next;
+    });
+  }
+
+  if (items.length === 0 && resurrected.size === 0) {
     return (
       <div className="text-center py-10 text-stone-400">
         <p className="text-sm">Empty list</p>
@@ -87,47 +120,80 @@ export function GroceryTable({ items, stores }: GroceryTableProps) {
 
   async function handleToggle(id: string, current: boolean) {
     setOptimistic((prev) => ({ ...prev, [id]: !current }));
-    await toggleInCart(id, current);
+    const res = await toggleInCart(id, current);
+    if (res && !res.ok) {
+      // Never leave the checkbox showing a state the database disagrees with.
+      setOptimistic((prev) => ({ ...prev, [id]: current }));
+      toast.error("Couldn't update that. Try again.");
+    }
   }
 
-  async function handleDelete(id: string, groupId: string | null, isParent: boolean) {
-    if (isParent && groupId) {
-      const groupItems = items.filter((i) => i.dedup_group_id === groupId);
-      if (groupItems.length > 1) {
-        const ok = window.confirm(`This will delete all ${groupItems.length} items in this group. Continue?`);
-        if (!ok) return;
-        setDeleting((prev) => new Set([...prev, ...groupItems.map((i) => i.id)]));
-        for (const item of groupItems) {
-          await deleteGroceryItem(item.id);
-        }
-        return;
-      }
-    }
-    setDeleting((prev) => new Set([...prev, id]));
-    await deleteGroceryItem(id);
+  async function handleDelete(item: GroceryItem, isParent: boolean) {
+    const group =
+      isParent && item.dedup_group_id
+        ? visible.filter((i) => i.dedup_group_id === item.dedup_group_id)
+        : [item];
+    const rows = group.length > 1 ? group : [item];
+
+    hide(rows.map((r) => r.id));
+
+    await deleteWithUndo({
+      table: "grocery_items",
+      ids: rows.map((r) => r.id),
+      message: rows.length > 1 ? `${rows.length} items removed` : `${item.name} removed`,
+      onShow: () => show(rows),
+      onHide: () => hide(rows.map((r) => r.id)),
+      onSettled: refresh,
+    });
   }
 
   async function handleStoreChange(id: string, newStoreId: string) {
     setEditingStoreId(null);
-    startTransition(() => {
-      updateGroceryStore(id, newStoreId || null);
-    });
+    const previous = storeOverride[id];
+    setStoreOverride((prev) => ({ ...prev, [id]: newStoreId || null }));
+    const res = await updateGroceryStore(id, newStoreId || null);
+    if (res && !res.ok) {
+      setStoreOverride((prev) => {
+        const next = { ...prev };
+        if (previous === undefined) delete next[id];
+        else next[id] = previous;
+        return next;
+      });
+      toast.error("Couldn't change the store. Try again.");
+      return;
+    }
+    refresh();
   }
 
-  // Build cluster membership map
+  // What the user should see right now: the server's rows minus anything removed by
+  // tap, plus anything Undo brought back that the server hasn't caught up on yet.
+  const visible: GroceryItem[] = [
+    ...items.filter((i) => !hidden.has(i.id)),
+    ...[...resurrected.values()].filter((r) => !items.some((i) => i.id === r.id)),
+  ];
+
+  // Build cluster membership map over what is visible, so deleting a parent doesn't
+  // leave its children indented under nothing.
   const clusterParents = new Set<string>();
   const clusterChildren = new Set<string>();
-  const groupedItems = items.filter((i) => i.dedup_group_id);
+  const groupedItems = visible.filter((i) => i.dedup_group_id);
   const groupIds = [...new Set(groupedItems.map((i) => i.dedup_group_id!))];
   for (const gid of groupIds) {
-    const members = items.filter((i) => i.dedup_group_id === gid);
+    const members = visible.filter((i) => i.dedup_group_id === gid);
     if (members.length > 0) {
       clusterParents.add(members[0].id);
       members.slice(1).forEach((m) => clusterChildren.add(m.id));
     }
   }
 
-  const sorted = sortedItems(items);
+  const sorted = sortedItems(visible);
+
+  function storeLabel(item: GroceryItem): string {
+    const overridden = storeOverride[item.id];
+    if (overridden === undefined) return item.stores?.name ?? "—";
+    if (overridden === null) return "—";
+    return stores.find((s) => s.id === overridden)?.name ?? "—";
+  }
 
   const headerCls = (field: SortField) =>
     `cursor-pointer select-none font-medium text-xs uppercase tracking-wide ${
@@ -152,7 +218,6 @@ export function GroceryTable({ items, stores }: GroceryTableProps) {
       <div className="divide-y divide-stone-100">
         {sorted.map((item) => {
           const inCart = optimistic[item.id] ?? item.in_cart;
-          const isDeleting = deleting.has(item.id);
           const isChild = clusterChildren.has(item.id);
           const isParent = clusterParents.has(item.id);
 
@@ -161,7 +226,7 @@ export function GroceryTable({ items, stores }: GroceryTableProps) {
               key={item.id}
               className={`grid grid-cols-[44px_1fr_auto_44px] sm:grid-cols-[44px_1fr_120px_44px] items-center transition-all ${
                 inCart ? "opacity-50 bg-stone-50" : "bg-white hover:bg-stone-50/50"
-              } ${isDeleting ? "opacity-30" : ""} ${isChild ? "pl-6" : ""}`}
+              } ${isChild ? "pl-6" : ""}`}
             >
               {/* Checkbox */}
               <button
@@ -211,7 +276,7 @@ export function GroceryTable({ items, stores }: GroceryTableProps) {
                   <select
                     autoFocus
                     className="text-xs border border-stone-200 rounded px-1 py-0.5 text-stone-700 bg-white"
-                    defaultValue={item.store_id ?? ""}
+                    defaultValue={storeOverride[item.id] ?? item.store_id ?? ""}
                     onBlur={(e) => handleStoreChange(item.id, e.target.value)}
                     onChange={(e) => handleStoreChange(item.id, e.target.value)}
                   >
@@ -226,17 +291,16 @@ export function GroceryTable({ items, stores }: GroceryTableProps) {
                     onClick={() => setEditingStoreId(item.id)}
                     title="Click to change store"
                   >
-                    {item.stores?.name ?? "—"}
+                    {storeLabel(item)}
                   </button>
                 )}
               </div>
 
               {/* Delete */}
               <button
-                onClick={() => handleDelete(item.id, item.dedup_group_id, isParent)}
-                disabled={isDeleting}
+                onClick={() => handleDelete(item, isParent)}
                 aria-label="Remove item"
-                className="min-w-11 min-h-11 flex items-center justify-center text-stone-300 hover:text-rose-400 transition-colors disabled:opacity-30"
+                className="min-w-11 min-h-11 flex items-center justify-center text-stone-300 hover:text-rose-400 transition-colors"
               >
                 ×
               </button>

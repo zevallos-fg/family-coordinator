@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { updatePantryItemAction, removePantryItemAction } from "@/app/(app)/meal-plans/actions";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { updatePantryItemAction } from "@/app/(app)/meal-plans/actions";
+import { deleteWithUndo } from "@/lib/undo";
 
 interface PantryItem {
   id: string;
@@ -36,24 +39,33 @@ function ExpiryBadge({ expiresOn }: { expiresOn: string | null }) {
   );
 }
 
-function PantryRow({ item, onUpdated }: { item: PantryItem; onUpdated: () => void }) {
+function PantryRow({
+  item,
+  onUpdated,
+  onRemove,
+}: {
+  item: PantryItem;
+  onUpdated: () => void;
+  onRemove: (item: PantryItem) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState(String(item.amount ?? ""));
-  const [saving, setSaving] = useState(false);
+  const [savedAmount, setSavedAmount] = useState<number | null>(item.amount);
 
   async function saveAmount() {
     const num = parseFloat(amount);
     if (isNaN(num) || num < 0) return;
-    setSaving(true);
-    await updatePantryItemAction(item.id, num);
-    setSaving(false);
+    const previous = savedAmount;
+    // Show the new number and close the editor now; reconcile after.
+    setSavedAmount(num);
     setEditing(false);
-    onUpdated();
-  }
-
-  async function handleRemove() {
-    if (!confirm(`Remove ${item.ingredientName} from pantry?`)) return;
-    await removePantryItemAction(item.id);
+    const res = await updatePantryItemAction(item.id, num);
+    if (res?.error) {
+      setSavedAmount(previous);
+      setAmount(String(previous ?? ""));
+      toast.error("Couldn't save that amount. Try again.");
+      return;
+    }
     onUpdated();
   }
 
@@ -75,8 +87,8 @@ function PantryRow({ item, onUpdated }: { item: PantryItem; onUpdated: () => voi
               autoFocus
               onKeyDown={e => { if (e.key === "Enter") saveAmount(); if (e.key === "Escape") setEditing(false); }}
             />
-            <button onClick={saveAmount} disabled={saving} className="text-xs text-green-600 hover:text-green-800 font-medium">
-              {saving ? "…" : "Save"}
+            <button onClick={saveAmount} className="text-xs text-green-600 hover:text-green-800 font-medium">
+              Save
             </button>
             <button onClick={() => setEditing(false)} className="text-xs text-gray-400 hover:text-gray-600">
               Cancel
@@ -87,7 +99,7 @@ function PantryRow({ item, onUpdated }: { item: PantryItem; onUpdated: () => voi
             onClick={() => setEditing(true)}
             className="text-sm text-gray-600 hover:text-orange-700 transition-colors"
           >
-            {item.amount !== null ? `${item.amount}${item.unit ? ` ${item.unit}` : ""}` : "—"}
+            {savedAmount !== null ? `${savedAmount}${item.unit ? ` ${item.unit}` : ""}` : "—"}
           </button>
         )}
       </td>
@@ -96,7 +108,7 @@ function PantryRow({ item, onUpdated }: { item: PantryItem; onUpdated: () => voi
       </td>
       <td className="px-4 py-3 text-right">
         <button
-          onClick={handleRemove}
+          onClick={() => onRemove(item)}
           className="text-xs text-red-400 hover:text-red-600 transition-colors"
         >
           Remove
@@ -107,7 +119,55 @@ function PantryRow({ item, onUpdated }: { item: PantryItem; onUpdated: () => voi
 }
 
 export function PantryList({ items, onRefresh }: { items: PantryItem[]; onRefresh?: () => void }) {
-  if (items.length === 0) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // Rows Undo brought back that the server hasn't re-sent yet.
+  const [resurrected, setResurrected] = useState<Map<string, PantryItem>>(new Map());
+
+  // This list is rendered from a server component with no onRefresh, so router.refresh()
+  // is what actually reconciles. The prop is honoured when a caller does pass one.
+  const refresh = () => {
+    startTransition(() => router.refresh());
+    onRefresh?.();
+  };
+
+  function hide(item: PantryItem) {
+    setHidden((prev) => new Set(prev).add(item.id));
+    setResurrected((prev) => {
+      const next = new Map(prev);
+      next.delete(item.id);
+      return next;
+    });
+  }
+
+  function show(item: PantryItem) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.delete(item.id);
+      return next;
+    });
+    setResurrected((prev) => new Map(prev).set(item.id, item));
+  }
+
+  async function handleRemove(item: PantryItem) {
+    hide(item);
+    await deleteWithUndo({
+      table: "pantry_items",
+      ids: [item.id],
+      message: `${item.ingredientName} removed`,
+      onShow: () => show(item),
+      onHide: () => hide(item),
+      onSettled: refresh,
+    });
+  }
+
+  const visible: PantryItem[] = [
+    ...items.filter((i) => !hidden.has(i.id)),
+    ...[...resurrected.values()].filter((r) => !items.some((i) => i.id === r.id)),
+  ];
+
+  if (visible.length === 0) {
     return (
       <div className="text-center py-12 text-gray-400">
         <div className="text-4xl mb-3">🥫</div>
@@ -129,8 +189,8 @@ export function PantryList({ items, onRefresh }: { items: PantryItem[]; onRefres
           </tr>
         </thead>
         <tbody>
-          {items.map(item => (
-            <PantryRow key={item.id} item={item} onUpdated={onRefresh ?? (() => {})} />
+          {visible.map(item => (
+            <PantryRow key={item.id} item={item} onUpdated={refresh} onRemove={handleRemove} />
           ))}
         </tbody>
       </table>

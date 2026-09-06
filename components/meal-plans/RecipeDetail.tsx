@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { deleteRecipeAction } from "@/app/(app)/meal-plans/actions";
 import { useRouter } from "next/navigation";
+import { deleteWithUndo } from "@/lib/undo";
 
 interface Ingredient {
   canonicalName: string;
@@ -44,18 +43,27 @@ export function RecipeDetail({
   id, title, description, servings, prepTimeMin, cookTimeMin, tags, sourceUrl, instructions, ingredients,
 }: RecipeDetailProps) {
   const router = useRouter();
-  const [deleting, setDeleting] = useState(false);
 
+  const listHref = "/meal-plans/recipes";
+
+  /**
+   * One-touch, and the undo is real: fn_soft_delete banks recipe_ingredients along with
+   * the recipe and remembers which meal_plan_entries pointed at it, so fn_restore brings
+   * the whole thing back — ingredients and plan links included.
+   */
   async function handleDelete() {
-    if (!confirm("Delete this recipe? This cannot be undone.")) return;
-    setDeleting(true);
-    const result = await deleteRecipeAction(id);
-    if (result.error) {
-      alert(result.error);
-      setDeleting(false);
-    } else {
-      router.push("/meal-plans/recipes");
-    }
+    // Leave immediately. The recipe keeps its id through fn_restore, so if the delete
+    // fails or the user undoes it, this URL is still the right one to come back to.
+    router.push(listHref);
+
+    await deleteWithUndo({
+      table: "recipes",
+      ids: [id],
+      message: `${title} deleted`,
+      onShow: () => router.push(`${listHref}/${id}`),
+      onHide: () => router.push(listHref),
+      onSettled: () => router.refresh(),
+    });
   }
 
   const metaLine = timeLine(prepTimeMin, cookTimeMin, servings);
@@ -149,10 +157,9 @@ export function RecipeDetail({
       <div className="pt-4 border-t border-gray-100">
         <button
           onClick={handleDelete}
-          disabled={deleting}
-          className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+          className="text-sm text-red-500 hover:text-red-700 font-medium transition-colors"
         >
-          {deleting ? "Deleting…" : "Delete recipe"}
+          Delete recipe
         </button>
       </div>
     </div>
