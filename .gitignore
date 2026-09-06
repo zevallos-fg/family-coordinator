@@ -20,6 +20,11 @@ Thumbs.db
 # Secrets — never commit these
 *.env
 .env*
+# Cloudflare Worker secrets for `wrangler dev`. NOT covered by .env* above —
+# the filename starts with ".dev", so it needs its own rule.
+.dev.vars
+**/.dev.vars
+
 # Next.js
 /.next/
 /out/
