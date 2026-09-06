@@ -1,22 +1,22 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { lookupFamily } from "@/lib/auth/current-family";
 import { OnboardingWizard } from "./onboarding-wizard";
 
 export default async function OnboardingPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // The other half of the loop. Every page in the app redirected here when its
+  // membership read failed, and this page swallowed the same read, agreed there
+  // was no family, and offered to create one. A member of a working household
+  // could be walked into a duplicate that way.
+  //
+  // Now a failed lookup throws to the error boundary. The wizard is shown only
+  // when we have actually established that there is no family.
+  const family = await lookupFamily();
 
-  if (!user) redirect("/login");
-
-  // If user already has a family, send them to the dashboard
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (membership) redirect("/dashboard");
+  if (family.ok) redirect("/dashboard");
+  if (family.reason === "unauthenticated") redirect("/login");
+  if (family.reason === "lookup-failed") {
+    throw new Error(`Could not check whether you already have a household: ${family.message}`);
+  }
 
   return (
     <main className="flex min-h-full flex-col items-center justify-center p-8">

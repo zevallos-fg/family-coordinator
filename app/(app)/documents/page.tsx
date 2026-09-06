@@ -1,30 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { DocumentVaultView } from "@/components/documents/DocumentVaultView";
+import { requireFamily } from "@/lib/auth/current-family";
 
 async function getDocuments() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: docs, error } = await supabase
     .from("documents")
     .select("id, title, doc_type, tags, file_url, indexed_at, file_size_bytes, created_at")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
   return { docs: docs ?? [], error: error?.message ?? null };

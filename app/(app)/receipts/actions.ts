@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as receiptParser from "@/skills/family-receipt-parser";
 import type { Output as ParsedReceipt } from "@/skills/family-receipt-parser";
+import { lookupFamily } from "@/lib/auth/current-family";
 
 export type { ParsedReceipt };
 
@@ -32,23 +33,18 @@ export async function parseReceiptAction(
   const imageMimeType = file.type as "image/jpeg" | "image/png" | "image/webp";
 
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) return { ok: false, error: "Not signed in" };
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { ok: false, error: "No family found" };
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") return { ok: false, error: "Not signed in" };
+    if (family.reason === "no-family") return { ok: false, error: "No family found" };
+    return { ok: false, error: "Couldn't reach your family record. Nothing was changed — try again." };
+  }
+  const familyId = family.familyId;
 
   const { data: stores } = await supabase
     .from("stores")
     .select("id, name")
-    .eq("family_id", membership.family_id);
+    .eq("family_id", familyId);
 
   const knownStores = stores ?? [];
 
@@ -91,20 +87,14 @@ export async function saveReceiptAction(
   input: SaveReceiptInput
 ): Promise<SaveReceiptResult> {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) return { ok: false, error: "Not signed in" };
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") return { ok: false, error: "Not signed in" };
+    if (family.reason === "no-family") return { ok: false, error: "No family found" };
+    return { ok: false, error: "Couldn't reach your family record. Nothing was changed — try again." };
+  }
+  const familyId = family.familyId;
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { ok: false, error: "No family found" };
-
-  const familyId = membership.family_id;
 
   // Upload image to Supabase Storage
   const imageBuffer = Buffer.from(input.imageBase64, "base64");
@@ -147,7 +137,7 @@ export async function saveReceiptAction(
     .from("receipts")
     .insert({
       family_id: familyId,
-      created_by_user_id: authData.user.id,
+      created_by_user_id: family.userId,
       store_id: storeId,
       image_url: imageUrl,
       purchased_at: input.receiptDate ? new Date(input.receiptDate).toISOString() : null,
@@ -194,19 +184,13 @@ export async function addReceiptItemsToPantryAction(
   receiptId: string
 ): Promise<AddReceiptToPantryResult> {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) return { ok: false, error: "Not signed in" };
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { ok: false, error: "No family found" };
-  const familyId = membership.family_id;
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") return { ok: false, error: "Not signed in" };
+    if (family.reason === "no-family") return { ok: false, error: "No family found" };
+    return { ok: false, error: "Couldn't reach your family record. Nothing was changed — try again." };
+  }
+  const familyId = family.familyId;
 
   const { data: items, error: itemsError } = await supabase
     .from("receipt_items")

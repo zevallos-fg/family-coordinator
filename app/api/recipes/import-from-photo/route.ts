@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { lookupFamily } from "@/lib/auth/current-family";
 import { withSkillContext } from "@/lib/skill-action";
 import * as recipeImporter from "@/skills/family-recipe-importer";
 
@@ -14,22 +15,22 @@ type SupportedImageType = (typeof SUPPORTED_IMAGE_TYPES)[number];
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    const family = await lookupFamily();
+    if (!family.ok) {
+      if (family.reason === "unauthenticated") {
+        return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+      }
+      if (family.reason === "no-family") {
+        return NextResponse.json({ error: "No family found" }, { status: 400 });
+      }
+      // Not the caller's fault and not a permanent answer: a retry may work,
+      // and this route spends money once it gets past here.
+      return NextResponse.json(
+        { error: "Couldn't reach your family record. Try again." },
+        { status: 503 }
+      );
     }
-
-    // Find family
-    const { data: membership } = await supabase
-      .from("family_members")
-      .select("family_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-    const familyId = membership?.family_id;
-    if (!familyId) {
-      return NextResponse.json({ error: "No family found" }, { status: 400 });
-    }
+    const familyId = family.familyId;
 
     // Parse multipart form
     const formData = await request.formData();
@@ -115,7 +116,7 @@ export async function POST(request: Request) {
         servings: recipe.servings,
         cook_time_min: recipe.totalTimeMin ?? null,
         instructions: JSON.stringify(recipe.instructions),
-        created_by_user_id: user.id,
+        created_by_user_id: family.userId,
       })
       .select("id")
       .single();

@@ -10,24 +10,22 @@ import { withRetry } from "@/lib/with-retry";
 import { run as runMilestoneSkill } from "@/skills/family-kid-milestone";
 import type { Output as MilestoneOutput } from "@/skills/family-kid-milestone";
 import { parseMedicalEventType } from "@/lib/db/enums";
+import { lookupFamily } from "@/lib/auth/current-family";
 
 async function getAuthedFamily() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
+  const family = await lookupFamily();
 
-  const { data: membership, error } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  // Three failures, three sentences. The old body collapsed `error || !membership`
+  // into "no family found", so a database that could not be reached reported
+  // itself as a household that does not exist.
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") throw new Error("not signed in");
+    if (family.reason === "no-family") throw new Error("no family found");
+    throw new Error(`could not reach your family record: ${family.message}`);
+  }
 
-  if (error || !membership) throw new Error("no family found");
-  return { supabase, userId: user.id, familyId: membership.family_id };
+  return { supabase, userId: family.userId, familyId: family.familyId };
 }
 
 // Returns skill analysis for USER REVIEW — does NOT auto-save

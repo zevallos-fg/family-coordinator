@@ -6,21 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as scheduleReconciler from "@/skills/family-schedule-reconciler";
 import type { Output } from "@/skills/family-schedule-reconciler";
+import { requireFamily, lookupFamily } from "@/lib/auth/current-family";
 
 export async function processScreenshot(formData: FormData) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id, families(timezone)")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const imageFile = formData.get("image") as File | null;
   const weekOf = formData.get("weekOf") as string;
@@ -43,7 +33,7 @@ export async function processScreenshot(formData: FormData) {
   const { data: members, error: membersError } = await supabase
     .from("family_members")
     .select("users(full_name)")
-    .eq("family_id", membership.family_id);
+    .eq("family_id", familyId);
 
   // These names are what the model matches calendar entries against, and the
   // result is written straight into schedule_entries. A failed read used to fall
@@ -84,22 +74,11 @@ export async function processScreenshot(formData: FormData) {
 
 export async function saveReconciliation(reconciliation: Output) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   // Build rows to insert — one per duty per day
   const rows = reconciliation.days.flatMap((day) => {
-    const base = { family_id: membership.family_id, date: day.date };
+    const base = { family_id: familyId, date: day.date };
     const duties: Array<{ duty_type: string; notes: string }> = [
       { duty_type: "dropoff", notes: day.duties.dropoff.assignee },
       { duty_type: "pickup", notes: day.duties.pickup.assignee },
@@ -117,7 +96,7 @@ export async function saveReconciliation(reconciliation: Output) {
   const { error: clearError } = await supabase
     .from("schedule_entries")
     .delete()
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .in("date", dates);
 
   // A failed clear followed by a successful insert duplicates every duty for
@@ -137,29 +116,35 @@ export async function saveReconciliation(reconciliation: Output) {
   return { ok: true };
 }
 
-// Check whether any schedule_entries exist for a set of ISO dates (family-scoped).
-export async function checkDatesHaveDuties(dates: string[]): Promise<boolean> {
+/**
+ * Does this week already have duties? The answer decides whether saving asks
+ * before replacing them.
+ *
+ * It used to return a bare boolean, and every failure — no session, no family,
+ * a failed membership read, a failed count — returned `false`, which the caller
+ * reads as "nothing here to lose" and saves without asking. A blink of the
+ * database was therefore enough to overwrite a week of duties with no
+ * confirmation and nothing on screen to say it had happened.
+ *
+ * Three states, not two. "I could not check" is not "there is nothing there",
+ * and the caller asks first when it does not know.
+ */
+export type DutiesCheck = "has-duties" | "empty" | "unknown";
+
+export async function checkDatesHaveDuties(dates: string[]): Promise<DutiesCheck> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return false;
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) return false;
+  const family = await lookupFamily();
+  if (!family.ok) return family.reason === "lookup-failed" ? "unknown" : "empty";
 
-  const { count } = await supabase
+  const { count, error } = await supabase
     .from("schedule_entries")
     .select("id", { count: "exact", head: true })
-    .eq("family_id", membership.family_id)
+    .eq("family_id", family.familyId)
     .in("date", dates);
 
-  return (count ?? 0) > 0;
+  if (error) return "unknown";
+  return (count ?? 0) > 0 ? "has-duties" : "empty";
 }
 
 export async function deleteEntry(id: string) {

@@ -1,27 +1,24 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Greeting } from "@/components/dashboard/Greeting";
 import { TodayDate } from "@/components/dashboard/TodayDate";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { userId, familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id, role, families(name, timezone)")
-    .eq("user_id", user.id)
-    .limit(1)
+  // `role` and `families(timezone)` were selected here and never read. The one
+  // field this page actually wants is the household's name, and it is read on
+  // its own so a failure is a failure rather than a nameless dashboard.
+  const { data: family, error: familyError } = await supabase
+    .from("families")
+    .select("name")
+    .eq("id", familyId)
     .maybeSingle();
+  if (familyError) throw new Error(`Could not load your household: ${familyError.message}`);
 
-  if (!membership) redirect("/onboarding");
-
-  const familyId = membership.family_id;
-  const familyName = (membership.families as { name: string } | null)?.name ?? "your household";
+  const familyName = family?.name ?? "your household";
   const today = new Date().toISOString().slice(0, 10);
 
   const [
@@ -53,8 +50,8 @@ export default async function DashboardPage() {
       .limit(5),
     supabase
       .from("users")
-      .select("full_name")
-      .eq("id", user.id)
+      .select("full_name, email")
+      .eq("id", userId)
       .maybeSingle(),
     supabase
       .from("grocery_items")
@@ -64,7 +61,7 @@ export default async function DashboardPage() {
       .is("completed_at", null),
   ]);
 
-  const firstName = userData?.full_name?.split(" ")[0] ?? user.email?.split("@")[0] ?? "there";
+  const firstName = userData?.full_name?.split(" ")[0] ?? userData?.email?.split("@")[0] ?? "there";
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,7 @@
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { RecipeDetail } from "@/components/meal-plans/RecipeDetail";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -9,22 +10,13 @@ interface Props {
 export default async function RecipeDetailPage({ params }: Props) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: recipe } = await supabase
     .from("recipes")
     .select("id, title, description, servings, prep_time_min, cook_time_min, tags, source_url, instructions, recipe_ingredients(amount, unit, notes, ingredients(canonical_name))")
     .eq("id", id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .maybeSingle();
 
   if (!recipe) notFound();

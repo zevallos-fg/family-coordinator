@@ -1,27 +1,16 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReceiptList } from "@/components/receipt/ReceiptList";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function ReceiptsPage() {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: receipts } = await supabase
     .from("receipts")
     .select("id, purchased_at, total_cents, store_id, image_url, stores(name)")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false })
     .limit(50);
 

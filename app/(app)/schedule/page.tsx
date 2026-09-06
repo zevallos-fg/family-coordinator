@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { WeekView } from "@/components/schedule/WeekView";
 import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
 import { parseWeekParam, formatWeekParam, addDays, weekLabel } from "@/lib/week";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
@@ -13,18 +14,7 @@ export default async function SchedulePage({ searchParams }: Props) {
   const { week: weekParam } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const today = new Date();
   const selectedWeek = parseWeekParam(weekParam ?? null, today);
@@ -41,13 +31,13 @@ export default async function SchedulePage({ searchParams }: Props) {
   const { data: kids } = await supabase
     .from("kids")
     .select("name")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("name");
 
   const { data: duties } = await supabase
     .from("schedule_entries")
     .select("id, date, duty_type, notes")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .gte("date", weekStr)
     .lte("date", weekEnd)
     .order("date", { ascending: true });

@@ -1,20 +1,10 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function RootPage() {
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  // Only here to route: requireFamily sends you to /login or /onboarding when
+  // that is the answer, and throws when it does not have one.
+  await requireFamily();
 
   redirect("/dashboard");
 }

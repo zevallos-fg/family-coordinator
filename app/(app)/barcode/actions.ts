@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as pantryInference from "@/skills/family-pantry-inference";
+import { lookupFamily } from "@/lib/auth/current-family";
 
 export interface LookupBarcodeResult {
   ok: boolean;
@@ -21,20 +22,14 @@ export async function lookupBarcodeAction(
   barcode: string
 ): Promise<LookupBarcodeResult> {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) return { ok: false, cached: false, productName: null, brand: null, category: null, note: null, error: "Not signed in" };
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") return { ok: false, cached: false, productName: null, brand: null, category: null, note: null, error: "Not signed in" };
+    if (family.reason === "no-family") return { ok: false, cached: false, productName: null, brand: null, category: null, note: null, error: "No family found" };
+    return { ok: false, cached: false, productName: null, brand: null, category: null, note: null, error: "Couldn't reach your family record. Nothing was changed — try again." };
+  }
+  const familyId = family.familyId;
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { ok: false, cached: false, productName: null, brand: null, category: null, note: null, error: "No family found" };
-
-  const familyId = membership.family_id;
 
   // Check cache first
   const { data: cached } = await supabase
@@ -108,19 +103,13 @@ export async function addBarcodeToPantryAction(
   brand: string | null
 ): Promise<AddBarcodeToPantryResult> {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) return { ok: false, error: "Not signed in" };
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { ok: false, error: "No family found" };
-  const familyId = membership.family_id;
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") return { ok: false, error: "Not signed in" };
+    if (family.reason === "no-family") return { ok: false, error: "No family found" };
+    return { ok: false, error: "Couldn't reach your family record. Nothing was changed — try again." };
+  }
+  const familyId = family.familyId;
 
   const canonicalName = productName.toLowerCase().trim();
 
@@ -182,21 +171,16 @@ export async function addBarcodeToGroceryAction(
   productName: string
 ): Promise<AddBarcodeToGroceryResult> {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData?.user) return { ok: false, error: "Not signed in" };
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", authData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) return { ok: false, error: "No family found" };
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") return { ok: false, error: "Not signed in" };
+    if (family.reason === "no-family") return { ok: false, error: "No family found" };
+    return { ok: false, error: "Couldn't reach your family record. Nothing was changed — try again." };
+  }
+  const familyId = family.familyId;
 
   const { error } = await supabase.from("grocery_items").insert({
-    family_id: membership.family_id,
+    family_id: familyId,
     name: productName,
     quantity: "1",
   });

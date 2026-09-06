@@ -7,6 +7,7 @@ import { ShiftCard } from "@/components/caregiver/ShiftCard";
 import { CaregiverList } from "@/components/caregiver/CaregiverList";
 import { QuickBriefModal } from "@/components/caregiver/QuickBriefModal";
 import { parseWeekParam, formatWeekParam, addDays, weekLabel } from "@/lib/week";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
@@ -16,20 +17,8 @@ export default async function CaregiverHubPage({ searchParams }: Props) {
   const { week: weekParam } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
-
-  const familyId = membership.family_id;
 
   const today = new Date();
   const selectedWeek = parseWeekParam(weekParam ?? null, today);

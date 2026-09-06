@@ -1,28 +1,17 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { KidProfile } from "@/components/kid-state/KidProfile";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function KidsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: kids } = await supabase
     .from("kids")
     .select("id, name, birth_date, notes, food_favorites, food_aversions, clothing_size, shoe_size")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: true });
 
   return (

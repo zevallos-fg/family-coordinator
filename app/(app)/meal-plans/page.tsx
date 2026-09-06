@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { WeekPickerNav } from "@/components/ui/WeekPickerNav";
 import { MealPlanWeek } from "@/components/meal-plans/MealPlanWeek";
 import { MealPlanGenerateClient } from "@/components/meal-plans/MealPlanGenerateClient";
+import { requireFamily } from "@/lib/auth/current-family";
 import {
   parseWeekParam,
   formatWeekParam,
@@ -19,18 +20,7 @@ export default async function MealPlanPage({ searchParams }: Props) {
   const { week: weekParam } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const today = new Date();
   const selectedWeek = parseWeekParam(weekParam ?? null, today);
@@ -46,14 +36,14 @@ export default async function MealPlanPage({ searchParams }: Props) {
     .select(
       "id, week_start_date, created_at, meal_plan_entries(id, date, meal_type, recipe_id, notes, recipes(id, title))"
     )
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .eq("week_start_date", weekStr)
     .maybeSingle();
 
   const { count: recipeCount } = await supabase
     .from("recipes")
     .select("id", { count: "exact", head: true })
-    .eq("family_id", membership.family_id);
+    .eq("family_id", familyId);
 
   const hasRecipes = (recipeCount ?? 0) > 0;
 
@@ -81,7 +71,7 @@ export default async function MealPlanPage({ searchParams }: Props) {
     ? await supabase
         .from("recipes")
         .select("id, title")
-        .eq("family_id", membership.family_id)
+        .eq("family_id", familyId)
         .order("title")
     : { data: [] };
 

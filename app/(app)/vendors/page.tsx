@@ -1,32 +1,19 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { VendorTable } from "@/components/vendors/VendorTable";
 import { VendorMemorySearch } from "@/components/vendors/VendorMemorySearch";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { requireFamily } from "@/lib/auth/current-family";
 
 async function getVendors() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: vendors, error } = await supabase
     .from("vendors")
     .select("id, name, category, phone, email, last_used_at, rating")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("name");
 
   return { vendors: vendors ?? [], error: error?.message ?? null };

@@ -1,25 +1,16 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { RecipeCard } from "@/components/meal-plans/RecipeCard";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function RecipesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: recipes } = await supabase
     .from("recipes")
     .select("id, title, description, servings, prep_time_min, cook_time_min, tags, source_url, recipe_ingredients(ingredient_id)")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
   return (

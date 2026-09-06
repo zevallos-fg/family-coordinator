@@ -1,28 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ExpenseView } from "@/components/expenses/ExpenseView";
 import Link from "next/link";
+import { requireFamily } from "@/lib/auth/current-family";
 
 const CATEGORIES = ["Groceries", "Dining", "Medical", "Education", "Activities", "Clothing", "Home", "Transportation", "Utilities", "Entertainment", "Childcare", "Other"];
 
 async function getExpenses(period: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const startDate = `${period}-01`;
   const [year, month] = period.split("-").map(Number);
@@ -31,7 +18,7 @@ async function getExpenses(period: string) {
   const { data: expenses, error } = await supabase
     .from("expenses")
     .select("id, amount_cents, category, merchant, purchased_at, notes")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .gte("purchased_at", startDate)
     .lte("purchased_at", endDate)
     .order("purchased_at", { ascending: false });

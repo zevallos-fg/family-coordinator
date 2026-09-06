@@ -24,6 +24,7 @@ export function UploadForm({ weekOf }: UploadFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Output | null>(null);
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
   const [, startTransition] = useTransition();
 
   const weekLabel = formatWeekRange(new Date(weekOf + "T12:00:00"));
@@ -79,11 +80,14 @@ export function UploadForm({ weekOf }: UploadFormProps) {
     if (!result) return;
     // UX safety net: check if this week already has duties
     const dates = result.days.map((d) => d.date);
-    const hasDuties = await checkDatesHaveDuties(dates);
-    if (hasDuties) {
-      setShowReplaceConfirm(true);
-    } else {
+    const check = await checkDatesHaveDuties(dates);
+    // "unknown" means the check itself failed. Saving anyway could replace a
+    // week of duties that is still there, so ask rather than assume.
+    if (check === "empty") {
       await doSave();
+    } else {
+      setUncertain(check === "unknown");
+      setShowReplaceConfirm(true);
     }
   }
 
@@ -201,7 +205,9 @@ export function UploadForm({ weekOf }: UploadFormProps) {
           >
             <h3 className="font-semibold text-stone-900">Replace existing schedule?</h3>
             <p className="text-sm text-stone-600">
-              The week of {weekLabel} already has schedule entries. Saving will replace them with the newly analyzed duties.
+              {uncertain
+                ? `We couldn't check whether the week of ${weekLabel} already has schedule entries. If it does, saving will replace them with the newly analyzed duties.`
+                : `The week of ${weekLabel} already has schedule entries. Saving will replace them with the newly analyzed duties.`}
             </p>
             <div className="flex gap-3">
               <button
