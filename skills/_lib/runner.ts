@@ -130,11 +130,25 @@ export async function callSkill<T = string>(
     usage?: { input_tokens?: number; output_tokens?: number };
   };
 
+  // The Worker verifies this token against the project's JWKS and rate-limits per
+  // `sub`, so the proxy is no longer callable without a session. getUser() above
+  // already validated it against the auth server; this reads the same token back
+  // out of the cookie to forward it.
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) {
+    return {
+      ok: false,
+      error: { code: "unauthorized", message: "no access token to authenticate the proxy call" },
+    };
+  }
+
   try {
     const response = await fetch(WORKER_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
         "X-Family-Id": ctx.familyId,
         "X-Skill-Name": skillName,
       },
