@@ -148,12 +148,16 @@ export async function generateDigest(
       date: s.date,
     }));
 
+    // Found by the compiler the moment tasks.status became an enum: both of these
+    // compared against "completed", which is not one of the four values the
+    // column has ever held. So every weekly digest reported no completed tasks at
+    // all, and listed the done ones among the open ones.
     const completed_tasks = (tasksRes.data ?? [])
-      .filter((t) => t.status === "completed" && (t.completed_at ?? "") >= week_start_date)
+      .filter((t) => t.status === "done" && (t.completed_at ?? "") >= week_start_date)
       .map((t) => t.title);
 
     const open_tasks = (tasksRes.data ?? [])
-      .filter((t) => t.status !== "completed")
+      .filter((t) => t.status !== "done" && t.status !== "cancelled")
       .map((t) => t.title)
       .slice(0, 10);
 
