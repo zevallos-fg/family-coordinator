@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { submitSharedRecap } from "@/app/caregiver-view/actions";
 
@@ -9,16 +9,34 @@ interface RecapFormProps {
   token: string;
 }
 
+/**
+ * The textarea is UNCONTROLLED, and the submit button is never disabled for being
+ * empty. Both on purpose.
+ *
+ * A controlled input whose submit is gated on React state is unusable until the
+ * page hydrates, and — worse — anything typed before then is silently discarded:
+ * the DOM has the text, React's state does not, and React never reads it back. On
+ * a public page whose entire audience is someone opening a link on a phone, on
+ * whatever connection they have, that is the wrong trade. The DOM is the source
+ * of truth here, so the words survive however slowly the JavaScript arrives.
+ *
+ * Emptiness is checked on submit instead, where it can say something useful.
+ */
 export function RecapForm({ token }: RecapFormProps) {
-  const [text, setText] = useState("");
+  const textRef = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!text.trim()) return;
+    const text = textRef.current?.value.trim() ?? "";
+    if (!text) {
+      setStatus("error");
+      setErrorMsg("Please write a little about the day first.");
+      return;
+    }
     setStatus("loading");
-    const result = await submitSharedRecap(token, text.trim());
+    const result = await submitSharedRecap(token, text);
     if (result.ok) {
       setStatus("done");
     } else {
@@ -42,8 +60,8 @@ export function RecapForm({ token }: RecapFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        ref={textRef}
+        name="recap"
         rows={5}
         placeholder="e.g. Napped for 2 hours, ate all his lunch, was happy all day. Seemed a little tired by 4pm but a snack helped."
         className="w-full rounded-xl border border-foreground/20 bg-white px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
@@ -55,7 +73,7 @@ export function RecapForm({ token }: RecapFormProps) {
 
       <Button
         type="submit"
-        disabled={status === "loading" || !text.trim()}
+        disabled={status === "loading"}
         className="w-full py-4 text-lg rounded-xl"
       >
         {status === "loading" ? "Sending..." : "Send recap"}
