@@ -73,9 +73,9 @@ test("every role the dropdown offers is one the database will take", async ({ pa
     nodes.map((n) => (n as HTMLOptionElement).value)
   );
   expect(offered.length).toBeGreaterThan(0);
-  // "au_pair" was offered here for as long as the form existed, and choosing it
-  // was one of the ways to crash the page.
-  expect(offered).not.toContain("au_pair");
+  // No fixed list to assert against on purpose: the options come from the
+  // generated enum, so the only question worth asking is whether the column
+  // takes every one of them. The loop below asks the column, not a constant.
 
   for (const role of offered) {
     const { data, error } = await admin

@@ -1,47 +1,61 @@
+import { Constants, type Database } from "@/lib/supabase/database.types";
+
 /**
- * The values four CHECK-constrained text columns will actually accept.
+ * The four columns that used to be `text` with a CHECK, and are now real
+ * Postgres enums.
  *
- * These columns are `text` with a `CHECK (col = ANY (ARRAY[...]))`. `supabase gen
- * types` cannot see a CHECK, so it emits `string`, and the compiler happily let
- * four features ship strings the database was never going to take: caregiver
- * roles were title-cased into `Nanny`, medical events offered nine labels none of
- * which were valid, the hurricane checklist wrote `pending`/`completed`/`n_a`,
- * and trip prep tasks wrote `pending`. Three features could not write at all; the
- * fourth dropped its rows in silence.
+ * WHAT CHANGED, AND WHY IT MATTERS
+ * `supabase gen types` cannot see a CHECK constraint, so these columns were typed
+ * `string` and the compiler could not reject a wrong value. Four features shipped
+ * strings the database was never going to accept: caregiver roles were
+ * title-cased into `Nanny`, medical events offered nine labels none of which were
+ * valid, the hurricane checklist wrote `pending`/`completed`/`n_a`, and trip prep
+ * tasks wrote `pending`. Three features could not write at all; the fourth
+ * dropped its rows in silence.
  *
- * Until the columns become real Postgres enums — at which point the generated
- * types carry the union and a wrong value is a compile error — this module is the
- * single place those values are written down, and the `parse*` helpers are the
- * only sanctioned way to turn a form string into one.
+ * Migration 20260906193358_check_columns_to_enums converted them. The values and
+ * types below are now READ FROM THE GENERATED FILE rather than typed out again —
+ * `Constants.public.Enums` comes straight from the database — so the list cannot
+ * drift from the column, and a value the column will not take is a compile error.
+ * That is the whole point of the conversion; hand-maintaining a second copy here
+ * would have given it back.
  *
- * Storage values are lower_snake and are never displayed. Display casing belongs
- * to the label maps below and to nothing else: putting it on the value is exactly
- * what broke `createCaregiver`.
+ * What still lives here is everything the database has no opinion about: the
+ * display labels, and the parsers that narrow an untrusted form field. Storage
+ * values are lower_snake and are never displayed. Putting display casing on the
+ * value is exactly what broke createCaregiver.
  */
 
-export const CAREGIVER_ROLES = ["nanny", "grandparent", "daycare", "other"] as const;
-export type CaregiverRole = (typeof CAREGIVER_ROLES)[number];
+export const CAREGIVER_ROLES = Constants.public.Enums.caregiver_role;
+export type CaregiverRole = Database["public"]["Enums"]["caregiver_role"];
 
+export const MEDICAL_EVENT_TYPES = Constants.public.Enums.medical_event_type;
+export type MedicalEventType = Database["public"]["Enums"]["medical_event_type"];
+
+export const CHECKLIST_STATUSES = Constants.public.Enums.checklist_status;
+export type ChecklistStatus = Database["public"]["Enums"]["checklist_status"];
+
+export const TASK_STATUSES = Constants.public.Enums.task_status;
+export type TaskStatus = Database["public"]["Enums"]["task_status"];
+
+/**
+ * Labels are exhaustive by type. Add a value to the enum in the database,
+ * regenerate, and these stop compiling until someone decides what it is called —
+ * which is the correct moment to be asked.
+ */
 export const CAREGIVER_ROLE_LABEL: Record<CaregiverRole, string> = {
   nanny: "Nanny",
   grandparent: "Grandparent",
   daycare: "Daycare",
+  au_pair: "Au Pair",
   other: "Other",
 };
 
-export const MEDICAL_EVENT_TYPES = [
-  "checkup",
-  "illness",
-  "vaccine",
-  "question",
-  "other",
-] as const;
-export type MedicalEventType = (typeof MEDICAL_EVENT_TYPES)[number];
-
 /**
  * The old dropdown offered nine clinic-visit names — "Well-child visit", "Dental
- * checkup", "ER visit" and so on. They are kept here as labels for the five real
- * values rather than thrown away, so the form still reads like a form.
+ * checkup", "ER visit" and so on — as values. They are kept here as labels for
+ * the five real values rather than thrown away, so the form still reads like a
+ * form.
  */
 export const MEDICAL_EVENT_TYPE_LABEL: Record<MedicalEventType, string> = {
   checkup: "Checkup or well-child visit",
@@ -50,12 +64,6 @@ export const MEDICAL_EVENT_TYPE_LABEL: Record<MedicalEventType, string> = {
   question: "Question for the doctor",
   other: "Other",
 };
-
-export const CHECKLIST_STATUSES = ["open", "done", "na"] as const;
-export type ChecklistStatus = (typeof CHECKLIST_STATUSES)[number];
-
-export const TASK_STATUSES = ["open", "in_progress", "done", "cancelled"] as const;
-export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   open: "Open",

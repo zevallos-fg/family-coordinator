@@ -119,6 +119,201 @@ export type Database = {
           },
         ]
       }
+      baby_events: {
+        Row: {
+          created_at: string
+          ended_at: string | null
+          event_type: string
+          family_id: string
+          id: string
+          kid_id: string | null
+          logged_by_user_id: string | null
+          note: string | null
+          payload: Json
+          source: string
+          started_at: string
+          written_by: string
+        }
+        Insert: {
+          created_at?: string
+          ended_at?: string | null
+          event_type: string
+          family_id: string
+          id?: string
+          kid_id?: string | null
+          logged_by_user_id?: string | null
+          note?: string | null
+          payload?: Json
+          source?: string
+          started_at: string
+          written_by?: string
+        }
+        Update: {
+          created_at?: string
+          ended_at?: string | null
+          event_type?: string
+          family_id?: string
+          id?: string
+          kid_id?: string | null
+          logged_by_user_id?: string | null
+          note?: string | null
+          payload?: Json
+          source?: string
+          started_at?: string
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "baby_events_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_events_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_events_logged_by_user_id_fkey"
+            columns: ["logged_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      baby_predictions: {
+        Row: {
+          actual_event_id: string | null
+          basis: Json
+          created_at: string
+          error_minutes: number | null
+          family_id: string
+          id: string
+          kid_id: string
+          made_at: string
+          predicted_for: unknown
+          prediction_type: string
+        }
+        Insert: {
+          actual_event_id?: string | null
+          basis: Json
+          created_at?: string
+          error_minutes?: number | null
+          family_id: string
+          id?: string
+          kid_id: string
+          made_at?: string
+          predicted_for: unknown
+          prediction_type: string
+        }
+        Update: {
+          actual_event_id?: string | null
+          basis?: Json
+          created_at?: string
+          error_minutes?: number | null
+          family_id?: string
+          id?: string
+          kid_id?: string
+          made_at?: string
+          predicted_for?: unknown
+          prediction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "baby_predictions_actual_event_id_fkey"
+            columns: ["actual_event_id"]
+            isOneToOne: false
+            referencedRelation: "baby_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_predictions_actual_event_id_fkey"
+            columns: ["actual_event_id"]
+            isOneToOne: false
+            referencedRelation: "v_contractions_recent"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_predictions_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_predictions_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      baby_share_links: {
+        Row: {
+          created_at: string
+          created_by_user_id: string | null
+          expires_at: string
+          family_id: string
+          id: string
+          label: string
+          last_viewed_at: string | null
+          revoked_at: string | null
+          scope: string
+          token: string
+          view_count: number
+          window_hours: number
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id?: string | null
+          expires_at: string
+          family_id: string
+          id?: string
+          label: string
+          last_viewed_at?: string | null
+          revoked_at?: string | null
+          scope: string
+          token: string
+          view_count?: number
+          window_hours?: number
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string | null
+          expires_at?: string
+          family_id?: string
+          id?: string
+          label?: string
+          last_viewed_at?: string | null
+          revoked_at?: string | null
+          scope?: string
+          token?: string
+          view_count?: number
+          window_hours?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "baby_share_links_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_share_links_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       barcodes: {
         Row: {
           brand: string | null
@@ -378,7 +573,7 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
-          role: string
+          role: Database["public"]["Enums"]["caregiver_role"]
         }
         Insert: {
           created_at?: string
@@ -388,7 +583,7 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
-          role: string
+          role: Database["public"]["Enums"]["caregiver_role"]
         }
         Update: {
           created_at?: string
@@ -398,7 +593,7 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
-          role?: string
+          role?: Database["public"]["Enums"]["caregiver_role"]
         }
         Relationships: [
           {
@@ -444,6 +639,60 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "categories_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deleted_items: {
+        Row: {
+          children: Json | null
+          deleted_at: string
+          deleted_by_user_id: string | null
+          expires_at: string
+          family_id: string
+          id: string
+          restored_at: string | null
+          row_data: Json
+          row_id: string
+          source_table: string
+        }
+        Insert: {
+          children?: Json | null
+          deleted_at?: string
+          deleted_by_user_id?: string | null
+          expires_at?: string
+          family_id: string
+          id?: string
+          restored_at?: string | null
+          row_data: Json
+          row_id: string
+          source_table: string
+        }
+        Update: {
+          children?: Json | null
+          deleted_at?: string
+          deleted_by_user_id?: string | null
+          expires_at?: string
+          family_id?: string
+          id?: string
+          restored_at?: string | null
+          row_data?: Json
+          row_id?: string
+          source_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deleted_items_deleted_by_user_id_fkey"
+            columns: ["deleted_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deleted_items_family_id_fkey"
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
@@ -757,6 +1006,7 @@ export type Database = {
         Row: {
           completed_at: string | null
           created_at: string
+          created_by_user_id: string | null
           dedup_group_id: string | null
           family_id: string
           id: string
@@ -769,10 +1019,12 @@ export type Database = {
           requires_review: boolean
           source_capture_id: string | null
           store_id: string | null
+          written_by: string
         }
         Insert: {
           completed_at?: string | null
           created_at?: string
+          created_by_user_id?: string | null
           dedup_group_id?: string | null
           family_id: string
           id?: string
@@ -785,10 +1037,12 @@ export type Database = {
           requires_review?: boolean
           source_capture_id?: string | null
           store_id?: string | null
+          written_by?: string
         }
         Update: {
           completed_at?: string | null
           created_at?: string
+          created_by_user_id?: string | null
           dedup_group_id?: string | null
           family_id?: string
           id?: string
@@ -801,8 +1055,16 @@ export type Database = {
           requires_review?: boolean
           source_capture_id?: string | null
           store_id?: string | null
+          written_by?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "grocery_items_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "grocery_items_family_id_fkey"
             columns: ["family_id"]
@@ -1196,6 +1458,7 @@ export type Database = {
         Row: {
           cadence_days: number
           created_at: string
+          created_by_user_id: string | null
           family_id: string
           id: string
           item: string
@@ -1203,11 +1466,14 @@ export type Database = {
           next_due_at: string | null
           notes: string | null
           owner_user_id: string | null
+          prev_last_done_at: string | null
           start_date: string
+          written_by: string
         }
         Insert: {
           cadence_days: number
           created_at?: string
+          created_by_user_id?: string | null
           family_id: string
           id?: string
           item: string
@@ -1215,11 +1481,14 @@ export type Database = {
           next_due_at?: string | null
           notes?: string | null
           owner_user_id?: string | null
+          prev_last_done_at?: string | null
           start_date?: string
+          written_by?: string
         }
         Update: {
           cadence_days?: number
           created_at?: string
+          created_by_user_id?: string | null
           family_id?: string
           id?: string
           item?: string
@@ -1227,9 +1496,18 @@ export type Database = {
           next_due_at?: string | null
           notes?: string | null
           owner_user_id?: string | null
+          prev_last_done_at?: string | null
           start_date?: string
+          written_by?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "maintenance_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "maintenance_family_id_fkey"
             columns: ["family_id"]
@@ -1405,7 +1683,7 @@ export type Database = {
         Row: {
           created_at: string
           event_date: string
-          event_type: string
+          event_type: Database["public"]["Enums"]["medical_event_type"]
           family_id: string
           id: string
           kid_id: string | null
@@ -1415,7 +1693,7 @@ export type Database = {
         Insert: {
           created_at?: string
           event_date: string
-          event_type: string
+          event_type: Database["public"]["Enums"]["medical_event_type"]
           family_id: string
           id?: string
           kid_id?: string | null
@@ -1425,7 +1703,7 @@ export type Database = {
         Update: {
           created_at?: string
           event_date?: string
-          event_type?: string
+          event_type?: Database["public"]["Enums"]["medical_event_type"]
           family_id?: string
           id?: string
           kid_id?: string | null
@@ -1463,6 +1741,7 @@ export type Database = {
           subject_label: string | null
           what_is_true: string
           what_was_said: string
+          written_by: string
         }
         Insert: {
           correction_type: string
@@ -1477,6 +1756,7 @@ export type Database = {
           subject_label?: string | null
           what_is_true: string
           what_was_said: string
+          written_by?: string
         }
         Update: {
           correction_type?: string
@@ -1491,6 +1771,7 @@ export type Database = {
           subject_label?: string | null
           what_is_true?: string
           what_was_said?: string
+          written_by?: string
         }
         Relationships: [
           {
@@ -1561,6 +1842,7 @@ export type Database = {
           source: string
           source_ref: string | null
           supersedes_decision_id: string | null
+          written_by: string
         }
         Insert: {
           context?: string | null
@@ -1578,6 +1860,7 @@ export type Database = {
           source?: string
           source_ref?: string | null
           supersedes_decision_id?: string | null
+          written_by?: string
         }
         Update: {
           context?: string | null
@@ -1595,6 +1878,7 @@ export type Database = {
           source?: string
           source_ref?: string | null
           supersedes_decision_id?: string | null
+          written_by?: string
         }
         Relationships: [
           {
@@ -1652,6 +1936,7 @@ export type Database = {
           subject_id: string | null
           subject_label: string
           subject_type: string
+          written_by: string
         }
         Insert: {
           assertion_type?: string
@@ -1670,6 +1955,7 @@ export type Database = {
           subject_id?: string | null
           subject_label: string
           subject_type: string
+          written_by?: string
         }
         Update: {
           assertion_type?: string
@@ -1688,6 +1974,7 @@ export type Database = {
           subject_id?: string | null
           subject_label?: string
           subject_type?: string
+          written_by?: string
         }
         Relationships: [
           {
@@ -1719,6 +2006,7 @@ export type Database = {
           supersedes_id: string | null
           term: string
           why_it_matters: string | null
+          written_by: string
         }
         Insert: {
           confirmed_by_user_id?: string | null
@@ -1732,6 +2020,7 @@ export type Database = {
           supersedes_id?: string | null
           term: string
           why_it_matters?: string | null
+          written_by?: string
         }
         Update: {
           confirmed_by_user_id?: string | null
@@ -1745,6 +2034,7 @@ export type Database = {
           supersedes_id?: string | null
           term?: string
           why_it_matters?: string | null
+          written_by?: string
         }
         Relationships: [
           {
@@ -2266,7 +2556,7 @@ export type Database = {
           id: string
           item_text: string
           season: string
-          status: string
+          status: Database["public"]["Enums"]["checklist_status"]
         }
         Insert: {
           completed_at?: string | null
@@ -2276,7 +2566,7 @@ export type Database = {
           id?: string
           item_text: string
           season: string
-          status?: string
+          status?: Database["public"]["Enums"]["checklist_status"]
         }
         Update: {
           completed_at?: string | null
@@ -2286,7 +2576,7 @@ export type Database = {
           id?: string
           item_text?: string
           season?: string
-          status?: string
+          status?: Database["public"]["Enums"]["checklist_status"]
         }
         Relationships: [
           {
@@ -2401,7 +2691,7 @@ export type Database = {
           id: string
           owner_user_id: string | null
           source_capture_id: string | null
-          status: string
+          status: Database["public"]["Enums"]["task_status"]
           title: string
         }
         Insert: {
@@ -2413,7 +2703,7 @@ export type Database = {
           id?: string
           owner_user_id?: string | null
           source_capture_id?: string | null
-          status?: string
+          status?: Database["public"]["Enums"]["task_status"]
           title: string
         }
         Update: {
@@ -2425,7 +2715,7 @@ export type Database = {
           id?: string
           owner_user_id?: string | null
           source_capture_id?: string | null
-          status?: string
+          status?: Database["public"]["Enums"]["task_status"]
           title?: string
         }
         Relationships: [
@@ -2658,6 +2948,53 @@ export type Database = {
             columns: ["proposed_ingredient_id"]
             isOneToOne: false
             referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_baby_today: {
+        Row: {
+          count_today: number | null
+          event_type: string | null
+          family_id: string | null
+          in_progress: number | null
+          kid_id: string | null
+          last_at: string | null
+          total_minutes: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "baby_events_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "baby_events_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_contractions_recent: {
+        Row: {
+          duration_s: number | null
+          ended_at: string | null
+          family_id: string | null
+          id: string | null
+          in_progress: boolean | null
+          since_prev_s: number | null
+          started_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "baby_events_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
             referencedColumns: ["id"]
           },
         ]
@@ -3005,6 +3342,33 @@ export type Database = {
     }
     Functions: {
       fn_accept_invite: { Args: { p_token: string }; Returns: string }
+      fn_baby_log: {
+        Args: {
+          p_at?: string
+          p_event_type: string
+          p_family_id: string
+          p_kid_id?: string
+          p_note?: string
+          p_payload?: Json
+        }
+        Returns: string
+      }
+      fn_baby_toggle: {
+        Args: {
+          p_at?: string
+          p_event_type: string
+          p_family_id: string
+          p_kid_id?: string
+          p_payload?: Json
+        }
+        Returns: {
+          ended_at: string
+          event_type: string
+          id: string
+          started_at: string
+          state: string
+        }[]
+      }
       fn_chore_done: {
         Args: { p_chore_id: string; p_done_on?: string }
         Returns: {
@@ -3063,6 +3427,30 @@ export type Database = {
         }[]
       }
       fn_restore: { Args: { p_trash_id: string }; Returns: string }
+      fn_share_create: {
+        Args: {
+          p_family_id: string
+          p_hours?: number
+          p_label: string
+          p_scope: string
+        }
+        Returns: {
+          expires_at: string
+          token: string
+        }[]
+      }
+      fn_share_read: {
+        Args: { p_token: string }
+        Returns: {
+          duration_s: number
+          ended_at: string
+          label: string
+          scope: string
+          since_prev_s: number
+          started_at: string
+        }[]
+      }
+      fn_share_revoke: { Args: { p_id: string }; Returns: boolean }
       fn_skill_get_monthly_spend: {
         Args: { target_family_id: string }
         Returns: number
@@ -3114,7 +3502,15 @@ export type Database = {
       show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
-      [_ in never]: never
+      caregiver_role: "nanny" | "grandparent" | "daycare" | "au_pair" | "other"
+      checklist_status: "open" | "done" | "na"
+      medical_event_type:
+        | "checkup"
+        | "illness"
+        | "vaccine"
+        | "question"
+        | "other"
+      task_status: "open" | "in_progress" | "done" | "cancelled"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3241,6 +3637,17 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      caregiver_role: ["nanny", "grandparent", "daycare", "au_pair", "other"],
+      checklist_status: ["open", "done", "na"],
+      medical_event_type: [
+        "checkup",
+        "illness",
+        "vaccine",
+        "question",
+        "other",
+      ],
+      task_status: ["open", "in_progress", "done", "cancelled"],
+    },
   },
 } as const

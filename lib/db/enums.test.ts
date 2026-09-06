@@ -14,14 +14,14 @@ import {
 } from "./enums";
 
 /**
- * These four columns are `text` with a CHECK, which `supabase gen types` cannot
- * see — so the compiler typed them `string` and four features shipped values the
- * database refuses. Until they are real Postgres enums, these tests and
- * tests/e2e/db-enum-parity.spec.ts are what stands in for that.
+ * The four columns are native enums now, so the values in lib/db/enums.ts are
+ * read straight out of the generated types and cannot drift from the database.
+ * What is left to test is what the database has no opinion about: that the
+ * parsers narrow correctly, that the labels stay display-only, and that the exact
+ * strings which caused each outage are still refused.
  *
- * The parity spec proves the lists match the live constraints. These prove the
- * lists are used correctly, and that the exact values that caused each outage
- * are still rejected.
+ * tests/e2e/db-enum-parity.spec.ts covers the other half — that the live column
+ * agrees, by inserting every value and watching what happens.
  */
 
 describe("the values that broke each feature stay rejected", () => {
@@ -33,9 +33,12 @@ describe("the values that broke each feature stay rejected", () => {
     expect(CAREGIVER_ROLES).not.toContain("Nanny");
   });
 
-  it("refuses au_pair, which the column has never accepted", () => {
-    expect(parseCaregiverRole("au_pair")).toBeNull();
-    expect(CAREGIVER_ROLES).not.toContain("au_pair");
+  it("accepts au_pair, which the enum migration added", () => {
+    // Offered by the form for as long as the form existed and refused by the old
+    // CHECK the whole time. Folded into caregiver_role when the column was
+    // converted, so the form and the column finally agree.
+    expect(parseCaregiverRole("au_pair")).toBe("au_pair");
+    expect(CAREGIVER_ROLES).toContain("au_pair");
   });
 
   it("refuses the nine display labels the medical form used to submit", () => {

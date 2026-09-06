@@ -75,11 +75,11 @@ test("caregivers.role accepts every role the app offers, and no title-cased form
 
   // The exact value createCaregiver used to send.
   expect(await attempt("caregivers", { family_id: familyId, name: tag, role: "Nanny" })).toContain(
-    "caregivers_role_check"
+    "invalid input value for enum caregiver_role"
   );
-  expect(
-    await attempt("caregivers", { family_id: familyId, name: tag, role: "au_pair" })
-  ).toContain("caregivers_role_check");
+  // au_pair was refused for as long as the CHECK existed and is a real value
+  // now; the loop above already inserted it, so this only pins the direction.
+  expect(CAREGIVER_ROLES).toContain("au_pair");
 });
 
 test("medical_events.event_type accepts every type the form offers", async () => {
@@ -103,7 +103,7 @@ test("medical_events.event_type accepts every type the form offers", async () =>
       event_type: "Well-child visit",
       event_date: "2026-09-06",
     })
-  ).toContain("medical_events_event_type_check");
+  ).toContain("invalid input value for enum medical_event_type");
 });
 
 test("seasonal_checklists.status accepts every status the hurricane feature writes", async () => {
@@ -128,7 +128,7 @@ test("seasonal_checklists.status accepts every status the hurricane feature writ
         status: dead,
       }),
       `"${dead}" broke generation and ticking; it must stay rejected`
-    ).toContain("seasonal_checklists_status_check");
+    ).toContain("invalid input value for enum checklist_status");
   }
 });
 
@@ -143,6 +143,6 @@ test("tasks.status accepts every status the app writes — the silent one", asyn
   // createTrip wrote this and never read the error, so every prep task a trip
   // has ever generated was discarded without a trace.
   expect(await attempt("tasks", { family_id: familyId, title: tag, status: "pending" })).toContain(
-    "tasks_status_check"
+    "invalid input value for enum task_status"
   );
 });
