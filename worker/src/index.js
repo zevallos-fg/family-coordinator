@@ -201,6 +201,78 @@ class BadRequest extends Error {
   }
 }
 
+class Forbidden extends Error {
+  constructor(message) {
+    super(message);
+    this.status = 403;
+  }
+}
+
+/** Is this host on the recipe-site allowlist? */
+function isAllowlistedHost(url) {
+  const hostname = url.hostname.replace(/^www\./, "");
+  return ALLOWED_FETCH_DOMAINS.some((d) => hostname === d || hostname.endsWith("." + d));
+}
+
+const MAX_FETCH_REDIRECTS = 2;
+
+/**
+ * Fetch an allowlisted recipe page, re-checking the allowlist on every hop.
+ *
+ * Following redirects automatically made the allowlist advisory: an allowlisted
+ * domain could bounce the request anywhere, including at a cloud metadata address
+ * or an internal host, and the worker would have fetched it and handed back the
+ * body. Same class of hole as the model allowlist — a check applied once to a
+ * value that changes afterwards.
+ *
+ * Three rules: every hop is re-checked against the allowlist, a redirect may not
+ * cross origins, and the chain is capped.
+ */
+async function fetchAllowlistedHTML(targetUrl) {
+  let current;
+  try {
+    current = new URL(targetUrl);
+  } catch {
+    throw new BadRequest("invalid url");
+  }
+  if (current.protocol !== "https:") throw new Forbidden("only https is allowed");
+  if (!isAllowlistedHost(current)) throw new Forbidden("domain not allowlisted");
+
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(current, {
+      redirect: "manual",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible)" },
+    });
+
+    if (res.status < 300 || res.status >= 400) return res.text();
+
+    if (hop >= MAX_FETCH_REDIRECTS) {
+      throw new Forbidden(`too many redirects (limit ${MAX_FETCH_REDIRECTS})`);
+    }
+
+    const location = res.headers.get("Location");
+    if (!location) throw new Forbidden("redirect without a Location header");
+
+    let next;
+    try {
+      next = new URL(location, current); // Relative Location values are legal.
+    } catch {
+      throw new Forbidden("redirect to an unparseable location");
+    }
+
+    // Cross-origin is refused outright, so a site can redirect within itself
+    // (http→https, /recipe → /recipes/123) but cannot hand us off elsewhere.
+    // The allowlist is re-checked anyway rather than relied on transitively.
+    if (next.origin !== current.origin) {
+      throw new Forbidden(`redirect crosses origin: ${current.origin} -> ${next.origin}`);
+    }
+    if (next.protocol !== "https:") throw new Forbidden("redirect leaves https");
+    if (!isAllowlistedHost(next)) throw new Forbidden("redirect target not allowlisted");
+
+    current = next;
+  }
+}
+
 async function callAnthropic(apiKey, body) {
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
@@ -399,14 +471,14 @@ export default {
       if (path === "/fetch-html") {
         const { url: targetUrl } = await request.json();
         if (!targetUrl) return jsonResp({ error: "url required" }, 400, origin);
-        let hostname;
-        try { hostname = new URL(targetUrl).hostname.replace(/^www\./, ""); }
-        catch { return jsonResp({ error: "invalid url" }, 400, origin); }
-        const allowed = ALLOWED_FETCH_DOMAINS.some(d => hostname === d || hostname.endsWith("." + d));
-        if (!allowed) return jsonResp({ error: "domain not allowlisted" }, 403, origin);
-        const pageRes = await fetch(targetUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible)" } });
-        const html = await pageRes.text();
-        return jsonResp({ html: html.slice(0, 500000) }, 200, origin);
+        try {
+          const html = await fetchAllowlistedHTML(targetUrl);
+          return jsonResp({ html: html.slice(0, 500000) }, 200, origin);
+        } catch (err) {
+          if (err instanceof BadRequest) return jsonResp({ error: err.message }, 400, origin);
+          if (err instanceof Forbidden) return jsonResp({ error: err.message }, 403, origin);
+          throw err;
+        }
       }
 
       return jsonResp({ error: "not found" }, 404, origin);
