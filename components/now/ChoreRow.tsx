@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { completionUndoToast } from "@/lib/undo";
 
 type Props = {
   id: string;
@@ -56,8 +57,18 @@ export function ChoreRow({
       return;
     }
 
-    toast.success(recurring ? `${item} — next one scheduled` : `${item} done`);
-    startTransition(() => router.refresh());
+    const refresh = () => startTransition(() => router.refresh());
+
+    await completionUndoToast({
+      kind: sourceTable === "maintenance" ? "maintenance" : "tasks",
+      id,
+      message: recurring ? `${item} — next one scheduled` : `${item} done`,
+      onShow: () => setDone(false),
+      onHide: () => setDone(true),
+      onSettled: refresh,
+    });
+
+    refresh();
   }
 
   const overdue = daysUntil < 0;

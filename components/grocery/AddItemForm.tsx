@@ -1,17 +1,62 @@
 "use client";
 
-import { useRef, useState, useTransition, useEffect } from "react";
+import { useRef, useState, useTransition, useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { addGroceryItemFromText, previewDedup } from "@/app/(app)/grocery/actions";
 
-interface AddItemFormProps {
-  familyId: string;
+interface Store {
+  id: string;
+  name: string;
 }
 
-export function AddItemForm({ familyId }: AddItemFormProps) {
+interface AddItemFormProps {
+  familyId: string;
+  stores: Store[];
+}
+
+/**
+ * The store you added to last. Shared with StoreFilter, which writes it whenever a real
+ * store is picked, so "last store used" means one thing across the page. Concrete ids
+ * only — "all" and "none" are filter states, not destinations.
+ */
+const LAST_STORE_KEY = "grocery:last-store";
+
+// Read through useSyncExternalStore rather than an effect: localStorage is an external
+// store, the server snapshot is null, and React handles the hydration step for us.
+function subscribeToStorage(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+function readLastStore(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_STORE_KEY);
+  } catch {
+    return null; // private mode, storage disabled — just start on No store
+  }
+}
+const noRememberedStore = () => null;
+
+export function AddItemForm({ familyId, stores }: AddItemFormProps) {
   const router = useRouter();
   const [text, setText] = useState("");
+  // undefined = the user hasn't picked this session, so fall back to what we remember.
+  // null = they explicitly chose No store.
+  const [chosenStoreId, setChosenStoreId] = useState<string | null | undefined>(undefined);
+
+  const remembered = useSyncExternalStore(
+    subscribeToStorage,
+    readLastStore,
+    noRememberedStore
+  );
+
+  const storeId =
+    chosenStoreId !== undefined
+      ? chosenStoreId
+      : // a store that has since been deleted simply doesn't apply
+        remembered && stores.some((s) => s.id === remembered)
+        ? remembered
+        : null;
   const [status, setStatus] = useState<"idle" | "parsing" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const [mergePreview, setMergePreview] = useState<{
@@ -43,6 +88,9 @@ export function AddItemForm({ familyId }: AddItemFormProps) {
 
     const fd = new FormData();
     fd.append("text", text);
+    // A store named in the text ("at Costco") still wins on the server; this only fills
+    // the gap when the text doesn't say.
+    if (storeId) fd.append("defaultStoreId", storeId);
 
     const res = await addGroceryItemFromText(fd);
     setStatus("idle");
@@ -67,6 +115,16 @@ export function AddItemForm({ familyId }: AddItemFormProps) {
     setStatus("done");
     startTransition(() => router.refresh());
     setTimeout(() => setStatus("idle"), 2000);
+  }
+
+  function selectStore(id: string | null) {
+    setChosenStoreId(id);
+    try {
+      // Remember concrete stores only; "None" is a choice for this item, not a habit.
+      if (id) window.localStorage.setItem(LAST_STORE_KEY, id);
+    } catch {
+      // not being able to remember is not a reason to fail the tap
+    }
   }
 
   const willMerge = mergePreview?.willMerge ?? false;
@@ -101,6 +159,30 @@ export function AddItemForm({ familyId }: AddItemFormProps) {
               {mergePreview.existingItem.qty_unit ? " " + mergePreview.existingItem.qty_unit : ""})
             </span>
           )}
+        </div>
+      )}
+
+      {stores.length > 0 && (
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          <span className="text-xs text-stone-400 whitespace-nowrap shrink-0">Store</span>
+          {[{ id: "", name: "None" }, ...stores].map((s) => {
+            const selected = (s.id || null) === storeId;
+            return (
+              <button
+                key={s.id || "none"}
+                type="button"
+                onClick={() => selectStore(s.id || null)}
+                aria-pressed={selected}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                  selected
+                    ? "bg-amber-600 text-white"
+                    : "bg-white border border-stone-200 text-stone-600 hover:bg-stone-50"
+                }`}
+              >
+                {s.name}
+              </button>
+            );
+          })}
         </div>
       )}
 

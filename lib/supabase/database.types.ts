@@ -3013,6 +3013,14 @@ export type Database = {
           next_due_at: string
         }[]
       }
+      fn_chore_undo: {
+        Args: { p_chore_id: string }
+        Returns: {
+          item: string
+          last_done_at: string
+          next_due_at: string
+        }[]
+      }
       fn_create_family_and_claim: {
         Args: { p_city?: string; p_name: string; p_timezone?: string }
         Returns: string
@@ -3054,6 +3062,7 @@ export type Database = {
           subject: string
         }[]
       }
+      fn_restore: { Args: { p_trash_id: string }; Returns: string }
       fn_skill_get_monthly_spend: {
         Args: { target_family_id: string }
         Returns: number
@@ -3078,10 +3087,21 @@ export type Database = {
         }
         Returns: undefined
       }
+      fn_soft_delete: {
+        Args: { p_row_id: string; p_table: string }
+        Returns: string
+      }
       fn_task_done: {
         Args: { p_task_id: string }
         Returns: {
           completed_at: string
+          status: string
+          title: string
+        }[]
+      }
+      fn_task_undo: {
+        Args: { p_task_id: string }
+        Returns: {
           status: string
           title: string
         }[]

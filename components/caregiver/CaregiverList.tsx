@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { deleteCaregiver } from "@/app/(app)/caregiver/actions";
 import { formatPhone } from "@/lib/format/phone";
+import { deleteWithUndo } from "@/lib/undo";
 
 const ROLE_LABELS: Record<string, string> = {
   nanny: "Nanny",
@@ -24,19 +25,56 @@ interface Caregiver {
 }
 
 export function CaregiverList({ caregivers }: { caregivers: Caregiver[] }) {
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const router = useRouter();
+  const [, startTransition] = useTransition();
 
-  async function handleDelete(id: string) {
-    if (!confirm("Remove this caregiver?")) return;
-    setDeleting(id);
-    try {
-      await deleteCaregiver(id);
-    } finally {
-      setDeleting(null);
-    }
+  /**
+   * One-touch, and the undo is real: fn_soft_delete banks caregiver_shifts, timesheets
+   * and mileage along with the caregiver — and the briefs and recaps hanging off those
+   * shifts, two levels down — so fn_restore returns the whole history, not just a name.
+   */
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // Rows Undo brought back that the server hasn't re-sent yet.
+  const [resurrected, setResurrected] = useState<Map<string, Caregiver>>(new Map());
+
+  const refresh = () => startTransition(() => router.refresh());
+
+  function hide(c: Caregiver) {
+    setHidden((prev) => new Set(prev).add(c.id));
+    setResurrected((prev) => {
+      const next = new Map(prev);
+      next.delete(c.id);
+      return next;
+    });
   }
 
-  if (caregivers.length === 0) {
+  function show(c: Caregiver) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.delete(c.id);
+      return next;
+    });
+    setResurrected((prev) => new Map(prev).set(c.id, c));
+  }
+
+  async function handleDelete(c: Caregiver) {
+    hide(c);
+    await deleteWithUndo({
+      table: "caregivers",
+      ids: [c.id],
+      message: `${c.name} removed`,
+      onShow: () => show(c),
+      onHide: () => hide(c),
+      onSettled: refresh,
+    });
+  }
+
+  const visible: Caregiver[] = [
+    ...caregivers.filter((c) => !hidden.has(c.id)),
+    ...[...resurrected.values()].filter((r) => !caregivers.some((c) => c.id === r.id)),
+  ];
+
+  if (visible.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-foreground/20 p-8 text-center">
         <p className="text-foreground/50 text-sm">No caregivers yet.</p>
@@ -51,7 +89,7 @@ export function CaregiverList({ caregivers }: { caregivers: Caregiver[] }) {
 
   return (
     <div className="space-y-3">
-      {caregivers.map((c) => (
+      {visible.map((c) => (
         <div
           key={c.id}
           className="flex items-start justify-between rounded-lg border border-foreground/10 p-4"
@@ -81,13 +119,8 @@ export function CaregiverList({ caregivers }: { caregivers: Caregiver[] }) {
                 Edit
               </Button>
             </Link>
-            <Button
-              variant="outline"
-             
-              onClick={() => handleDelete(c.id)}
-              disabled={deleting === c.id}
-            >
-              {deleting === c.id ? "..." : "Remove"}
+            <Button variant="outline" onClick={() => handleDelete(c)}>
+              Remove
             </Button>
           </div>
         </div>
