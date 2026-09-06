@@ -29,19 +29,25 @@ export async function saveCapture(formData: FormData) {
 
   const familyId = membership.family_id;
 
-  // Fetch categories for routing context
-  const { data: categories } = await supabase
+  // Fetch categories for routing context. `?? []` here meant a failed read gave
+  // the router nothing to route into, so everything landed in Uncategorised with
+  // category_id null — a wrong filing that looks exactly like a correct one.
+  // The words matter more than the filing, so this does not refuse: it skips the
+  // routing, saves the capture as-is, and says why.
+  const { data: categories, error: categoriesError } = await supabase
     .from("categories")
     .select("id, name")
     .eq("family_id", familyId)
     .order("sort_order");
 
-  const result = await withSkillContext(captureRouter.run, {
-    text,
-    categories: categories ?? [],
-  });
+  const result = categoriesError
+    ? null
+    : await withSkillContext(captureRouter.run, {
+        text,
+        categories: categories ?? [],
+      });
 
-  if (!result.ok || !result.data) {
+  if (!result || !result.ok || !result.data) {
     // Skill failed — still save the capture without routing. This is the last
     // copy of something the user may have spoken once, so if even the plain
     // insert fails they have to be told rather than shown a tick.
@@ -56,7 +62,13 @@ export async function saveCapture(formData: FormData) {
     }
     revalidatePath("/capture");
     revalidatePath("/organized");
-    return { ok: true, routed: false };
+    return {
+      ok: true,
+      routed: false,
+      warning: categoriesError
+        ? "Saved, but your categories couldn't be read, so this wasn't filed anywhere. It's in Organized."
+        : undefined,
+    };
   }
 
   const { categoryId, isGrocery, groceryItems } = result.data;
