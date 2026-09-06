@@ -22,6 +22,11 @@ export default defineConfig({
     {
       name: "mobile-safari",
       use: { ...devices["iPhone 14"], storageState: STORAGE_STATE },
+      // Contractions are family-scoped and carry no name to namespace them, and
+      // fn_baby_toggle closes whichever row of a type is open — so the two
+      // projects running this file concurrently would stop each other's timers.
+      // Excluded here rather than skipped at runtime, so a failure stays a failure.
+      testIgnore: /baby-lane\.spec\.ts/,
     },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL
