@@ -8,6 +8,7 @@
 // There is no unauthenticated path other than the CORS preflight and /health.
 
 import { AuthError, verifyAccessToken } from "./auth.js";
+import { enforceRateLimit, RateLimitError } from "./ratelimit.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -118,12 +119,48 @@ Return ONLY valid JSON. No markdown. No prose.
 Receipt:
 ${content.slice(0, 40000)}`;
 
+// Vercel project: family-coordinator, team zevallos-fgs-projects.
+// Preview URLs are generated per deployment and per branch, so they are matched
+// by shape rather than listed. Both patterns are anchored and pin the team suffix,
+// so `family-coordinator-evil.vercel.app` (a project someone else owns) does not
+// match.
+const ALLOWED_ORIGINS = new Set([
+  "https://family-coordinator.vercel.app",
+  "https://family-coordinator-git-main-zevallos-fgs-projects.vercel.app",
+]);
+const PREVIEW_ORIGIN_RE =
+  /^https:\/\/family-coordinator-(git-)?[a-z0-9-]+-zevallos-fgs-projects\.vercel\.app$/;
+const DEV_ORIGIN_RE = /^http:\/\/localhost:\d+$/;
+
+/**
+ * Resolve the origin this response may be shared with, or null.
+ *
+ * Returning null (rather than "*") for an unrecognised origin is the point: the
+ * previous version echoed whatever Origin it was sent, which is the same as
+ * having no policy at all.
+ *
+ * Note this is a browser control only. It stops a random web page from calling
+ * the proxy with a signed-in user's token; it does nothing against curl. The
+ * bearer check in auth.js is what actually protects the key.
+ */
+function allowedOrigin(origin, env) {
+  if (!origin) return null; // Non-browser caller (the skills runner). No CORS needed.
+  if (ALLOWED_ORIGINS.has(origin)) return origin;
+  if (PREVIEW_ORIGIN_RE.test(origin)) return origin;
+  if (env?.ALLOW_LOCALHOST_ORIGIN === "true" && DEV_ORIGIN_RE.test(origin)) return origin;
+  return null;
+}
+
 function corsHeaders(origin) {
-  return {
-    "Access-Control-Allow-Origin": origin || "*",
+  const headers = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
   };
+  // Omitted entirely when the origin is not allowed, so the browser blocks it.
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
 }
 
 function jsonResp(data, status, origin, extraHeaders = {}) {
@@ -186,8 +223,7 @@ function extractJSON(text) {
 
 export default {
   async fetch(request, env) {
-    const origin = request.headers.get("Origin") || "*";
-
+    const origin = allowedOrigin(request.headers.get("Origin"), env);
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
@@ -214,6 +250,17 @@ export default {
       if (!(err instanceof AuthError)) throw err;
       return jsonResp({ error: err.message }, err.status, origin, {
         "WWW-Authenticate": 'Bearer realm="family-coordinator-proxy"',
+      });
+    }
+
+    try {
+      await enforceRateLimit(env.RATE_LIMIT, caller.userId, {
+        allowMissingKv: env.ALLOW_MISSING_KV === "true",
+      });
+    } catch (err) {
+      if (!(err instanceof RateLimitError)) throw err;
+      return jsonResp({ error: err.message }, 429, origin, {
+        "Retry-After": String(err.retryAfterSeconds),
       });
     }
 

@@ -3,6 +3,39 @@ main = "src/index.js"
 compatibility_date = "2025-01-01"
 
 [vars]
+# Public project URL. Used only to fetch the JWKS that verifies caller tokens —
+# no key material lives here.
+SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
+
 # USDA_FDC_KEY: register at https://fdc.nal.usda.gov/api-key-signup.html
 # then run: wrangler secret put USDA_FDC_KEY
 # Barcode lookup chain skips USDA until this key is set.
+
+# Secrets (wrangler secret put <NAME>):
+#   ANTHROPIC_KEY  — the key every route spends. The reason auth exists here.
+#
+# Deliberately NOT set, and no code path uses one: any Supabase key (this worker
+# verifies tokens with the public JWKS and never talks to the database), and the
+# signing secret (it verifies, it cannot mint).
+
+# Per-user rate limit counters. Create with:
+#   wrangler kv namespace create RATE_LIMIT
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[env.dev.vars]
+SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
+# Local only: lets a dev server on localhost pass the CORS allowlist. Not set in
+# production. ALLOW_MISSING_KV is deliberately NOT set even here — the dev env
+# binds its own local KV below, so the rate limiter is exercised by the suite
+# rather than skipped, and a missing limiter always fails closed.
+ALLOW_LOCALHOST_ORIGIN = "true"
+
+# Bindings are not inherited by named environments, so the dev env repeats it.
+# In local mode the id is not resolved against the account; miniflare keeps the
+# data under .wrangler/state.
+[[env.dev.kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "local-dev-rate-limit"
