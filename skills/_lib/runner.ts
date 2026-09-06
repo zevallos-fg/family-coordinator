@@ -49,6 +49,45 @@ export async function updateSkillError(
   if (error) console.error("[skillRunner] updateSkillError failed", error.message);
 }
 
+/**
+ * Write a failed call into api_usage with a real error_message.
+ *
+ * Every failure path calls this. Before, a failure either returned early with no
+ * row at all, or — worse — logged a clean zero-token row that read as a success.
+ * Either way api_usage showed nothing wrong, so a four-month outage looked like
+ * a family that had simply stopped using the AI features.
+ *
+ * The row carries zero tokens and zero cost, which is accurate: nothing was
+ * spent. What makes it a failure is error_message, not the numbers.
+ */
+async function recordFailure(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ctx: SkillContext,
+  skillName: string,
+  model: string,
+  errorMessage: string
+): Promise<void> {
+  try {
+    const { data: usageId, error } = await supabase.rpc("fn_skill_record_usage", {
+      target_family_id: ctx.familyId,
+      target_user_id: ctx.userId,
+      p_skill_name: skillName,
+      p_model: model,
+      p_input_tokens: 0,
+      p_output_tokens: 0,
+      p_cost_cents: 0,
+    });
+    if (error) {
+      console.error("[skillRunner] failure logging failed", { skillName, error: error.message });
+      return;
+    }
+    if (usageId) await updateSkillError(usageId, errorMessage);
+  } catch (err) {
+    // Logging a failure must never mask the failure being reported.
+    console.error("[skillRunner] failure logging threw", { skillName, err });
+  }
+}
+
 export type MessageContent =
   | string
   | Array<
@@ -157,26 +196,43 @@ export async function callSkill<T = string>(
 
     if (!response.ok) {
       const text = await response.text();
-      return {
-        ok: false,
-        error: { code: "api_error", message: `Worker ${response.status}: ${text}` },
-      };
+      const upstream = response.headers.get("X-Upstream-Error");
+      const message = upstream
+        ? `${upstream} upstream error ${response.status}: ${text}`
+        : `Worker ${response.status}: ${text}`;
+      // Logged, not just returned. A failure that leaves no api_usage row is a
+      // failure nobody finds later — which is how the invalid key went unnoticed
+      // from 2026-04-19 to 2026-09-06.
+      await recordFailure(supabase, ctx, skillName, model, message);
+      return { ok: false, error: { code: "api_error", message } };
     }
 
     body = await response.json();
   } catch (err) {
-    return {
-      ok: false,
-      error: {
-        code: "api_error",
-        message: err instanceof Error ? err.message : String(err),
-      },
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    await recordFailure(supabase, ctx, skillName, model, `worker unreachable: ${message}`);
+    return { ok: false, error: { code: "api_error", message } };
   }
 
   // 4. Compute cost and log via RPC; capture the returned usage row ID
   const inputTokens = body.usage?.input_tokens ?? 0;
   const outputTokens = body.usage?.output_tokens ?? 0;
+
+  // A real completion always consumes input tokens — the prompt alone guarantees
+  // it. Zero is therefore proof that no call happened and that `body` is an error
+  // payload wearing a 200, which is exactly what the Worker used to return for an
+  // invalid API key. Treating it as success produced 7 tidy zero-token rows in
+  // api_usage across four months, none of them marked as errors, while every AI
+  // feature silently did nothing.
+  if (inputTokens === 0) {
+    const detail =
+      (body as { error?: { message?: string } })?.error?.message ??
+      "response carried no usage data";
+    const message = `upstream returned no completion (0 input tokens): ${detail}`;
+    await recordFailure(supabase, ctx, skillName, model, message);
+    return { ok: false, error: { code: "api_error", message } };
+  }
+
   const pricing = PRICING[model as keyof typeof PRICING];
   const costCents =
     (inputTokens * pricing.input + outputTokens * pricing.output) / 10000;

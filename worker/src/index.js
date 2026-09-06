@@ -244,7 +244,19 @@ async function fetchAllowlistedHTML(targetUrl) {
       headers: { "User-Agent": "Mozilla/5.0 (compatible)" },
     });
 
-    if (res.status < 300 || res.status >= 400) return res.text();
+    if (res.status < 300 || res.status >= 400) {
+      // Same rule as the Anthropic path: an upstream failure is not a 200. Handing
+      // back a site's 404 or paywall page would send it to the model as if it were
+      // a recipe, and the import would "succeed" with nonsense.
+      if (!res.ok) {
+        throw new UpstreamError(
+          res.status,
+          { type: "error", error: { type: "fetch_failed", message: `${current.hostname} returned ${res.status}` } },
+          "recipe-site"
+        );
+      }
+      return res.text();
+    }
 
     if (hop >= MAX_FETCH_REDIRECTS) {
       throw new Forbidden(`too many redirects (limit ${MAX_FETCH_REDIRECTS})`);
@@ -273,17 +285,64 @@ async function fetchAllowlistedHTML(targetUrl) {
   }
 }
 
+/**
+ * An Anthropic call that failed. Carries the upstream status so the caller sees
+ * a failure as a failure.
+ */
+class UpstreamError extends Error {
+  constructor(status, body, source = "anthropic") {
+    super(`upstream ${source} error`);
+    this.source = source;
+    // 0 means we never got a response at all (network/DNS). Nothing upstream
+    // said anything, so 502 is ours to report.
+    this.status = status >= 400 ? status : 502;
+    this.body = body;
+  }
+}
+
+/**
+ * Call Anthropic, and throw on anything that is not a usable completion.
+ *
+ * This used to `return res.json()` and discard the status, so an Anthropic error
+ * body was handed back to the caller with HTTP 200. That is how an invalid API
+ * key stayed invisible from 2026-04-19 to 2026-09-06: skills/_lib/runner.ts saw
+ * response.ok, read `usage.input_tokens ?? 0` off an error body, logged a tidy
+ * zero-token row and returned ok:true with empty text. No error reached the UI,
+ * api_usage or PostHog — the only symptom was features quietly doing nothing.
+ *
+ * Both failure shapes are checked. A non-2xx is the normal signal, and
+ * `type: "error"` is belt-and-braces in case a future error is served with a 2xx.
+ */
 async function callAnthropic(apiKey, body) {
-  const res = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-    },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  let res;
+  try {
+    res = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new UpstreamError(0, { type: "error", error: { type: "network_error", message: String(err) } });
+  }
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok || (data && data.type === "error")) {
+    throw new UpstreamError(res.status, data);
+  }
+  // A 2xx with no content is not a completion either; treating it as one is what
+  // produced empty results that looked like successes.
+  if (!data || !Array.isArray(data.content)) {
+    throw new UpstreamError(502, {
+      type: "error",
+      error: { type: "malformed_response", message: "Anthropic returned no content block" },
+    });
+  }
+  return data;
 }
 
 // Extracts first {...} block — guards against Haiku prose-append (per §2b finding)
@@ -488,6 +547,23 @@ export default {
       // Anything else is ours, and its message is not shown: an upstream error
       // string can carry request detail that does not belong in a client response.
       if (err instanceof BadRequest) return jsonResp({ error: err.message }, 400, origin);
+
+      // Upstream failures pass through with the upstream status and body, so a
+      // dead key reads as a dead key rather than as an empty success.
+      //
+      // The status can collide with ours — Anthropic answers an invalid key with
+      // 401, and so does our own auth gate. Two things tell them apart:
+      // X-Upstream-Error, and the fact that our gate always sends
+      // WWW-Authenticate and never reaches this handler.
+      if (err instanceof UpstreamError) {
+        console.error("upstream error", err.source, path, caller.userId, err.status, err.body);
+        return jsonResp(
+          err.body ?? { type: "error", error: { type: "upstream_error" } },
+          err.status,
+          origin,
+          { "X-Upstream-Error": err.source }
+        );
+      }
       console.error("proxy failure", path, caller.userId, err);
       return jsonResp({ error: "internal error" }, 500, origin);
     }
