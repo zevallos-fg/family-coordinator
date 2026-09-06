@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 
 interface VoiceButtonProps {
   onTranscript: (text: string) => void;
@@ -9,17 +9,45 @@ interface VoiceButtonProps {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySR = any;
 
+function getSpeechRecognition(): AnySR {
+  if (typeof window === "undefined") return null;
+  const w = window as AnySR;
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+/**
+ * SpeechRecognition support, read without breaking hydration.
+ *
+ * Reading `window` during render made this component return `null` on the server
+ * and a button on the client, so every load of /capture/new threw React error
+ * #418 and re-rendered the subtree. It was the only page error anywhere in the
+ * app.
+ *
+ * useSyncExternalStore is the sanctioned fix: React uses `getServerSnapshot` for
+ * the server render *and* for the hydration pass, so both agree, then re-renders
+ * with the client snapshot. The store never changes after load, so `subscribe`
+ * has nothing to do — it just has to be a stable reference.
+ */
+const noopSubscribe = () => () => {};
+const supportedOnClient = () => getSpeechRecognition() !== null;
+const supportedOnServer = () => false;
+
 export function VoiceButton({ onTranscript }: VoiceButtonProps) {
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recRef = useRef<AnySR>(null);
 
-  const w = typeof window !== "undefined" ? (window as AnySR) : null;
-  const SR: AnySR = w?.SpeechRecognition ?? w?.webkitSpeechRecognition ?? null;
+  const supported = useSyncExternalStore(
+    noopSubscribe,
+    supportedOnClient,
+    supportedOnServer
+  );
 
-  if (!SR) return null;
+  if (!supported) return null;
 
   function start() {
+    const SR = getSpeechRecognition();
+    if (!SR) return;
     const rec = new SR();
     rec.lang = "en-US";
     rec.interimResults = false;
@@ -51,6 +79,7 @@ export function VoiceButton({ onTranscript }: VoiceButtonProps) {
       <button
         type="button"
         onClick={recording ? stop : start}
+        data-testid="voice-button"
         className={`p-3 rounded-xl transition-colors ${
           recording
             ? "bg-rose-500 text-white animate-pulse"
