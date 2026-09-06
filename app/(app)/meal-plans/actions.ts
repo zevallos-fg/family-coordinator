@@ -493,12 +493,21 @@ async function runPlanGeneration(
       })),
   }));
 
-  // Load pantry
-  const { data: pantryRaw } = await supabase
+  // Load pantry. A failed read here is not "the pantry is empty" — it is "I do
+  // not know what you have", and the difference is a Sonnet call that puts
+  // everything back on the grocery list and a shop for food already in the house.
+  const { data: pantryRaw, error: pantryError } = await supabase
     .from("pantry_items")
     .select("amount, unit, ingredients(canonical_name)")
     .eq("family_id", familyId)
     .gt("amount", 0);
+
+  if (pantryError) {
+    return {
+      error:
+        "Couldn't read your pantry, so the plan would shop for things you already have. Nothing was generated — try again.",
+    };
+  }
 
   const pantry = (pantryRaw ?? [])
     .filter(p => (p.ingredients as { canonical_name: string } | null)?.canonical_name)
@@ -592,13 +601,21 @@ async function runPlanGeneration(
   }
 
   // Resolve suggestedStore names to UUIDs (fixes silent store-drop bug)
-  const { data: storeList } = await supabase
+  const { data: storeList, error: storeError } = await supabase
     .from("stores")
     .select("id, name")
     .eq("family_id", familyId);
+
+  // Not fatal — the plan is already saved and the items still belong on the list.
+  // But an unread error here silently wrote every one of them with no store,
+  // undoing the store resolution the line below exists to do, so it is reported
+  // rather than absorbed.
   const storeByName: Record<string, string> = {};
   for (const s of storeList ?? []) {
     storeByName[s.name.toLowerCase()] = s.id;
+  }
+  if (storeError) {
+    console.error("[generateMealPlan] store lookup failed", storeError.message);
   }
 
   // Write grocery delta items via dedup orchestrator
@@ -641,12 +658,16 @@ async function runPlanGeneration(
 
   revalidatePath("/meal-plans");
   revalidatePath("/grocery");
+  const warnings = [
+    droppedDelta.length > 0
+      ? `these didn't reach your grocery list: ${droppedDelta.join(", ")}`
+      : null,
+    storeError ? "the store list couldn't be read, so items were added without one" : null,
+  ].filter(Boolean);
+
   return {
     planId: mealPlan.id,
-    warning:
-      droppedDelta.length > 0
-        ? `Plan saved, but these didn't reach your grocery list: ${droppedDelta.join(", ")}.`
-        : undefined,
+    warning: warnings.length > 0 ? `Plan saved, but ${warnings.join("; ")}.` : undefined,
   };
 }
 
