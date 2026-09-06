@@ -28,7 +28,10 @@ export class UserClient {
 
     const res = await fetch(url, {
       ...init,
-      redirect: "error",
+      // The Workers runtime does not implement redirect:"error", so a redirect is
+      // caught by status below. Following one would send the user's token to a
+      // host that is not the configured project.
+      redirect: "manual",
       headers: {
         // The gateway validates `apikey` as a project API key and rejects a user
         // token there ("Invalid API key"). The anon key is the right value: it is
@@ -40,6 +43,10 @@ export class UserClient {
         ...(init.headers ?? {}),
       },
     });
+
+    if (res.status >= 300 && res.status < 400) {
+      throw new SupabaseError("refusing to follow a redirect away from the project", 502);
+    }
 
     const text = await res.text();
     const body = text ? safeJSON(text) : null;

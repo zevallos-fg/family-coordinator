@@ -115,13 +115,19 @@ export async function getAccessToken(userId: string, env: Env): Promise<string> 
 
   const res = await fetch(new URL("/auth/v1/token?grant_type=refresh_token", env.SUPABASE_URL), {
     method: "POST",
-    redirect: "error",
+    // The Workers runtime does not implement redirect:"error"; a redirect is
+    // caught by status below rather than followed with the refresh token attached.
+    redirect: "manual",
     headers: {
       apikey: env.SUPABASE_ANON_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
+
+  if (res.status >= 300 && res.status < 400) {
+    throw new AuthError("token endpoint redirected; refusing to follow");
+  }
 
   const body = (await res.json().catch(() => ({}))) as TokenResponse;
 
