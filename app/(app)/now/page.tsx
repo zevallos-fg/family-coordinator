@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ChoreRow } from "@/components/now/ChoreRow";
+import { BabyButton } from "@/components/baby/BabyButton";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,10 @@ export default async function NowPage() {
         <h1 className="text-xl font-semibold text-stone-800">Now</h1>
         <p className="text-xs text-stone-400 mt-0.5">{today}</p>
       </div>
+
+      {/* Above the fold, before anything that can be scrolled past: during labour
+          the contraction timer is the only thing on this screen that matters. */}
+      <BabyButton familyId={familyId} />
 
       {nothingAtAll && (
         <div className="rounded-xl border border-stone-200 bg-white px-4 py-8 text-center">
