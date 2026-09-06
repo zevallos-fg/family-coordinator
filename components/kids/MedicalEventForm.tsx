@@ -3,18 +3,12 @@
 import { useState } from "react";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { logMedicalEvent } from "@/app/(app)/kids/actions";
+import { MEDICAL_EVENT_TYPES, MEDICAL_EVENT_TYPE_LABEL } from "@/lib/db/enums";
 
-const MEDICAL_EVENT_TYPES = [
-  "Well-child visit",
-  "Sick visit",
-  "Vaccination",
-  "Dental checkup",
-  "Eye exam",
-  "Specialist visit",
-  "ER visit",
-  "Surgery",
-  "Other",
-];
+// These nine were display labels being submitted as values. medical_events
+// .event_type accepts exactly five, none of which were in that list, so every
+// medical event anyone ever tried to log was refused. The five real values now
+// come from the shared module, with the readable text kept as labels.
 
 interface MedicalEventFormProps {
   kidId: string;
@@ -85,7 +79,9 @@ export function MedicalEventForm({ kidId }: MedicalEventFormProps) {
               >
                 <option value="">Select type</option>
                 {MEDICAL_EVENT_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>
+                    {MEDICAL_EVENT_TYPE_LABEL[t]}
+                  </option>
                 ))}
               </select>
             </div>

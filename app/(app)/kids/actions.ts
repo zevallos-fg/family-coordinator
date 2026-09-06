@@ -9,6 +9,7 @@ import type { ActionResult } from "@/lib/skill-action-result";
 import { withRetry } from "@/lib/with-retry";
 import { run as runMilestoneSkill } from "@/skills/family-kid-milestone";
 import type { Output as MilestoneOutput } from "@/skills/family-kid-milestone";
+import { parseMedicalEventType } from "@/lib/db/enums";
 
 async function getAuthedFamily() {
   const supabase = await createClient();
@@ -146,12 +147,20 @@ export async function logMedicalEvent(
     const { supabase, familyId } = await getAuthedFamily();
 
     const event_date = (formData.get("event_date") as string)?.trim();
-    const event_type = (formData.get("event_type") as string)?.trim();
     const provider = (formData.get("provider") as string)?.trim() || null;
     const notes = (formData.get("notes") as string)?.trim() || null;
 
+    // Narrowed rather than trusted: event_type is CHECK-constrained, so a value
+    // the column will refuse is caught here with a message instead of surfacing
+    // as an opaque "Could not save medical event."
+    const event_type = parseMedicalEventType(formData.get("event_type"));
+
     if (!event_date || !event_type) {
-      return err("invalid_input", "Event date and type are required.", "missing required fields");
+      return err(
+        "invalid_input",
+        "Event date and type are required.",
+        `missing or unrecognised fields (event_type=${JSON.stringify(formData.get("event_type"))})`
+      );
     }
 
     const { data, error } = await supabase

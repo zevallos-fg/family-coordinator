@@ -4,6 +4,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MedicalEventForm } from "@/components/kids/MedicalEventForm";
 import Link from "next/link";
+import { MEDICAL_EVENT_TYPE_LABEL, type MedicalEventType } from "@/lib/db/enums";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -96,7 +97,7 @@ export default async function KidMedicalPage({ params }: PageProps) {
                   <td className="py-2 text-stone-600 text-xs">
                     {new Date(e.event_date).toLocaleDateString()}
                   </td>
-                  <td className="py-2 font-medium text-stone-700">{e.event_type}</td>
+                  <td className="py-2 font-medium text-stone-700">{MEDICAL_EVENT_TYPE_LABEL[e.event_type as MedicalEventType] ?? e.event_type}</td>
                   <td className="py-2 text-stone-400 text-xs">{e.provider ?? "—"}</td>
                   <td className="py-2 text-stone-400 text-xs">{e.notes ?? "—"}</td>
                 </tr>
