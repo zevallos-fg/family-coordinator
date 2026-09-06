@@ -108,3 +108,74 @@ Not doing it yet. But the shape of a fix, for when you want one:
 
 The scanner used for this report is not committed — it is a throwaway. If a lint
 rule is wanted, that is the thing worth building properly.
+
+---
+
+## Follow-up: the cluster this report missed (2026-09-06, later)
+
+The report above ranked what each swallowed read *disguised itself as* on the
+page it appeared on. Ranking that way missed the largest cluster in the codebase,
+because it was not one site with a big blast radius — it was **the same six lines
+copy-pasted into 48 files**, in twelve slightly different spellings:
+
+```ts
+const { data: membership } = await supabase
+  .from("family_members")
+  .select("family_id")
+  .eq("user_id", user.id)
+  .limit(1)
+  .maybeSingle();
+
+if (!membership) redirect("/onboarding");
+```
+
+**54 of the 131 lint warnings were this.** Every copy dropped the error, so a
+transient failure on `family_members` produced `membership === null`, and every
+copy read that as *"this person has no family"*.
+
+The loop closed because `/onboarding` swallowed the same read: it also concluded
+there was no family, and showed the wizard. A member of a working household could
+therefore be walked into creating a second one — and since every page picks the
+*first* family joined, the new one would not even become the active one. The user
+would get their real household back once the read recovered, plus an orphan family
+and a duplicate `family_members` row nobody asked for.
+
+A second defect rode along: **24 of the 54 omitted `.order("joined_at")**, so for
+anyone in more than one family, *which* family they saw was whatever Postgres
+returned first, and could differ between two requests on the same page load.
+`/api/spend` was among them, which means the ceiling could have been reported for
+a different household than the one on screen.
+
+### What replaced it
+
+`lib/auth/current-family.ts` — one lookup, three outcomes kept apart
+(`unauthenticated`, `no-family`, `lookup-failed`), and one ordering.
+
+- `requireFamily()` for Server Components: redirects on the first two, **throws**
+  on the third.
+- `familyForAction()` for Server Actions, and `assertMembership(familyId)` for the
+  authorization check, which still fails closed but no longer reports a failed
+  check as a family that does not exist.
+
+Throwing needed somewhere to land, so `app/error.tsx` and `app/(app)/error.tsx`
+now exist. **There was no error boundary anywhere in the app before this.** That
+absence is worth naming as a cause rather than a detail: with no boundary, a
+Server Component that threw rendered Next's default 500, so swallowing a failed
+read and showing an empty page was the *better-looking* of the two options
+available. Code will keep choosing the disguise until there is somewhere honest
+for a failure to go.
+
+### Also found, and fixed, while here
+
+`checkDatesHaveDuties` in `schedule/actions.ts` is the guard that decides whether
+saving a parsed calendar asks before replacing a week of duties. It returned a
+bare `boolean`, and **every** failure — no session, no family, a failed membership
+read, a failed count — returned `false`, which the caller reads as "nothing here
+to lose" and saves without asking. It now returns three states, and the caller
+asks first when it does not know. This belonged in tier 1 of the report above and
+was not in it.
+
+### Count
+
+131 → 76 warnings. What remains is genuinely the empty-state tier and the
+`if (!row) notFound()` tier; none of it writes bad data or spends money.

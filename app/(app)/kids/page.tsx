@@ -1,25 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import Link from "next/link";
+import { requireFamily } from "@/lib/auth/current-family";
 
 async function getKids() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: kids, error } = await supabase
     .from("kids")
@@ -27,7 +14,7 @@ async function getKids() {
       id, name, birth_date, notes,
       kid_milestones(id, milestone_type, logged_at, notes)
     `)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("name");
 
   return { kids: kids ?? [], error: error?.message ?? null };

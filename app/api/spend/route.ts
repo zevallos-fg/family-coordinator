@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { lookupFamily } from "@/lib/auth/current-family";
 
 // In-memory cache keyed by family_id. Deduplicates Supabase RPC calls when
 // multiple clients or concurrent requests poll within the TTL window.
@@ -7,32 +8,27 @@ const CACHE_TTL_MS = 60_000; // 60 second server-side cache
 
 export async function GET() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return Response.json({ spend: null });
 
-  const { data: membership, error: membershipError } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (membershipError) {
-    console.error("[api/spend] membership lookup failed", membershipError.message);
-    return Response.json({ spend: null, unavailable: true }, { status: 503 });
+  // This read already handled its error. What it did not do was order by
+  // joined_at, so for anyone in more than one family the ceiling could be
+  // reported for a different household than the one on screen.
+  const family = await lookupFamily();
+  if (!family.ok) {
+    if (family.reason === "lookup-failed") {
+      console.error("[api/spend] membership lookup failed", family.message);
+      return Response.json({ spend: null, unavailable: true }, { status: 503 });
+    }
+    return Response.json({ spend: null });
   }
-  if (!membership) return Response.json({ spend: null });
 
-  const cacheKey = membership.family_id;
+  const cacheKey = family.familyId;
   const cached = spendCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return Response.json({ spend: cached.value, cached: true });
   }
 
   const { data: cents, error } = await supabase.rpc("fn_skill_get_monthly_spend", {
-    target_family_id: membership.family_id,
+    target_family_id: family.familyId,
   });
 
   // A spend query that fails used to report $0.00 of $10.00 and cache it for a
@@ -41,7 +37,7 @@ export async function GET() {
   // error look like a healthy month for as long as the TTL held.
   if (error || cents === null) {
     console.error("[api/spend] could not read monthly spend", {
-      familyId: membership.family_id,
+      familyId: family.familyId,
       error: error?.message ?? "rpc returned null",
     });
     return Response.json({ spend: null, unavailable: true }, { status: 503 });

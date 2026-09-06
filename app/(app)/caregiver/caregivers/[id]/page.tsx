@@ -1,8 +1,9 @@
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { CaregiverForm } from "@/components/caregiver/CaregiverForm";
 import { updateCaregiver } from "@/app/(app)/caregiver/actions";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -11,24 +12,13 @@ interface Props {
 export default async function EditCaregiverPage({ params }: Props) {
   const { id } = await params;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: caregiver } = await supabase
     .from("caregivers")
     .select("*")
     .eq("id", id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .single();
 
   if (!caregiver) notFound();

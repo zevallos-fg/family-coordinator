@@ -1,33 +1,20 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { HurricaneChecklist } from "@/components/hurricane/HurricaneChecklist";
 import { isChecklistSettled } from "@/lib/db/enums";
+import { requireFamily } from "@/lib/auth/current-family";
 
 const HURRICANE_SEASON = "hurricane_2026";
 
 async function getHurricaneData() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: items, error } = await supabase
     .from("seasonal_checklists")
     .select("id, item_text, status, due_by_date, season")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .like("season", `${HURRICANE_SEASON}%`)
     .order("due_by_date", { ascending: true });
 

@@ -1,8 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import Link from "next/link";
 import { IndexingStatus } from "@/components/documents/IndexingStatus";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -10,26 +11,13 @@ interface PageProps {
 
 async function getDocument(id: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: doc, error } = await supabase
     .from("documents")
     .select("*")
     .eq("id", id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .maybeSingle();
 
   return { doc, error: error?.message ?? null };

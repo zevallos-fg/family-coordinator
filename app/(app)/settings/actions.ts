@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { assertMembership } from "@/lib/auth/current-family";
 
 export async function updateDefaultServes(
   familyId: string,
@@ -12,19 +13,12 @@ export async function updateDefaultServes(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not signed in" };
 
-  // Verify the user belongs to this family
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .eq("family_id", familyId)
-    .maybeSingle();
-  if (!membership) return { error: "Family not found" };
+  // Verify the user belongs to this family. Failing closed was already the
+  // behaviour and stays; what changes is that a check we could not run no
+  // longer claims the family does not exist.
+  const access = await assertMembership(familyId);
+  if (!access.ok) return { error: access.error };
 
   const { error } = await supabase
     .from("families")

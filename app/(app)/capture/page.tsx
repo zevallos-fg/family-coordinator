@@ -1,27 +1,16 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CaptureList } from "@/components/capture/CaptureList";
 import Link from "next/link";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function CapturePage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: captures } = await supabase
     .from("captures")
     .select("id, text, created_at, voice_transcription, categories(name, icon)")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .is("completed_at", null)
     .order("created_at", { ascending: false })
     .limit(50);

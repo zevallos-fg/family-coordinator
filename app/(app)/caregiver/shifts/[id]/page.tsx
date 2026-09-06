@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BriefPreview } from "@/components/caregiver/BriefPreview";
 import { Button } from "@/components/ui/button";
 import { deleteShift } from "@/app/(app)/caregiver/actions";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -24,24 +25,13 @@ function formatDateTime(iso: string) {
 export default async function ShiftDetailPage({ params }: Props) {
   const { id } = await params;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: shift } = await supabase
     .from("caregiver_shifts")
     .select("*, caregivers(name, role)")
     .eq("id", id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .single();
 
   if (!shift) notFound();

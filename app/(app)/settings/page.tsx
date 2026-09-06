@@ -1,23 +1,17 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { FamilySettingsForm } from "@/components/settings/FamilySettingsForm";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id, families(name, default_serves)")
-    .eq("user_id", user.id)
-    .limit(1)
+  const { data: family, error: familyError } = await supabase
+    .from("families")
+    .select("name, default_serves")
+    .eq("id", familyId)
     .maybeSingle();
-  if (!membership) redirect("/onboarding");
-
-  const family = membership.families as { name: string; default_serves: number } | null;
+  if (familyError) throw new Error(`Could not load your settings: ${familyError.message}`);
 
   return (
     <div className="space-y-6 max-w-xl">
@@ -26,7 +20,7 @@ export default async function SettingsPage() {
         <p className="text-sm text-stone-400 mt-0.5">Family preferences</p>
       </div>
       <FamilySettingsForm
-        familyId={membership.family_id}
+        familyId={familyId}
         defaultServes={family?.default_serves ?? 4}
       />
     </div>

@@ -1,36 +1,23 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { BirthdayEventsView } from "@/components/kids/BirthdayEventsView";
+import { requireFamily } from "@/lib/auth/current-family";
 
 async function getBirthdayEvents() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: events, error } = await supabase
     .from("kid_birthday_events")
     .select("*, kids(name, birth_date)")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("party_date", { ascending: true });
 
   const { data: kids } = await supabase
     .from("kids")
     .select("id, name")
-    .eq("family_id", membership.family_id);
+    .eq("family_id", familyId);
 
   return {
     events: events ?? [],

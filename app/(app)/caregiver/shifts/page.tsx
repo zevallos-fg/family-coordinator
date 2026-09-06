@@ -1,28 +1,17 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { ShiftCard } from "@/components/caregiver/ShiftCard";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function ShiftsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: shifts } = await supabase
     .from("caregiver_shifts")
     .select("id, start_at, end_at, kid_names, caregivers(name, role)")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("start_at", { ascending: false })
     .limit(50);
 

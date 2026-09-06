@@ -1,28 +1,16 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/nav/TopNav";
 import { MobileNav } from "@/components/nav/MobileNav";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  // The shell renders for everyone in the app group, so this is the gate: no
+  // session sends you to /login, no family to /onboarding, and a lookup that
+  // fails throws to app/error.tsx rather than picking one of those for you.
+  await requireFamily();
 
   return (
     <div className="min-h-screen bg-stone-50">

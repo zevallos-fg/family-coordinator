@@ -10,6 +10,7 @@ import { withRetry } from "@/lib/with-retry";
 import { run as runIndexer } from "@/skills/family-document-indexer";
 import { run as runQA } from "@/skills/family-document-qa";
 import type { DocumentMatch } from "@/skills/family-document-qa";
+import { lookupFamily } from "@/lib/auth/current-family";
 
 const BUCKET = "family-documents";
 const MAX_FILE_SIZE = 26214400; // 25MB
@@ -25,21 +26,18 @@ const ALLOWED_MIME_TYPES = [
 
 async function getAuthedFamily() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
+  const family = await lookupFamily();
 
-  const { data: membership, error } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  // Three failures, three sentences. The old body collapsed `error || !membership`
+  // into "no family found", so a database that could not be reached reported
+  // itself as a household that does not exist.
+  if (!family.ok) {
+    if (family.reason === "unauthenticated") throw new Error("not signed in");
+    if (family.reason === "no-family") throw new Error("no family found");
+    throw new Error(`could not reach your family record: ${family.message}`);
+  }
 
-  if (error || !membership) throw new Error("no family found");
-  return { supabase, userId: user.id, familyId: membership.family_id };
+  return { supabase, userId: family.userId, familyId: family.familyId };
 }
 
 export async function uploadDocument(

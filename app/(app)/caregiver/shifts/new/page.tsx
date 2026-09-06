@@ -1,8 +1,8 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ShiftForm } from "@/components/caregiver/ShiftForm";
 import { parseWeekParam, formatWeekParam, addDays } from "@/lib/week";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
@@ -12,29 +12,18 @@ export default async function NewShiftPage({ searchParams }: Props) {
   const { week: weekParam } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const [{ data: caregivers }, { data: kids }] = await Promise.all([
     supabase
       .from("caregivers")
       .select("id, name, role")
-      .eq("family_id", membership.family_id)
+      .eq("family_id", familyId)
       .order("created_at"),
     supabase
       .from("kids")
       .select("id, name")
-      .eq("family_id", membership.family_id)
+      .eq("family_id", familyId)
       .order("created_at"),
   ]);
 

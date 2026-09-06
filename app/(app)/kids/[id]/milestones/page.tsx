@@ -1,9 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MilestoneLogger } from "@/components/kids/MilestoneLogger";
 import Link from "next/link";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -11,26 +12,13 @@ interface PageProps {
 
 async function getKidMilestones(kid_id: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: kid } = await supabase
     .from("kids")
     .select("id, name, birth_date")
     .eq("id", kid_id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .maybeSingle();
 
   if (!kid) return { kid: null, milestones: [], error: null };

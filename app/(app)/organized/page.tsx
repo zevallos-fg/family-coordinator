@@ -1,24 +1,12 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { CategoryColumn } from "@/components/organized/CategoryColumn";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export default async function OrganizedPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
-
-  const familyId = membership.family_id;
 
   const [{ data: categories }, { data: captures }] = await Promise.all([
     supabase

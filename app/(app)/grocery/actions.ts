@@ -6,26 +6,15 @@ import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as groceryParser from "@/skills/family-grocery-parser";
 import { addGroceryItem } from "@/lib/grocery/dedup";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export async function addGroceryItemFromText(formData: FormData) {
   const text = (formData.get("text") as string)?.trim();
   if (!text) return { ok: false, error: "No text provided." };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { userId, familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
-
-  const familyId = membership.family_id;
 
   const { data: stores } = await supabase
     .from("stores")
@@ -55,7 +44,7 @@ export async function addGroceryItemFromText(formData: FormData) {
         qtyUnit: null,
         storeId: defaultStoreId,
         familyId,
-        userId: user.id,
+        userId: userId,
         createIfMissing: true,
       });
     } catch {
@@ -91,7 +80,7 @@ export async function addGroceryItemFromText(formData: FormData) {
         qtyUnit: item.unit ?? null,
         storeId: item.storeId ?? defaultStoreId,
         familyId,
-        userId: user.id,
+        userId: userId,
         createIfMissing: true,
       });
       lastAction = dedup.action;

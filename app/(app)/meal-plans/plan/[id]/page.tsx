@@ -1,7 +1,8 @@
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { MealPlanWeek } from "@/components/meal-plans/MealPlanWeek";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -18,22 +19,13 @@ function formatWeekRange(mondayIso: string): string {
 export default async function MealPlanPage({ params }: Props) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: plan } = await supabase
     .from("meal_plans")
     .select("id, week_start_date, meal_plan_entries(id, date, meal_type, recipe_id, notes, recipes(id, title))")
     .eq("id", id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .maybeSingle();
 
   if (!plan) notFound();
@@ -42,7 +34,7 @@ export default async function MealPlanPage({ params }: Props) {
   const { data: allRecipes } = await supabase
     .from("recipes")
     .select("id, title")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("title");
 
   type EntryRaw = {

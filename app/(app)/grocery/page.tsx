@@ -1,9 +1,9 @@
-import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { GroceryTable } from "@/components/grocery/GroceryTable";
 import { AddItemForm } from "@/components/grocery/AddItemForm";
 import { StoreFilter } from "@/components/grocery/StoreFilter";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface PageProps {
   searchParams: Promise<{ store?: string }>;
@@ -13,20 +13,8 @@ export default async function GroceryPage({ searchParams }: PageProps) {
   const { store: storeFilter } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
-
-  const familyId = membership.family_id;
 
   const [{ data: allItems }, { data: stores }] = await Promise.all([
     supabase

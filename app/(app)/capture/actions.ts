@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { withSkillContext } from "@/lib/skill-action";
 import * as captureRouter from "@/skills/family-capture-router";
 import { addGroceryItem } from "@/lib/grocery/dedup";
+import { requireFamily } from "@/lib/auth/current-family";
 
 export async function saveCapture(formData: FormData) {
   const text = (formData.get("text") as string)?.trim();
@@ -14,20 +14,8 @@ export async function saveCapture(formData: FormData) {
   if (!text) return { ok: false, error: "Nothing to capture." };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { userId, familyId } = await requireFamily();
 
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
-
-  const familyId = membership.family_id;
 
   // Fetch categories for routing context. `?? []` here meant a failed read gave
   // the router nothing to route into, so everything landed in Uncategorised with
@@ -55,7 +43,7 @@ export async function saveCapture(formData: FormData) {
       family_id: familyId,
       text,
       voice_transcription: voiceTranscription,
-      created_by_user_id: user.id,
+      created_by_user_id: userId,
     });
     if (fallbackError) {
       return { ok: false, error: "Couldn't save that. Try again?" };
@@ -81,7 +69,7 @@ export async function saveCapture(formData: FormData) {
       text,
       category_id: categoryId,
       voice_transcription: voiceTranscription,
-      created_by_user_id: user.id,
+      created_by_user_id: userId,
     })
     .select("id")
     .single();
@@ -102,7 +90,7 @@ export async function saveCapture(formData: FormData) {
           storeId: null,
           familyId,
           sourceCaptureId: capture?.id ?? undefined,
-          userId: user.id,
+          userId: userId,
           createIfMissing: true,
         });
       } catch {

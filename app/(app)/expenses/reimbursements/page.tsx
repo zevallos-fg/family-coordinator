@@ -1,37 +1,24 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ReimbursementsView } from "@/components/expenses/ReimbursementsView";
 import Link from "next/link";
+import { requireFamily } from "@/lib/auth/current-family";
 
 async function getReimbursements() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .order("joined_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership) redirect("/onboarding");
+  const { userId, familyId } = await requireFamily();
 
   const { data: reimbursements, error } = await supabase
     .from("reimbursements")
     .select("id, amount_cents, status, settled_at, created_at, from_user_id, to_user_id")
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
   return {
     reimbursements: reimbursements ?? [],
     error: error?.message ?? null,
-    userId: user.id,
+    userId: userId,
   };
 }
 

@@ -1,10 +1,11 @@
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { KidForm } from "@/components/kid-state/KidForm";
 import { KidProfile } from "@/components/kid-state/KidProfile";
 import { KidUpdateForm } from "@/components/kid-state/KidUpdateForm";
 import { updateKid } from "@/app/(app)/caregiver/actions";
+import { requireFamily } from "@/lib/auth/current-family";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -13,24 +14,13 @@ interface Props {
 export default async function EditKidPage({ params }: Props) {
   const { id } = await params;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { familyId } = await requireFamily();
 
   const { data: kid } = await supabase
     .from("kids")
     .select("*")
     .eq("id", id)
-    .eq("family_id", membership.family_id)
+    .eq("family_id", familyId)
     .single();
 
   if (!kid) notFound();
