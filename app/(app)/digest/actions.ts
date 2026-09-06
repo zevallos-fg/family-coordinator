@@ -9,6 +9,7 @@ import type { ActionResult } from "@/lib/skill-action-result";
 import { withRetry } from "@/lib/with-retry";
 import { run as runDigestSkill } from "@/skills/family-weekly-digest";
 import type { BlindSpot } from "@/skills/family-weekly-digest";
+import { type ChecklistStatus, type TaskStatus } from "@/lib/db/enums";
 
 async function getAuthedFamily() {
   const supabase = await createClient();
@@ -89,14 +90,48 @@ export async function generateDigest(
           .from("caregiver_shifts")
           .select("id")
           .eq("family_id", familyId)
-          .gte("shift_date", week_start_date)
-          .lte("shift_date", weekEndStr),
+          // The column is start_at, not shift_date. Filtering on a column that
+          // does not exist made PostgREST return an error, and `.data ?? []`
+          // turned that into "no shifts this week", every week.
+          .gte("start_at", week_start_date)
+          .lte("start_at", weekEndStr + "T23:59:59Z"),
         supabase
           .from("seasonal_checklists")
           .select("id")
           .eq("family_id", familyId)
-          .eq("status", "pending"),
+          // "pending" is not a value this column can hold, so the outstanding
+          // hurricane count was always zero.
+          .eq("status", "open" satisfies ChecklistStatus),
       ]);
+
+    // These reads feed the digest's numbers. A failed one used to vanish into a
+    // `?? []` and read as "nothing happened this week", which is indistinguishable
+    // from a quiet week and considerably less true.
+    const readFailures = [
+      ["family_members", membersRes],
+      ["captures", capturesRes],
+      ["schedule_entries", scheduleRes],
+      ["expenses", expensesRes],
+      ["tasks", tasksRes],
+      ["kid_milestones", milestonesRes],
+      ["kid_birthday_events", birthdaysRes],
+      ["caregiver_shifts", caregiverRes],
+      ["seasonal_checklists", seasonalRes],
+    ].filter(([, res]) => (res as { error: unknown }).error);
+
+    if (readFailures.length > 0) {
+      const detail = readFailures
+        .map(([name, res]) => `${name}: ${(res as { error: { message: string } }).error.message}`)
+        .join("; ");
+      Sentry.captureException(new Error(`digest read failed — ${detail}`), {
+        extra: { action: "generateDigest", week_start_date },
+      });
+      return err(
+        "db_error",
+        "Could not read this week's activity, so the digest would be wrong.",
+        detail
+      );
+    }
 
     const family_members = (membersRes.data ?? []).map((m) => ({
       user_id: m.user_id,
@@ -210,8 +245,19 @@ export async function regenerateDigest(
 
     if (!existing) return err("not_found", "Digest not found.", `digest ${digest_id} not found`);
 
-    // Delete old digest
-    await supabase.from("digests").delete().eq("id", digest_id).eq("family_id", familyId);
+    // Delete old digest. Read the error: a failed delete followed by a
+    // successful generate leaves two digests for one week, and the page picks
+    // whichever it happens to read first.
+    const { error: deleteError } = await supabase
+      .from("digests")
+      .delete()
+      .eq("id", digest_id)
+      .eq("family_id", familyId);
+
+    if (deleteError) {
+      Sentry.captureException(deleteError, { extra: { action: "regenerateDigest", digest_id } });
+      return err("db_error", "Could not clear the old digest.", deleteError.message);
+    }
 
     // Generate new
     const result = await generateDigest(existing.week_start_date);
@@ -273,7 +319,8 @@ export async function convertBlindSpotToTask(
         family_id: familyId,
         title: spot.suggested_action,
         description: `From weekly digest blind spot: ${spot.observation}`,
-        status: "pending",
+        // tasks.status accepts open | in_progress | done | cancelled.
+        status: "open" satisfies TaskStatus,
       })
       .select("id")
       .single();
