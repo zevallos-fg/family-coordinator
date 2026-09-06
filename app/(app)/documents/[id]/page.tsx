@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import Link from "next/link";
+import { IndexingStatus } from "@/components/documents/IndexingStatus";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -86,11 +87,7 @@ export default async function DocumentDetailPage({ params }: PageProps) {
               </div>
               <div>
                 <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Indexed</p>
-                <p className="text-sm text-stone-700">
-                  {doc.indexed_at
-                    ? new Date(doc.indexed_at).toLocaleDateString()
-                    : "Indexing in progress..."}
-                </p>
+                <IndexingStatus documentId={doc.id} indexedAt={doc.indexed_at} />
               </div>
               {doc.tags && doc.tags.length > 0 && (
                 <div>
