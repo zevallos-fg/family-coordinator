@@ -152,17 +152,21 @@ export async function addBarcodeToPantryAction(
     .eq("ingredient_id", ingredientId)
     .maybeSingle();
 
-  if (existingPantry) {
-    await supabase
-      .from("pantry_items")
-      .update({ amount: (existingPantry.amount ?? 0) + 1, updated_at: new Date().toISOString() })
-      .eq("id", existingPantry.id);
-  } else {
-    await supabase.from("pantry_items").insert({
-      family_id: familyId,
-      ingredient_id: ingredientId,
-      amount: 1,
-    });
+  // Adding to the pantry is the entire point of the scan, so a failure here is
+  // the action failing — not something to shrug off after the barcode resolved.
+  const { error: pantryError } = existingPantry
+    ? await supabase
+        .from("pantry_items")
+        .update({ amount: (existingPantry.amount ?? 0) + 1, updated_at: new Date().toISOString() })
+        .eq("id", existingPantry.id)
+    : await supabase.from("pantry_items").insert({
+        family_id: familyId,
+        ingredient_id: ingredientId,
+        amount: 1,
+      });
+
+  if (pantryError) {
+    return { ok: false, error: pantryError.message };
   }
 
   revalidatePath("/meal-plans");

@@ -148,7 +148,10 @@ export async function triggerIndexing(document_id: string): Promise<ActionResult
 
     const { ocr_text, summary, suggested_tags, suggested_doc_type } = skillResult.data;
 
-    await supabase
+    // indexed_at is what the UI reads to stop saying "Indexing in progress…".
+    // Losing this update left the document in that state permanently while the
+    // action reported success.
+    const { error: indexError } = await supabase
       .from("documents")
       .update({
         ocr_text,
@@ -158,7 +161,15 @@ export async function triggerIndexing(document_id: string): Promise<ActionResult
       })
       .eq("id", document_id);
 
+    if (indexError) {
+      Sentry.captureException(indexError, {
+        extra: { action: "triggerIndexing", stage: "persist", document_id },
+      });
+      return err("db_error", "Indexed the document but could not save the result.", indexError.message);
+    }
+
     revalidatePath("/documents");
+    revalidatePath(`/documents/${document_id}`);
     return ok(undefined as void);
   } catch (error) {
     Sentry.captureException(error, { extra: { action: "triggerIndexing", document_id } });

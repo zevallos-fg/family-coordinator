@@ -97,11 +97,17 @@ export async function saveReconciliation(reconciliation: Output) {
 
   // Delete existing entries for these dates then insert fresh
   const dates = [...new Set(rows.map((r) => r.date))];
-  await supabase
+  const { error: clearError } = await supabase
     .from("schedule_entries")
     .delete()
     .eq("family_id", membership.family_id)
     .in("date", dates);
+
+  // A failed clear followed by a successful insert duplicates every duty for
+  // those dates, and the week view shows each one twice.
+  if (clearError) {
+    return { ok: false, error: clearError.message };
+  }
 
   const { error } = await supabase.from("schedule_entries").insert(rows);
 

@@ -150,7 +150,10 @@ async function writeLog(
   descriptors: string[],
   confidence: "exact" | "fuzzy" | "haiku" | "unmatched"
 ): Promise<void> {
-  await supabase.from("ingredient_resolution_log").insert({
+  // Pure telemetry: a lost row must never fail the resolution it is describing.
+  // Read anyway, because a log that has silently stopped writing is worse than
+  // no log at all — it reads as "nothing needed reviewing".
+  const { error } = await supabase.from("ingredient_resolution_log").insert({
     family_id: familyId,
     raw_input: rawInput,
     cleaned_name: cleanedName,
@@ -159,4 +162,12 @@ async function writeLog(
     confidence,
     reviewed_by_user: false,
   });
+
+  if (error) {
+    console.error("[resolveIngredient] resolution log write failed", {
+      familyId,
+      rawInput,
+      error: error.message,
+    });
+  }
 }

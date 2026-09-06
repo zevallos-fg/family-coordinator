@@ -46,16 +46,42 @@ export default async function InvitePage({ params }: Props) {
     .maybeSingle();
 
   if (!existing) {
-    await supabase.from("family_members").insert({
+    const { error: joinError } = await supabase.from("family_members").insert({
       family_id: invite.family_id,
       user_id: user.id,
       role: invite.role ?? "partner",
     });
 
-    await supabase
+    // Without this check a failed join still redirected to /dashboard, which
+    // bounces to /onboarding for want of a membership — so the invite looked
+    // like it had worked and then quietly asked you to start a second family.
+    if (joinError) {
+      return (
+        <main className="flex min-h-full flex-col items-center justify-center p-8">
+          <div className="w-full max-w-md space-y-4 text-center">
+            <h1 className="text-2xl font-semibold">Couldn&apos;t join that family</h1>
+            <p className="text-foreground/60">
+              Something went wrong accepting the invite. The link is still valid —
+              try opening it again, or ask for a new one.
+            </p>
+          </div>
+        </main>
+      );
+    }
+
+    // Marking the invite accepted is bookkeeping: the membership already exists,
+    // so a failure here must not block the person who just joined.
+    const { error: acceptError } = await supabase
       .from("family_invites")
       .update({ accepted_at: now.toISOString() })
       .eq("id", invite.id);
+
+    if (acceptError) {
+      console.error("[invite] could not mark invite accepted", {
+        inviteId: invite.id,
+        error: acceptError.message,
+      });
+    }
   }
 
   redirect("/dashboard");

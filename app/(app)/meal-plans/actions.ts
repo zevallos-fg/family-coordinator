@@ -22,7 +22,7 @@ async function getFamilyId(supabase: Awaited<ReturnType<typeof createClient>>, u
 
 // ── Recipe actions ────────────────────────────────────────────────────────────
 
-export async function importRecipeAction(url: string): Promise<{ error?: string; recipeId?: string }> {
+export async function importRecipeAction(url: string): Promise<{ error?: string; recipeId?: string; warning?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
@@ -138,7 +138,14 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
     }));
 
   if (ingredientRows.length > 0) {
-    await supabase.from("recipe_ingredients").insert(ingredientRows);
+    // A recipe with no ingredients is not a recipe. Report it rather than hand
+    // back a recipeId for a shell the user will only discover when they open it.
+    const { error: ingErr } = await supabase
+      .from("recipe_ingredients")
+      .insert(ingredientRows);
+    if (ingErr) {
+      return { recipeId: newRecipe.id, warning: "Recipe saved, but its ingredients could not be." };
+    }
   }
 
   revalidatePath("/meal-plans/recipes");
@@ -153,7 +160,7 @@ type SupportedImageType = (typeof SUPPORTED_IMAGE_TYPES)[number];
 
 export async function importRecipeFromPhotoAction(
   formData: FormData
-): Promise<{ error?: string; recipeId?: string }> {
+): Promise<{ error?: string; recipeId?: string; warning?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
@@ -244,7 +251,14 @@ export async function importRecipeFromPhotoAction(
     }));
 
   if (ingredientRows.length > 0) {
-    await supabase.from("recipe_ingredients").insert(ingredientRows);
+    // A recipe with no ingredients is not a recipe. Report it rather than hand
+    // back a recipeId for a shell the user will only discover when they open it.
+    const { error: ingErr } = await supabase
+      .from("recipe_ingredients")
+      .insert(ingredientRows);
+    if (ingErr) {
+      return { recipeId: newRecipe.id, warning: "Recipe saved, but its ingredients could not be." };
+    }
   }
 
   revalidatePath("/meal-plans/recipes");
@@ -445,7 +459,7 @@ async function runPlanGeneration(
   weekOf: string,
   userId: string,
   deletePlanId?: string
-): Promise<{ error: string; planId?: undefined } | { planId: string; error?: undefined }> {
+): Promise<{ error: string; planId?: undefined } | { planId: string; error?: undefined; warning?: string }> {
   // Load family settings (default_serves) and recipes in parallel
   const [{ data: familyData }, { data: recipesRaw }] = await Promise.all([
     supabase
@@ -525,9 +539,15 @@ async function runPlanGeneration(
     return { error: result.error?.message ?? "Meal plan generation failed" };
   }
 
-  // Sonnet succeeded — now it's safe to delete the old plan (CASCADE clears entries)
+  // Sonnet succeeded — now it's safe to delete the old plan (CASCADE clears entries).
+  // If the delete fails and we insert anyway, the week ends up with two plans and
+  // the page shows whichever it reads first.
   if (deletePlanId) {
-    await supabase.from("meal_plans").delete().eq("id", deletePlanId);
+    const { error: deleteErr } = await supabase
+      .from("meal_plans")
+      .delete()
+      .eq("id", deletePlanId);
+    if (deleteErr) return { error: "Could not replace the existing plan for that week." };
   }
 
   const plan = result.data!;
@@ -551,7 +571,24 @@ async function runPlanGeneration(
   }));
 
   if (entryRows.length > 0) {
-    await supabase.from("meal_plan_entries").insert(entryRows);
+    // These rows ARE the meal plan. Losing them leaves an empty week wearing a
+    // plan's name, which is exactly what "0 of 1 meals planned" looked like.
+    const { error: entryErr } = await supabase
+      .from("meal_plan_entries")
+      .insert(entryRows);
+    if (entryErr) {
+      // Roll the empty plan back so the week is not left holding a shell. If
+      // even the rollback fails, say so — "nothing was changed" would be false.
+      const { error: rollbackErr } = await supabase
+        .from("meal_plans")
+        .delete()
+        .eq("id", mealPlan.id);
+      return {
+        error: rollbackErr
+          ? "Could not save the meals for that week, and an empty plan was left behind. Try generating again."
+          : "Could not save the meals for that week. Nothing was changed.",
+      };
+    }
   }
 
   // Resolve suggestedStore names to UUIDs (fixes silent store-drop bug)
@@ -569,6 +606,7 @@ async function runPlanGeneration(
     (g) => (g.quantityNeeded ?? 0) > 0 || g.quantityNeeded === null
   );
 
+  const droppedDelta: string[] = [];
   for (const g of filteredDelta) {
     const resolvedStoreId = g.suggestedStore
       ? (storeByName[g.suggestedStore.toLowerCase()] ?? null)
@@ -585,8 +623,9 @@ async function runPlanGeneration(
         createIfMissing: true,
       });
     } catch {
-      // Fallback: direct insert so we never silently drop grocery delta items
-      await supabase.from("grocery_items").insert({
+      // Fallback: direct insert so we never silently drop grocery delta items —
+      // a promise that only held while nobody read this insert's error.
+      const { error: deltaErr } = await supabase.from("grocery_items").insert({
         family_id: familyId,
         name: g.quantityNeeded !== null && g.unit
           ? `${g.name} (${g.quantityNeeded} ${g.unit})`
@@ -596,12 +635,19 @@ async function runPlanGeneration(
           : null,
         in_cart: false,
       });
+      if (deltaErr) droppedDelta.push(g.name);
     }
   }
 
   revalidatePath("/meal-plans");
-  revalidatePath("/meal-plans");
-  return { planId: mealPlan.id };
+  revalidatePath("/grocery");
+  return {
+    planId: mealPlan.id,
+    warning:
+      droppedDelta.length > 0
+        ? `Plan saved, but these didn't reach your grocery list: ${droppedDelta.join(", ")}.`
+        : undefined,
+  };
 }
 
 // ── Manual recipe entry ───────────────────────────────────────────────────────
@@ -625,7 +671,7 @@ export async function addRecipeAction(
     tags?: string;
     instructions?: string;
   }
-): Promise<{ error?: string; recipeId?: string }> {
+): Promise<{ error?: string; recipeId?: string; warning?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
@@ -660,6 +706,7 @@ export async function addRecipeAction(
   if (recipeErr || !newRecipe) return { error: "Failed to save recipe" };
 
   const { resolveIngredient } = await import("@/lib/grocery/resolve-ingredient");
+  const droppedIngredients: string[] = [];
   for (const ing of ingredients) {
     if (!ing.name.trim()) continue;
 
@@ -676,17 +723,24 @@ export async function addRecipeAction(
       ? resolved.descriptors.join(", ")
       : (ing.notes?.trim() || null);
 
-    await supabase.from("recipe_ingredients").insert({
+    const { error: rowErr } = await supabase.from("recipe_ingredients").insert({
       recipe_id: newRecipe.id,
       ingredient_id: resolved.ingredientId,
       amount: ing.qty,
       unit: ing.unit?.trim() || null,
       notes: descriptorNotes,
     });
+    if (rowErr) droppedIngredients.push(ing.name);
   }
 
   revalidatePath("/meal-plans/recipes");
-  return { recipeId: newRecipe.id };
+  return {
+    recipeId: newRecipe.id,
+    warning:
+      droppedIngredients.length > 0
+        ? `Recipe saved without these ingredients: ${droppedIngredients.join(", ")}.`
+        : undefined,
+  };
 }
 
 export async function swapMealEntryAction(entryId: string, newRecipeId: string): Promise<{ error?: string }> {
