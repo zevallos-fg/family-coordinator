@@ -66,3 +66,20 @@ Each has a SKIP-REASON comment in the test file.
 ## Future migration path
 - **Supabase / Postgres**: when Google Sheets limits bind (~5M cells). Schema is designed for relational migration. Apps Script `weeklyBackup()` provides JSON snapshot for migration. All IDs are UUIDs.
 - **Obsidian integration**: for long-form/narrative content (family memory, decision log). Explicitly a separate system — not a v20 concern.
+
+## Auth / onboarding
+
+- **Onboarding has no sign-out — a wrong-account login strands the user.** `app/onboarding/page.tsx`
+  redirects to `/login` when there is no user and to `/dashboard` when a membership exists, so anyone
+  signed in *without* a family lands on "create a household" with no way out. Sign-out is only rendered
+  by `components/nav/TopNav.tsx:134` and `components/nav/MobileNav.tsx:74`, both of which live in the
+  `(app)` route group; `/onboarding` sits outside that group and so renders no nav at all. The
+  `POST /api/auth/signout` route exists and works — nothing on the page links to it.
+
+  Consequence: signing in with the wrong email (a personal address instead of the family one, or a typo
+  that created a fresh auth user) offers exactly one action — create a household. One wrong tap and the
+  account owns an orphan family that nobody else is a member of, and the only route out is clearing
+  cookies or an admin deleting the row.
+
+  Fix: render a sign-out control on `/onboarding` — a form posting to `/api/auth/signout`, plus the
+  signed-in email so the mistake is visible before the tap. Cheap; no schema change.
