@@ -96,11 +96,66 @@ async function ensureMembership(admin: SupabaseClient, familyId: string, userId:
   if (error) throw error;
 }
 
+/**
+ * Is the thing answering on this URL the build we just made?
+ *
+ * A stale `next start` left listening on 3000 answers every health check
+ * perfectly — `curl /login` returns 200 — while serving code from an hour ago.
+ * `reuseExistingServer` then hands the suite to it without a word. That cost a
+ * round of wrong conclusions: a fix "didn't work", then a change "broke a test",
+ * and both were the squatter.
+ *
+ * Next serves its static assets under a path containing the build id, so asking
+ * for one is a question only the right build can answer. Local URLs only: a run
+ * pointed at a deployed preview has no local build to compare against.
+ */
+async function assertServerIsOurBuild(baseURL: string): Promise<void> {
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(baseURL);
+  if (!isLocal) return;
+
+  const buildIdPath = path.join(process.cwd(), ".next", "BUILD_ID");
+  if (!fs.existsSync(buildIdPath)) return; // `next dev`, which has no build id
+
+  const buildId = fs.readFileSync(buildIdPath, "utf8").trim();
+  const probe = `${baseURL.replace(/\/$/, "")}/_next/static/${buildId}/_buildManifest.js`;
+
+  let status: number;
+  try {
+    status = (await fetch(probe)).status;
+  } catch (err) {
+    throw new Error(
+      `Could not reach ${baseURL} to check which build it is serving: ${String(err)}`
+    );
+  }
+
+  if (status !== 200) {
+    throw new Error(
+      [
+        `The server on ${baseURL} is NOT serving the build in .next.`,
+        ``,
+        `  expected build id : ${buildId}`,
+        `  probe             : ${probe} -> ${status}`,
+        ``,
+        `Almost certainly a previous \`next start\` still holding the port. It will`,
+        `answer every request and pass every health check while serving old code,`,
+        `so the results of this run would mean nothing. Kill it and rebuild:`,
+        ``,
+        `  PowerShell:  Get-NetTCPConnection -LocalPort 3000 -State Listen |`,
+        `               ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`,
+        ``,
+      ].join("\n")
+    );
+  }
+}
+
 export default async function globalSetup(config: FullConfig) {
   const baseURL =
     config.projects[0]?.use?.baseURL ??
     process.env.PLAYWRIGHT_BASE_URL ??
     "http://localhost:3000";
+
+  // Before anything else: prove the server under test is the one we built.
+  await assertServerIsOurBuild(baseURL);
 
   const admin = adminClient();
 
