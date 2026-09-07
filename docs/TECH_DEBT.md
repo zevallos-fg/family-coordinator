@@ -134,15 +134,29 @@ Each has a SKIP-REASON comment in the test file.
   (`--workers=8` against a CI database) and is written up in `docs/CI-DATABASE-SCOPE.md` §5.
 
 - **A vendor key was rotated out from under us and nothing noticed for 141 days.**
-  On 2026-04-20 a vendor security incident required rotating all Anthropic API keys. Family
-  Coordinator was not on the list of things to update, so the Worker went on presenting a key that
-  had been revoked underneath it. Every skill call from **2026-04-19 to 2026-09-06** failed.
 
-  It was invisible because the Worker returned **HTTP 200 wrapping Anthropic's error body**. That is
-  the whole mechanism: `response.ok` was true, `usage.input_tokens ?? 0` read `0` off an error
-  payload, and a clean zero-token row landed in `api_usage` with `error_message` never set. The UI
-  showed nothing, which is indistinguishable from nobody having used the feature. 52 of the 81 rows
-  in `api_usage` are that failure.
+  Here is the whole month in two strings. Both are `api_usage.error_message`, both describe the same
+  broken key, and they are eight hours apart on 2026-09-07:
+
+  ```
+  upstream returned no completion (0 input tokens): API key is invalid.
+  anthropic upstream error 401: API key is invalid.
+  ```
+
+  The first is a failure **deduced from an empty success**. The Worker returned HTTP 200 wrapping
+  Anthropic's error body, so `response.ok` was true and the only clue was that a call which claimed
+  to succeed had somehow used zero tokens. The second is a failure that **arrived as one**.
+
+  Everything else here follows from that difference. If a broken thing answers 200, the only
+  detector you can build is "this success looks wrong", and nobody builds those. 52 of the 81 rows in
+  `api_usage` are the first kind.
+
+  **What happened:** on 2026-04-20 a vendor security incident required rotating all Anthropic API
+  keys. Family Coordinator was not on the list of things to update, so the Worker went on presenting
+  a key that had been revoked underneath it. Every skill call from **2026-04-19 to 2026-09-06**
+  failed. `usage.input_tokens ?? 0` read `0` off an error payload and a clean zero-token row landed
+  in `api_usage` with `error_message` never set. The UI showed nothing — indistinguishable from
+  nobody having used the feature.
 
   The loudness fixes are in (`skills/_lib/runner.test.ts` pins them, and Gate D re-proved them
   against the deployed Worker on 2026-09-07). What is *not* fixed is the thing that let it happen:
