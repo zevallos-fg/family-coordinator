@@ -6,6 +6,7 @@ import { withSkillContext } from "@/lib/skill-action";
 import * as recipeImporter from "@/skills/family-recipe-importer";
 import * as mealPlanner from "@/skills/family-meal-planner";
 import { addGroceryItem } from "@/lib/grocery/dedup";
+import { resolveRecipeIngredientIds } from "@/lib/recipes/ingredients";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,12 +61,19 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
   }
 
   // Check for duplicate
-  const { data: existing } = await supabase
+  // Read the error: this check is the only thing standing between a re-import and
+  // paying the model for a recipe already in the library. A failed read used to
+  // mean "no duplicate", so a blink of the database bought it twice and left two
+  // rows behind.
+  const { data: existing, error: duplicateError } = await supabase
     .from("recipes")
     .select("id")
     .eq("family_id", familyId)
     .eq("source_url", url)
     .maybeSingle();
+  if (duplicateError) {
+    return { error: "Couldn't check whether you already have this recipe. Try again." };
+  }
   if (existing) return { recipeId: existing.id };
 
   // Invoke skill
@@ -79,27 +87,14 @@ export async function importRecipeAction(url: string): Promise<{ error?: string;
 
   const recipe = result.data!;
 
-  // Upsert ingredients and build id map
-  const ingredientIds: Record<string, string> = {};
-  for (const ing of recipe.ingredients) {
-    const { data: existing } = await supabase
-      .from("ingredients")
-      .select("id")
-      .eq("family_id", familyId)
-      .eq("canonical_name", ing.canonicalName)
-      .maybeSingle();
-
-    if (existing) {
-      ingredientIds[ing.canonicalName] = existing.id;
-    } else {
-      const { data: inserted } = await supabase
-        .from("ingredients")
-        .insert({ family_id: familyId, canonical_name: ing.canonicalName, name: ing.canonicalName })
-        .select("id")
-        .single();
-      if (inserted) ingredientIds[ing.canonicalName] = inserted.id;
-    }
-  }
+  // All or nothing, and before the recipe row exists: a partial id map used to be
+  // filtered down silently, saving a recipe with fewer ingredients than it has.
+  const resolved = await resolveRecipeIngredientIds(
+    familyId,
+    recipe.ingredients.map((ing) => ing.canonicalName)
+  );
+  if (!resolved.ok) return { error: resolved.error };
+  const ingredientIds = resolved.ids;
 
   // Total time: use cook_time_min for the sum
   const cookTimeMin = recipe.cookTimeMin ?? recipe.totalTimeMin ?? null;
@@ -196,27 +191,14 @@ export async function importRecipeFromPhotoAction(
 
   const recipe = result.data!;
 
-  // Upsert ingredients and build id map (same pattern as importRecipeAction)
-  const ingredientIds: Record<string, string> = {};
-  for (const ing of recipe.ingredients) {
-    const { data: existing } = await supabase
-      .from("ingredients")
-      .select("id")
-      .eq("family_id", familyId)
-      .eq("canonical_name", ing.canonicalName)
-      .maybeSingle();
-
-    if (existing) {
-      ingredientIds[ing.canonicalName] = existing.id;
-    } else {
-      const { data: inserted } = await supabase
-        .from("ingredients")
-        .insert({ family_id: familyId, canonical_name: ing.canonicalName, name: ing.canonicalName })
-        .select("id")
-        .single();
-      if (inserted) ingredientIds[ing.canonicalName] = inserted.id;
-    }
-  }
+  // All or nothing, and before the recipe row exists: a partial id map used to be
+  // filtered down silently, saving a recipe with fewer ingredients than it has.
+  const resolved = await resolveRecipeIngredientIds(
+    familyId,
+    recipe.ingredients.map((ing) => ing.canonicalName)
+  );
+  if (!resolved.ok) return { error: resolved.error };
+  const ingredientIds = resolved.ids;
 
   // Insert recipe with enriched fields — source_url is empty for photo imports
   const { data: newRecipe, error: recipeErr } = await supabase

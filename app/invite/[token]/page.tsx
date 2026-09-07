@@ -37,13 +37,32 @@ export default async function InvitePage({ params }: Props) {
     );
   }
 
-  // Check if user already belongs to this family
-  const { data: existing } = await supabase
+  // Check if user already belongs to this family.
+  //
+  // Third appearance of the same defect. A dropped error here reads as "not a
+  // member", and the next line inserts a membership row — so a blink of the
+  // database gives someone who is already in the household a duplicate
+  // family_members row. Every page picks the first family joined, so the
+  // duplicate is invisible until it isn't.
+  const { data: existing, error: existingError } = await supabase
     .from("family_members")
     .select("family_id")
     .eq("user_id", user.id)
     .eq("family_id", invite.family_id)
     .maybeSingle();
+
+  if (existingError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center px-6">
+        <div className="max-w-sm text-center">
+          <h1 className="text-xl font-semibold">We couldn&apos;t check your invite</h1>
+          <p className="mt-2 text-foreground/60">
+            Nothing has changed. Open the link again in a moment.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   if (!existing) {
     const { error: joinError } = await supabase.from("family_members").insert({

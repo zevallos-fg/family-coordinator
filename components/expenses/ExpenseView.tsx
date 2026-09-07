@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { parseExpenseText, createExpenseManual, confirmAndCreateExpense } from "@/app/(app)/expenses/actions";
@@ -28,7 +28,9 @@ export function ExpenseView({ expenses, total_cents, period, categories }: Expen
   const [addMode, setAddMode] = useState<AddMode>("idle");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [parseText, setParseText] = useState("");
+  // Uncontrolled: the DOM keeps the description typed before hydration, which a
+  // controlled binding would have discarded unrecoverably.
+  const parseTextRef = useRef<HTMLTextAreaElement>(null);
   const [parsedResult, setParsedResult] = useState<{
     expense: ParsedExpense | null;
     reasoning: string;
@@ -39,6 +41,8 @@ export function ExpenseView({ expenses, total_cents, period, categories }: Expen
 
   async function handleParseText(e: React.FormEvent) {
     e.preventDefault();
+    const parseText = parseTextRef.current?.value.trim() ?? "";
+    if (!parseText) return;
     setLoading(true);
     setError(null);
     const result = await parseExpenseText(parseText);
@@ -55,7 +59,7 @@ export function ExpenseView({ expenses, total_cents, period, categories }: Expen
     if (!result.ok) { setError(result.error.userMessage); return; }
     setAddMode("idle");
     setParsedResult(null);
-    setParseText("");
+    if (parseTextRef.current) parseTextRef.current.value = "";
     window.location.reload();
   }
 
@@ -107,15 +111,14 @@ export function ExpenseView({ expenses, total_cents, period, categories }: Expen
         <form onSubmit={handleParseText} className="p-4 border border-stone-200 rounded-xl space-y-3">
           <h3 className="text-sm font-medium text-stone-700">Describe the expense</h3>
           <textarea
-            value={parseText}
-            onChange={(e) => setParseText(e.target.value)}
+            ref={parseTextRef}
             rows={3}
             required
             className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
             placeholder="e.g. spent $45.99 at Publix today..."
           />
           <div className="flex gap-2">
-            <button type="submit" disabled={!parseText.trim()} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">Parse</button>
+            <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">Parse</button>
             <button type="button" onClick={() => setAddMode("idle")} className="px-4 py-2 border border-stone-300 rounded-lg text-sm text-stone-600">Cancel</button>
           </div>
         </form>

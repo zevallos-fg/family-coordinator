@@ -60,7 +60,12 @@ export default function NewReceiptPage() {
         toast.error(result.error ?? "Failed to save receipt");
         return;
       }
-      toast.success("Receipt saved!");
+      if (result.warning) {
+        // Saved, but not entirely. Longer duration because it asks for a decision.
+        toast.warning(result.warning, { duration: 8000 });
+      } else {
+        toast.success("Receipt saved!");
+      }
       router.push(`/receipts/${result.receiptId}`);
     } catch (err) {
       toast.error("Something went wrong. Please try again.");

@@ -21,6 +21,7 @@ export default function BarcodePage() {
     try {
       const result = await lookupBarcodeAction(barcode);
       setLookupResult(result);
+      if (result.warning) toast.warning(result.warning, { duration: 8000 });
       setPhase("result");
     } catch {
       toast.error("Lookup failed. Try again.");

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { createShift } from "@/app/(app)/caregiver/actions";
 
 interface QuickBriefModalProps {
@@ -12,19 +12,6 @@ interface QuickBriefModalProps {
 
 export function QuickBriefModal({ caregivers, kids }: QuickBriefModalProps) {
   const [open, setOpen] = useState(false);
-
-  const [, formAction, pending] = useActionState(
-    async (_: unknown, formData: FormData) => {
-      // Build kid_names from checked kids
-      const checked = kids.filter((k) =>
-        formData.get(`kid_${k.id}`) === "on"
-      );
-      formData.set("kid_names", checked.map((k) => k.name).join(","));
-      await createShift(formData);
-      return null;
-    },
-    null
-  );
 
   const now = new Date();
   const defaultStart = new Date(now);
@@ -57,7 +44,7 @@ export function QuickBriefModal({ caregivers, kids }: QuickBriefModalProps) {
           </button>
         </div>
 
-        <form action={formAction} className="space-y-4">
+        <form action={createShift} className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1" htmlFor="qb_caregiver">
               Caregiver
@@ -82,7 +69,8 @@ export function QuickBriefModal({ caregivers, kids }: QuickBriefModalProps) {
               <label key={k.id} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  name={`kid_${k.id}`}
+                  name="kid_names"
+                  value={k.name}
                   defaultChecked
                   className="rounded"
                 />
@@ -114,9 +102,9 @@ export function QuickBriefModal({ caregivers, kids }: QuickBriefModalProps) {
             </div>
           </div>
 
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? "Creating shift..." : "Create shift & go →"}
-          </Button>
+          <SubmitButton className="w-full" pendingLabel="Creating shift...">
+            Create shift &amp; go →
+          </SubmitButton>
         </form>
       </div>
     </div>
