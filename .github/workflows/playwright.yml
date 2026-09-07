@@ -13,7 +13,12 @@ jobs:
   # the check that has to be trustworthy whether or not a database is reachable
   # from CI, and it gates every pull request and every push.
   #
-  # The 230 unit tests below have never once run in CI.
+  # The 216 unit tests below have never once run in CI.
+  #
+  # `npm run test` also includes tests/smoke.test.ts, which builds a live
+  # Supabase client and asserts database contracts — an integration test that had
+  # been sitting in the unit suite. It cannot run without credentials, so it runs
+  # as `test:contract` in the e2e job instead of quietly failing here.
   checks:
     name: types, lint, unit
     timeout-minutes: 10
@@ -37,7 +42,7 @@ jobs:
         run: npx eslint app components lib skills --max-warnings 99
 
       - name: Unit tests
-        run: npm run test
+        run: npm run test:unit
 
   # ── Is there a database for the e2e suite to talk to? ────────────────────────
   #
@@ -122,6 +127,12 @@ jobs:
         run: npx playwright install --with-deps chromium webkit
       - name: Build
         run: npm run build
+
+      # The database-contract tests, which need a real Supabase to assert
+      # against. Cheap, and they fail fast if a migration has drifted.
+      - name: Contract tests
+        run: npm run test:contract
+
       - name: Run Playwright tests
         run: npm run test:e2e
 
@@ -141,7 +152,7 @@ jobs:
   e2e-skipped:
     name: playwright (skipped)
     runs-on: ubuntu-latest
-    needs: [checks, gate]
+    needs: [gate]
     if: needs.gate.outputs.run_e2e != 'true'
     steps:
       - name: Explain
@@ -158,7 +169,10 @@ jobs:
           This is a deliberate hold, not an oversight. The key bypasses RLS on the
           database that holds real family data, and this repository is public.
 
-          Until a dedicated CI Supabase project exists, the e2e suite runs locally
-          with `npm run test:e2e`, and the `checks` job above — typecheck, lint and
-          the full unit suite — is what gates this pull request.
+          Also not running, for the same reason: `npm run test:contract`, the 14
+          database-contract tests in tests/smoke.test.ts.
+
+          Until a dedicated CI Supabase project exists, both run locally
+          (`npm run test:e2e`, `npm run test:contract`), and the `checks` job —
+          typecheck, lint and 216 unit tests — is what gates this pull request.
           MSG
