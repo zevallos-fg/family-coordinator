@@ -29,15 +29,62 @@ export const TILES: Array<{ type: BabyEventType; label: string; emoji: string }>
   { type: "pump", label: "Pump", emoji: "🫙" },
 ];
 
+export interface ChipGroup {
+  key: string;
+  label: string;
+  options: string[];
+  /**
+   * Whether this group is worth showing at all, given what has been answered so
+   * far. Poo consistency is meaningless on a wet-only change, and offering it
+   * anyway is how a one-tap log turns back into a form.
+   */
+  showIf?: (payload: Record<string, unknown>) => boolean;
+}
+
+const contentsIncludes = (...wanted: string[]) => (payload: Record<string, unknown>) =>
+  wanted.includes(String(payload.contents ?? ""));
+
 /**
  * Detail chips offered *after* an event is logged. Never before — the whole point
  * of a one-touch tile is that a tap costs nothing to make and nothing to correct.
+ *
+ * The shapes come from three years of the family's own export rather than from
+ * what a tracker could theoretically record:
+ *
+ *   diaper   contents + amount + consistency. Consistency was filled 20.9% of the
+ *            time — used when notable, which is exactly right, so it is offered
+ *            and never required.
+ *   sleep    one location chip. Start location was filled 6 times in 1,800 sleeps;
+ *            start condition 0; end condition 0. Building those two pickers would
+ *            be copying dead UI, so they are not here.
+ *   feed     method only. Which side, and for how long, is the nursing screen's
+ *            job now, and a chip cannot express two ordered segments.
  */
-export const DETAIL_CHIPS: Record<BabyEventType, { key: string; options: string[] } | null> = {
-  feed: { key: "side", options: ["left", "right", "bottle"] },
-  diaper: { key: "kind", options: ["wet", "dirty", "both"] },
-  pump: { key: "side", options: ["left", "right", "both"] },
-  sleep: null,
+export const DETAIL_CHIPS: Record<BabyEventType, ChipGroup[]> = {
+  feed: [{ key: "method", label: "Method", options: ["breast", "bottle", "solid"] }],
+  diaper: [
+    { key: "contents", label: "Contents", options: ["pee", "poo", "both", "dry"] },
+    {
+      key: "pee_amount",
+      label: "Pee",
+      options: ["small", "medium", "large"],
+      showIf: contentsIncludes("pee", "both"),
+    },
+    {
+      key: "poo_amount",
+      label: "Poo",
+      options: ["small", "medium", "large"],
+      showIf: contentsIncludes("poo", "both"),
+    },
+    {
+      key: "consistency",
+      label: "Consistency",
+      options: ["loose", "solid", "runny"],
+      showIf: contentsIncludes("poo", "both"),
+    },
+  ],
+  pump: [{ key: "side", label: "Side", options: ["left", "right", "both"] }],
+  sleep: [{ key: "location", label: "Where", options: ["crib", "bassinet", "arms", "stroller", "car"] }],
 };
 
 export const EVENT_LABEL: Record<string, string> = {

@@ -870,6 +870,7 @@ export type Database = {
         Row: {
           city: string | null
           created_at: string
+          day_start_time: string
           default_serves: number
           id: string
           name: string
@@ -878,6 +879,7 @@ export type Database = {
         Insert: {
           city?: string | null
           created_at?: string
+          day_start_time?: string
           default_serves?: number
           id?: string
           name: string
@@ -886,6 +888,7 @@ export type Database = {
         Update: {
           city?: string | null
           created_at?: string
+          day_start_time?: string
           default_serves?: number
           id?: string
           name?: string

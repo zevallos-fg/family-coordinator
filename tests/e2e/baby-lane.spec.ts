@@ -233,3 +233,84 @@ test("a share link reads anonymously, shows its URL once, and dies on revoke", a
   await expect(anonPage.getByText("This link isn't available")).toBeVisible();
   await anon.close();
 });
+
+test("nursing records two ordered segments in one session, and suggests the other side next", async ({
+  page,
+}) => {
+  const { data: kid, error } = await admin
+    .from("kids")
+    .insert({ family_id: familyId, name: KID_NAME, birth_date: "2026-09-01" })
+    .select("id")
+    .single();
+  expect(error).toBeNull();
+
+  await page.goto("/now");
+  await page.getByTestId("baby-open").click();
+
+  // With no history, a first feed has to start somewhere, and the badge says where.
+  await expect(page.getByTestId("nursing-suggested-L")).toBeVisible();
+
+  const left = page.getByTestId("nursing-L");
+  const right = page.getByTestId("nursing-R");
+
+  await right.click();
+  await expect(right).toHaveAttribute("data-running", "true");
+
+  // Starting the other side stops the first in one step: a baby is not on both.
+  await left.click();
+  await expect(left).toHaveAttribute("data-running", "true");
+  await expect(right).toHaveAttribute("data-running", "false");
+
+  await page.getByTestId("nursing-done").click();
+  await expect(page.getByTestId("nursing-done")).toHaveCount(0);
+
+  // One row, not two, and the segments are in the order they happened.
+  const feeds = await admin
+    .from("baby_events")
+    .select("id, kid_id, ended_at, payload")
+    .eq("family_id", familyId)
+    .eq("event_type", "feed");
+  expect(feeds.error).toBeNull();
+  expect(feeds.data).toHaveLength(1);
+
+  const row = feeds.data![0];
+  expect(row.kid_id).toBe(kid!.id);
+  expect(row.ended_at).not.toBeNull();
+
+  const payload = row.payload as {
+    segments?: Array<{ side: string; seconds: number }>;
+    last_side?: string;
+    running?: unknown;
+    method?: string;
+  };
+  expect(payload.method).toBe("breast");
+  expect(payload.segments?.map((s) => s.side)).toEqual(["R", "L"]);
+  // Nothing may be left running on a finished session, or the sheet reopens
+  // with a clock that never stops.
+  expect(payload.running ?? null).toBeNull();
+  expect(payload.last_side).toBe("L");
+
+  // Next session starts on the opposite side to the one that finished last.
+  await page.reload();
+  await page.getByTestId("baby-open").click();
+  await expect(page.getByTestId("nursing-suggested-R")).toBeVisible();
+});
+
+test("a nursing session in progress survives the app closing", async ({ page }) => {
+  const { error } = await admin
+    .from("kids")
+    .insert({ family_id: familyId, name: KID_NAME, birth_date: "2026-09-01" });
+  expect(error).toBeNull();
+
+  await page.goto("/now");
+  await page.getByTestId("baby-open").click();
+  await page.getByTestId("nursing-L").click();
+  await expect(page.getByTestId("nursing-L")).toHaveAttribute("data-running", "true");
+
+  // The clock lives in the row's payload, not in a setInterval that dies with
+  // the tab. A full reload is the closest a test gets to closing the app.
+  await page.reload();
+  await page.getByTestId("baby-open").click();
+  await expect(page.getByTestId("nursing-L")).toHaveAttribute("data-running", "true");
+  await expect(page.getByTestId("nursing-done")).toBeVisible();
+});
