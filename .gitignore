@@ -45,3 +45,5 @@ supabase/.branches/
 
 # Playwright auth fixture (session cookies + test family ids)
 tests/e2e/.auth/
+
+.env.op
