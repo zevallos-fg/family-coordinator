@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { createShift } from "@/app/(app)/caregiver/actions";
 
 interface ShiftFormProps {
@@ -20,14 +20,6 @@ export function ShiftForm({
   defaultKidNames,
   defaultStartAt,
 }: ShiftFormProps) {
-  const [, formAction, pending] = useActionState(
-    async (_: unknown, formData: FormData) => {
-      await createShift(formData);
-      return null;
-    },
-    null
-  );
-
   const now = new Date();
   const defaultStart = defaultStartAt ?? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0);
   const defaultEnd = new Date(defaultStart.getFullYear(), defaultStart.getMonth(), defaultStart.getDate(), defaultStart.getHours() + 8, defaultStart.getMinutes());
@@ -35,7 +27,7 @@ export function ShiftForm({
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={createShift} className="space-y-4">
       <div>
         <label className="block text-sm font-medium mb-1" htmlFor="caregiver_id">
           Caregiver <span className="text-red-500">*</span>
@@ -77,36 +69,29 @@ export function ShiftForm({
             </Link>
           </p>
         ) : (
-          <>
-            <input
-              type="hidden"
-              name="kid_names"
-              id="kid_names_hidden"
-            />
-            <div className="space-y-1">
-              {kids.map((k) => (
-                <label key={k.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    defaultChecked={defaultKidNames?.includes(k.name)}
-                    onChange={(e) => {
-                      const hidden = document.getElementById("kid_names_hidden") as HTMLInputElement;
-                      const current = hidden.value
-                        ? hidden.value.split(",").filter(Boolean)
-                        : [];
-                      if (e.target.checked) {
-                        hidden.value = [...current, k.name].join(",");
-                      } else {
-                        hidden.value = current.filter((n) => n !== k.name).join(",");
-                      }
-                    }}
-                    className="rounded"
-                  />
-                  {k.name}
-                </label>
-              ))}
-            </div>
-          </>
+          // Checkboxes that share a name are how HTML has always sent a
+          // multi-select, and the browser does it with no JavaScript at all.
+          //
+          // This replaces a hidden field that an onChange handler kept in sync.
+          // That handler only ever ran on a *toggle*, so the kids ticked by
+          // `defaultChecked` were never written into it: anyone who accepted the
+          // defaults and pressed Schedule sent an empty kid list, and the shift
+          // was created for nobody. Nothing about that needed hydration to go
+          // wrong — it was wrong on every submit that did not touch a box.
+          <div className="space-y-1">
+            {kids.map((k) => (
+              <label key={k.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="kid_names"
+                  value={k.name}
+                  defaultChecked={defaultKidNames?.includes(k.name)}
+                  className="rounded"
+                />
+                {k.name}
+              </label>
+            ))}
+          </div>
         )}
       </div>
 
@@ -140,9 +125,12 @@ export function ShiftForm({
       </div>
 
       <div className="flex gap-3 pt-2">
-        <Button type="submit" disabled={pending || caregivers.length === 0 || kids.length === 0}>
-          {pending ? "Scheduling..." : "Schedule shift"}
-        </Button>
+        <SubmitButton
+          pendingLabel="Scheduling..."
+          disabled={caregivers.length === 0 || kids.length === 0}
+        >
+          Schedule shift
+        </SubmitButton>
         <Button type="button" variant="outline" onClick={() => history.back()}>
           Cancel
         </Button>

@@ -24,12 +24,15 @@ import { Button } from "@/components/ui/button";
 export function SubmitButton({
   children,
   pendingLabel,
+  disabled,
   ...props
 }: React.ComponentProps<typeof Button> & { pendingLabel?: string }) {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" disabled={pending} {...props}>
+    // `disabled` is merged, not replaced: some forms are also disabled for
+    // reasons of their own (no caregivers yet, no kids yet).
+    <Button type="submit" disabled={pending || disabled} {...props}>
       {pending ? (pendingLabel ?? "Saving…") : children}
     </Button>
   );

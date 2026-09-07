@@ -25,7 +25,11 @@ function descriptorHint(name: string): string | null {
 export function RecipeImportForm() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("url");
-  const [url, setUrl] = useState("");
+  // Uncontrolled: this is the one field of this form that is server-rendered.
+  // Everything under the Manual tab is reached by a click, which cannot happen
+  // before hydration, so those fields are not exposed to this race and stay as
+  // they are rather than being rewritten for a problem they do not have.
+  const urlRef = useRef<HTMLInputElement>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +73,7 @@ export function RecipeImportForm() {
 
   async function handleUrlSubmit(e: React.FormEvent) {
     e.preventDefault(); resetErrors();
-    const trimmed = url.trim();
+    const trimmed = urlRef.current?.value.trim() ?? "";
     if (!trimmed) return;
     try { new URL(trimmed); } catch { setError("Enter a valid URL (e.g. https://allrecipes.com/recipe/...)"); return; }
     setLoading(true);
@@ -150,11 +154,11 @@ export function RecipeImportForm() {
         <form onSubmit={handleUrlSubmit} className="mt-6 space-y-4">
           <div>
             <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-1">Recipe URL</label>
-            <Input id="url" type="url" placeholder="https://www.allrecipes.com/recipe/..." value={url} onChange={(e) => setUrl(e.target.value)} disabled={loading} className="w-full" />
+            <Input id="url" type="url" placeholder="https://www.allrecipes.com/recipe/..." ref={urlRef} required disabled={loading} className="w-full" />
             <p className="mt-1.5 text-xs text-gray-500">Works with most recipe sites. If a site blocks the fetch, use the From Photo tab instead.</p>
           </div>
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>}
-          <Button type="submit" disabled={loading || !url.trim()} className="w-full">
+          <Button type="submit" disabled={loading} className="w-full">
             {loading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin">⏳</span>Importing recipe…</span> : "Import Recipe"}
           </Button>
         </form>

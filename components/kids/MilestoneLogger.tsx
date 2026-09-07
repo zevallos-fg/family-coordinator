@@ -65,10 +65,19 @@ export function MilestoneLogger({ kidId }: MilestoneLoggerProps) {
 
       {stage === "idle" && (
         <form onSubmit={handleAnalyze} className="space-y-3">
+          {/*
+            Uncontrolled on purpose. handleAnalyze already reads this through
+            `new FormData(e.currentTarget)` — the DOM was always the real source
+            here — and `milestoneText` is then overwritten by what the server
+            sends back for the review step. The controlled binding bought nothing
+            and cost the words typed before hydration, which is a description of
+            a child's first sentence.
+
+            `required` keeps an empty submit from going anywhere, and the browser
+            enforces it whether or not JavaScript has arrived.
+          */}
           <textarea
             name="milestone_text"
-            value={milestoneText}
-            onChange={(e) => setMilestoneText(e.target.value)}
             rows={3}
             required
             className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
@@ -76,7 +85,6 @@ export function MilestoneLogger({ kidId }: MilestoneLoggerProps) {
           />
           <button
             type="submit"
-            disabled={!milestoneText.trim()}
             className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
           >
             Analyze Milestone

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { updateKidFromObservation } from "@/app/(app)/caregiver/actions";
 
@@ -9,20 +9,35 @@ interface KidUpdateFormProps {
   kidName: string;
 }
 
+/**
+ * The textarea is uncontrolled and the button is never disabled for being empty,
+ * for the reason spelled out in RecapForm and AddItemForm: a controlled field
+ * discards anything typed before hydration, and React seeds its input tracker
+ * from the DOM at that moment, so re-typing the same words fires no change event
+ * and cannot recover them.
+ *
+ * What is at stake here is a sentence someone wrote about their child. Emptiness
+ * is checked on submit, where it can say something useful.
+ */
 export function KidUpdateForm({ kidId, kidName }: KidUpdateFormProps) {
-  const [text, setText] = useState("");
+  const textRef = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!text.trim()) return;
+    const text = textRef.current?.value.trim() ?? "";
+    if (!text) {
+      setStatus("error");
+      setMessage(`Write a line about ${kidName} first.`);
+      return;
+    }
     setStatus("loading");
-    const result = await updateKidFromObservation(kidId, text.trim());
+    const result = await updateKidFromObservation(kidId, text);
     if (result.ok) {
       setStatus("done");
       setMessage("Profile updated.");
-      setText("");
+      if (textRef.current) textRef.current.value = "";
     } else {
       setStatus("error");
       setMessage(result.error ?? "Something went wrong");
@@ -37,10 +52,12 @@ export function KidUpdateForm({ kidId, kidName }: KidUpdateFormProps) {
         </label>
         <textarea
           id="observation"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            if (status !== "idle") setStatus("idle");
+          ref={textRef}
+          onChange={() => {
+            if (status !== "idle") {
+              setStatus("idle");
+              setMessage("");
+            }
           }}
           rows={3}
           placeholder={`e.g. "${kidName} is really into dinosaurs this week" or "she hates broccoli now"`}
@@ -54,7 +71,7 @@ export function KidUpdateForm({ kidId, kidName }: KidUpdateFormProps) {
         </p>
       )}
 
-      <Button type="submit" disabled={status === "loading" || !text.trim()}>
+      <Button type="submit" disabled={status === "loading"}>
         {status === "loading" ? "Updating..." : "Update profile"}
       </Button>
     </form>

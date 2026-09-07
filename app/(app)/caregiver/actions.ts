@@ -113,6 +113,19 @@ const toArray = (raw: FormDataEntryValue | null) =>
         .filter(Boolean)
     : [];
 
+/**
+ * Names from a set of checkboxes that all share one name, which is how HTML has
+ * always sent a multi-select and needs no JavaScript to do it.
+ *
+ * Falls back to the old comma-joined single value so nothing that still sends
+ * that shape breaks.
+ */
+function namesFromForm(formData: FormData, field: string): string[] {
+  const all = formData.getAll(field).map(String).map((v) => v.trim()).filter(Boolean);
+  if (all.length > 1) return all;
+  return toArray(all[0] ?? null);
+}
+
 export async function createKid(formData: FormData) {
   const { supabase, familyId } = await getAuthedFamily();
 
@@ -210,7 +223,7 @@ export async function deleteKid(id: string) {
 export async function createShift(formData: FormData) {
   const { supabase, familyId } = await getAuthedFamily();
 
-  const kidNames = toArray(formData.get("kid_names"));
+  const kidNames = namesFromForm(formData, "kid_names");
 
   const { data: shift, error } = await supabase
     .from("caregiver_shifts")
