@@ -6,7 +6,11 @@ export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // No retries, in CI or out of it. grocery-manual-add-merge was a real
+  // hydration race that passed on a second attempt, and a retry that turns a
+  // real race green is the same failure as everything else fixed this week: a
+  // control reporting healthy because it stopped looking.
+  retries: 0,
   reporter: process.env.CI ? [["html"], ["github"]] : [["list"]],
   globalSetup: "./tests/e2e/global-setup.ts",
   use: {

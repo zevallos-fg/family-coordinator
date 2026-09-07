@@ -19,13 +19,17 @@ test.describe("Grocery manual add merge indicator", () => {
     await page.goto("/grocery");
     const addInput = page.getByPlaceholder(/gallons of milk|bananas|eggs/i);
     const addButton = page.getByRole("button", { name: /^(Add|Add & merge)/i });
-    // KNOWN FAILING (webkit, under load) — app defect, not a selector problem.
-    // If the fill lands before React hydrates, the text is visible but unowned:
-    // `text` state stays "" and the button is disabled forever. React seeds its
-    // input-value tracker from the DOM at hydration, so re-entering the SAME
-    // string raises no change event and cannot recover it; only editing to a
-    // different value does. A real user typing fast on a slow connection hits
-    // this. Do not "fix" this by clearing and refilling — that hides the bug.
+    // This was the witness for a real defect, and it is now the guard against
+    // its return. If the fill lands before React hydrates, a controlled input
+    // leaves the text visible but unowned: `text` state stays "" and the button
+    // is disabled forever. React seeds its input-value tracker from the DOM at
+    // hydration, so re-entering the SAME string raises no change event and
+    // cannot recover it; only editing to a different value does.
+    //
+    // AddItemForm's input is uncontrolled and adopts the DOM value on mount, so
+    // this passes whenever the fill lands. If it ever fails again, that is the
+    // race returning — do not clear and refill to get past it, and do not add a
+    // retry. Both hide it.
     await addInput.fill("watermelon");
     await expect(addButton).not.toBeDisabled();
   });

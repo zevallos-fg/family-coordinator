@@ -37,8 +37,25 @@ function readLastStore(): string | null {
 }
 const noRememberedStore = () => null;
 
+/**
+ * The text input is UNCONTROLLED, for the same reason the caregiver recap textarea
+ * is: a controlled input is unusable until the page hydrates, and anything typed
+ * before then is silently discarded.
+ *
+ * The discarding is the part worth spelling out, because it does not recover on
+ * its own. React seeds its input-value tracker from the DOM during hydration, so
+ * once the DOM holds "watermelon" and `text` state holds "", re-typing the *same*
+ * string fires no change event — there is no change. The word sits there, visibly
+ * typed, with the Add button disabled forever, and the only way out is to edit it
+ * to something else or reload. A phone on a slow connection hits this routinely;
+ * it is why grocery-manual-add-merge failed on WebKit.
+ *
+ * So the DOM owns the text. React mirrors it for the merge preview and the button
+ * label, and adopts whatever was typed before hydration on mount.
+ */
 export function AddItemForm({ familyId, stores }: AddItemFormProps) {
   const router = useRouter();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   // undefined = the user hasn't picked this session, so fall back to what we remember.
   // null = they explicitly chose No store.
@@ -66,6 +83,14 @@ export function AddItemForm({ familyId, stores }: AddItemFormProps) {
   const [, startTransition] = useTransition();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Adopt anything typed before hydration. Runs once, and only does something
+  // when the DOM already holds text React never saw — which is exactly the case
+  // that used to strand the Add button in its disabled state.
+  useEffect(() => {
+    const typedBeforeHydration = inputRef.current?.value ?? "";
+    if (typedBeforeHydration) setText(typedBeforeHydration);
+  }, []);
+
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
@@ -82,12 +107,14 @@ export function AddItemForm({ familyId, stores }: AddItemFormProps) {
   }, [text, familyId]);
 
   async function submit() {
-    if (!text.trim()) return;
+    // The DOM owns the text, so read it there rather than from the mirror.
+    const current = (inputRef.current?.value ?? text).trim();
+    if (!current) return;
     setStatus("parsing");
     setError(null);
 
     const fd = new FormData();
-    fd.append("text", text);
+    fd.append("text", current);
     // A store named in the text ("at Costco") still wins on the server; this only fills
     // the gap when the text doesn't say.
     if (storeId) fd.append("defaultStoreId", storeId);
@@ -102,7 +129,7 @@ export function AddItemForm({ familyId, stores }: AddItemFormProps) {
     }
 
     const action = res.action;
-    const name = res.name ?? text;
+    const name = res.name ?? current;
     if (action === "merged") {
       toast.success(`Merged into ${name}`);
     } else if (action === "review_required") {
@@ -111,6 +138,8 @@ export function AddItemForm({ familyId, stores }: AddItemFormProps) {
       toast.success(`Added ${name}`);
     }
 
+    // Uncontrolled, so clearing state is not enough — clear the field itself.
+    if (inputRef.current) inputRef.current.value = "";
     setText("");
     setStatus("done");
     startTransition(() => router.refresh());
@@ -134,7 +163,8 @@ export function AddItemForm({ familyId, stores }: AddItemFormProps) {
       <div className="flex gap-2">
         <input
           type="text"
-          value={text}
+          ref={inputRef}
+          defaultValue=""
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="e.g. 2 gallons of milk at Costco, bananas, eggs"
