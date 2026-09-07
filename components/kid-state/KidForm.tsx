@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { Input } from "@/components/ui/input";
 
 interface KidFormProps {
@@ -17,16 +17,8 @@ interface KidFormProps {
 }
 
 export function KidForm({ action, defaultValues, submitLabel = "Save" }: KidFormProps) {
-  const [, formAction, pending] = useActionState(
-    async (_: unknown, formData: FormData) => {
-      await action(formData);
-      return null;
-    },
-    null
-  );
-
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={action} className="space-y-4">
       <div>
         <label className="block text-sm font-medium mb-1" htmlFor="name">
           Name <span className="text-red-500">*</span>
@@ -93,9 +85,7 @@ export function KidForm({ action, defaultValues, submitLabel = "Save" }: KidForm
       </div>
 
       <div className="flex gap-3 pt-2">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving..." : submitLabel}
-        </Button>
+        <SubmitButton pendingLabel="Saving...">{submitLabel}</SubmitButton>
         <Button type="button" variant="outline" onClick={() => history.back()}>
           Cancel
         </Button>
