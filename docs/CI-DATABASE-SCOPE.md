@@ -7,6 +7,35 @@ being the reason not to do this.
 
 ---
 
+> **Update, later the same day — the blocker in §2 is gone.**
+>
+> This document's central argument was that a CI database could not be built
+> because the repository could not rebuild production: three ledger entries with
+> no file, ten files collapsing to four versions, and — found while writing §2 —
+> no genesis migration at all, so replay from empty failed on the first
+> statement.
+>
+> That is now repaired. `supabase/migrations/` holds one baseline generated from
+> production, replayed into both an empty Postgres 17 and an empty Supabase
+> project, and diffed byte-identical against production both times. See
+> `docs/MIGRATION-REPAIR.md`. Sections 2, 2a, 2b, 2c and "What fixing it looks
+> like" describe a state that no longer exists; they are kept because they
+> explain how it happened.
+>
+> §3's recommendation — a ledger/files drift check — is also built and wired into
+> the `checks` job. It is what would have caught `baby_lane_trunk` the day it was
+> applied.
+>
+> **The recommendation itself does not change.** It never rested on the broken
+> history; that was the prerequisite, not the reason. §6 still stands: the fixture
+> family in production is isolated, serialized, and has never touched Zevallos
+> data, and the one genuinely load-bearing benefit of a separate project is
+> removing `SUPABASE_SERVICE_ROLE_KEY` from the decision. What has changed is that
+> building it is now a straightforward `supabase db push` at $10.00/month rather
+> than a repair project of unknown size.
+
+---
+
 ## The short version
 
 **Recommendation: do not build it yet, and possibly not at all.**

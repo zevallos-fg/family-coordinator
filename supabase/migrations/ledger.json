@@ -1,0 +1,17 @@
+{
+  "project_ref": "pmficrajnyeuworrqytn",
+  "note": [
+    "The versions production's supabase_migrations.schema_migrations table is expected to hold.",
+    "This exists so the offline drift check has something to compare the files against without",
+    "needing a credential, and so a stale ledger is a diff in a pull request rather than a",
+    "discovery months later. Update it in the same commit as any new migration.",
+    "It is a snapshot, not the source of truth: only `npm run migrations:verify:live` can tell",
+    "you whether production agrees."
+  ],
+  "migrations": [
+    {
+      "version": "20260907150000",
+      "name": "baseline_production_schema"
+    }
+  ]
+}
