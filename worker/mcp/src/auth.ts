@@ -91,6 +91,8 @@ interface TokenResponse {
   error?: string;
   error_description?: string;
   msg?: string;
+  /** What the gateway returns for a bad apikey, e.g. "Invalid API key". */
+  message?: string;
 }
 
 /**
@@ -134,7 +136,13 @@ export async function getAccessToken(userId: string, env: Env): Promise<string> 
   if (!res.ok || !body.access_token || !body.refresh_token) {
     // A revoked or superseded refresh token lands here. Say so plainly: a silent
     // fall-through would look to the model like an account with no data.
-    const detail = body.error_description ?? body.error ?? body.msg ?? `status ${res.status}`;
+    // `message` is in this list because of the case that hid itself: a wrong
+    // SUPABASE_ANON_KEY makes the gateway answer 401 {"message":"Invalid API
+    // key"}, which has none of the other three fields — so the detail collapsed
+    // to "status 401" and read exactly like a revoked refresh token. The cause
+    // was a bad secret and the message pointed at the user's session.
+    const detail =
+      body.error_description ?? body.error ?? body.msg ?? body.message ?? `status ${res.status}`;
     throw new AuthError(
       `could not exchange the stored refresh token (${detail}). If the user was ` +
         `signed out, the connector is revoked and must be re-linked.`

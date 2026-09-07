@@ -8,6 +8,14 @@ name = "familyco-mcp"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 
+# Pinned because the deploy token is scoped to Workers Scripts:Edit and Workers
+# KV Storage:Edit and nothing else. Without an account here, wrangler first calls
+# /memberships to work out which account to use, which needs User Details:Read —
+# and fails with "Authentication error [code: 10000]" that reads like a Workers
+# permission problem and is not one. An account id is an identifier, not a
+# credential; the token that can act on it is not in this repo.
+account_id = "7093d01612de7f4615fa5bc9c49a8fb6"
+
 [vars]
 # Non-secret. The one project this Worker may talk to; enforced in code, and the
 # only Supabase origin any request is allowed to reach.
@@ -35,4 +43,4 @@ SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
 # and Fernando revokes it by signing her out.
 [[kv_namespaces]]
 binding = "TOKENS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "33bd92117073451bae7901b3dd726957"

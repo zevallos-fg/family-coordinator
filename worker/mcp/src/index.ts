@@ -129,7 +129,7 @@ export default {
           // refresh token. This worker holds no signing secret and cannot mint one.
           const accessToken = await getAccessToken(userId, env);
           const db = new UserClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, accessToken);
-          const familyId = await db.familyId();
+          const familyId = await db.familyId(userId);
           const result = await handler(db, userId, familyId, args);
           return rpcResult(body.id, toolContent(result));
         } catch (err) {

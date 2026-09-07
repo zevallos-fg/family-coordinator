@@ -95,13 +95,25 @@ export class UserClient {
    * so a request cannot aim a write at a family the user is not in. RLS would
    * refuse it anyway — this makes the refusal unnecessary rather than relied upon.
    */
-  async familyId(): Promise<string> {
+  async familyId(userId: string): Promise<string> {
+    // Filtered to this user's OWN membership rows, and de-duplicated by family.
+    //
+    // Both parts matter. An unfiltered `select=family_id` returns every member
+    // row the caller can see, because RLS lets a member read the whole family's
+    // membership — so a two-person household came back as two rows and the guard
+    // below fired "belongs to more than one family" on a family count of one.
+    // Fernando and Yenny were both locked out by it while the single-member E2E
+    // fixture family passed, which is why no test caught it.
+    //
+    // userId comes from the connector token map, never from the request body, so
+    // this narrows the query without letting a caller choose whose family to read.
     const rows = await this.select<{ family_id: string }>(
       "family_members",
-      "select=family_id&limit=2"
+      `select=family_id&user_id=eq.${encodeURIComponent(userId)}`
     );
-    if (!rows.length) throw new SupabaseError("this user belongs to no family", 403);
-    if (rows.length > 1) {
+    const families = [...new Set(rows.map((r) => r.family_id))];
+    if (!families.length) throw new SupabaseError("this user belongs to no family", 403);
+    if (families.length > 1) {
       // Refuse rather than guess. Picking the first would silently file a write
       // against whichever family happened to sort first, and the row is append-only.
       throw new SupabaseError(
@@ -110,7 +122,7 @@ export class UserClient {
         409
       );
     }
-    return rows[0].family_id;
+    return families[0];
   }
 }
 
