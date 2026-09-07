@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { CAREGIVER_ROLES, CAREGIVER_ROLE_LABEL } from "@/lib/db/enums";
 
 // Was a local list that included "au_pair" — a value caregivers.role has never
@@ -22,21 +22,30 @@ interface CaregiverFormProps {
   submitLabel?: string;
 }
 
+/**
+ * The Server Action is handed to <form action> directly.
+ *
+ * It used to be wrapped in useActionState, purely to get a `pending` flag for
+ * the button, and that wrapper cost the form its progressive enhancement. A
+ * server action passed straight to <form action> is posted by the browser
+ * whether or not JavaScript has arrived; an inline client reducer gives the
+ * browser no endpoint, so a submit landing before hydration did nothing — no
+ * navigation, no error, no sign anything had been pressed.
+ *
+ * That is why write-paths.spec's caregiver test fails under parallel load and
+ * passes alone: the click beat hydration. A person on a slow phone tapping
+ * "Add caregiver" the moment it appears gets the same nothing.
+ *
+ * The pending state now comes from useFormStatus inside SubmitButton, which
+ * reads the parent form without owning its submission.
+ */
 export function CaregiverForm({
   action,
   defaultValues,
   submitLabel = "Save caregiver",
 }: CaregiverFormProps) {
-  const [, formAction, pending] = useActionState(
-    async (_: unknown, formData: FormData) => {
-      await action(formData);
-      return null;
-    },
-    null
-  );
-
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={action} className="space-y-4">
       <div>
         <label className="block text-sm font-medium mb-1" htmlFor="name">
           Name <span className="text-red-500">*</span>
@@ -110,9 +119,7 @@ export function CaregiverForm({
       </div>
 
       <div className="flex gap-3 pt-2">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving..." : submitLabel}
-        </Button>
+        <SubmitButton pendingLabel="Saving...">{submitLabel}</SubmitButton>
         <Button type="button" variant="outline" onClick={() => history.back()}>
           Cancel
         </Button>
