@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { lookupFamily } from "@/lib/auth/current-family";
 import { withSkillContext } from "@/lib/skill-action";
 import * as recipeImporter from "@/skills/family-recipe-importer";
+import { resolveRecipeIngredientIds } from "@/lib/recipes/ingredients";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -80,31 +81,15 @@ export async function POST(request: Request) {
 
     const recipe = result.data!;
 
-    // Upsert ingredients
-    const ingredientIds: Record<string, string> = {};
-    for (const ing of recipe.ingredients) {
-      const { data: existing } = await supabase
-        .from("ingredients")
-        .select("id")
-        .eq("family_id", familyId)
-        .eq("canonical_name", ing.canonicalName)
-        .maybeSingle();
-
-      if (existing) {
-        ingredientIds[ing.canonicalName] = existing.id;
-      } else {
-        const { data: inserted } = await supabase
-          .from("ingredients")
-          .insert({
-            family_id: familyId,
-            canonical_name: ing.canonicalName,
-            name: ing.canonicalName,
-          })
-          .select("id")
-          .single();
-        if (inserted) ingredientIds[ing.canonicalName] = inserted.id;
-      }
+    // All or nothing, and before the recipe row exists.
+    const resolved = await resolveRecipeIngredientIds(
+      familyId,
+      recipe.ingredients.map((ing) => ing.canonicalName)
+    );
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: 503 });
     }
+    const ingredientIds = resolved.ids;
 
     // Insert recipe
     const { data: newRecipe, error: recipeErr } = await supabase

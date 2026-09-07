@@ -81,6 +81,8 @@ export interface SaveReceiptResult {
   ok: boolean;
   receiptId?: string;
   error?: string;
+  /** Saved, but not entirely. Shown next to the success, not instead of it. */
+  warning?: string;
 }
 
 export async function saveReceiptAction(
@@ -123,13 +125,24 @@ export async function saveReceiptAction(
   // Insert receipt row
   let storeId = input.storeId;
 
-  // If storeName provided but no match, create the store
+  // If storeName provided but no match, create the store.
+  //
+  // Not fatal, deliberately: the receipt and its line items are the record, and
+  // the store is a label on them. Refusing the whole save because a store row
+  // could not be created would lose the photo the user just took. But it is not
+  // silent either — `storeId = newStore?.id ?? null` used to file the receipt
+  // under no store at all and say nothing, which reads later as a receipt that
+  // was never assigned rather than one that failed to be.
+  let storeWarning: string | null = null;
   if (!storeId && input.storeName) {
-    const { data: newStore } = await supabase
+    const { data: newStore, error: storeError } = await supabase
       .from("stores")
       .insert({ family_id: familyId, name: input.storeName })
       .select("id")
       .single();
+    if (storeError || !newStore) {
+      storeWarning = `Saved, but "${input.storeName}" couldn't be added as a store, so this receipt has no store on it.`;
+    }
     storeId = newStore?.id ?? null;
   }
 
@@ -152,6 +165,7 @@ export async function saveReceiptAction(
   }
 
   // Insert receipt items
+  let itemsWarning: string | null = null;
   if (input.items.length > 0) {
     const itemRows = input.items.map((item) => ({
       receipt_id: receipt.id,
@@ -167,11 +181,20 @@ export async function saveReceiptAction(
 
     if (itemsError) {
       console.error("[saveReceiptAction] items insert failed", itemsError.message);
+      // The line items are what a receipt is for. Logging this to a console
+      // nobody reads and returning plain success meant the user saw "saved",
+      // opened the receipt later, and found a total with nothing under it.
+      itemsWarning =
+        "Saved, but the individual items couldn't be stored — only the total. You may want to re-scan it.";
     }
   }
 
   revalidatePath("/receipts");
-  return { ok: true, receiptId: receipt.id };
+  return {
+    ok: true,
+    receiptId: receipt.id,
+    warning: [storeWarning, itemsWarning].filter(Boolean).join(" ") || undefined,
+  };
 }
 
 export interface AddReceiptToPantryResult {

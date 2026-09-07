@@ -13,7 +13,7 @@ jobs:
   # the check that has to be trustworthy whether or not a database is reachable
   # from CI, and it gates every pull request and every push.
   #
-  # The 216 unit tests below have never once run in CI.
+  # The 220 unit tests below have never once run in CI.
   #
   # `npm run test` also includes tests/smoke.test.ts, which builds a live
   # Supabase client and asserts database contracts — an integration test that had
@@ -34,12 +34,12 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      # A ratchet, not a ceiling. 99 is exactly what main carries today (76 of
+      # A ratchet, not a ceiling. 88 is exactly what this branch carries (65 of
       # them no-floating-supabase-error), so the count can fall and cannot
       # climb. Lower it as they go; at zero the rule becomes "error" and this
       # flag comes out.
       - name: Lint
-        run: npx eslint app components lib skills --max-warnings 99
+        run: npx eslint app components lib skills --max-warnings 88
 
       - name: Unit tests
         run: npm run test:unit
@@ -174,5 +174,5 @@ jobs:
 
           Until a dedicated CI Supabase project exists, both run locally
           (`npm run test:e2e`, `npm run test:contract`), and the `checks` job —
-          typecheck, lint and 216 unit tests — is what gates this pull request.
+          typecheck, lint and 220 unit tests — is what gates this pull request.
           MSG

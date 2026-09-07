@@ -16,6 +16,8 @@ export interface LookupBarcodeResult {
   confidence?: "high" | "medium" | "low";
   note: string | null;
   error?: string;
+  /** The answer is good, but something after it was not. */
+  warning?: string;
 }
 
 export async function lookupBarcodeAction(
@@ -31,13 +33,31 @@ export async function lookupBarcodeAction(
   const familyId = family.familyId;
 
 
-  // Check cache first
-  const { data: cached } = await supabase
+  // Check cache first.
+  //
+  // The error matters here in a way it does not on most reads: a cache miss is
+  // what sends this function to a paid model call. Dropping the error turned
+  // every failed lookup into a miss, so a blink of the database bought an answer
+  // that was already bought and sitting in this table. Rescanning costs the user
+  // a second of camera time; re-answering costs money.
+  const { data: cached, error: cacheError } = await supabase
     .from("barcodes")
     .select("id, product_name, brand")
     .eq("family_id", familyId)
     .eq("upc", barcode)
     .maybeSingle();
+
+  if (cacheError) {
+    return {
+      ok: false,
+      cached: false,
+      productName: null,
+      brand: null,
+      category: null,
+      note: null,
+      error: "Couldn't check what we already know about this barcode. Scan it again in a moment.",
+    };
+  }
 
   if (cached) {
     return {
@@ -68,8 +88,14 @@ export async function lookupBarcodeAction(
 
   const { productName, brand, category, confidence, note } = result.data;
 
-  // Cache the result
-  const { data: newEntry } = await supabase
+  // Cache the result.
+  //
+  // The opposite call to the read above: the model has already been paid for, so
+  // refusing now would throw away an answer we own. What a failure here costs is
+  // the *next* scan of this barcode, and the one after that, for as long as the
+  // write keeps failing. So the answer goes back, and the failure is said out
+  // loud rather than discovered on a bill.
+  const { data: newEntry, error: cacheWriteError } = await supabase
     .from("barcodes")
     .insert({
       family_id: familyId,
@@ -80,6 +106,13 @@ export async function lookupBarcodeAction(
     .select("id")
     .single();
 
+  if (cacheWriteError) {
+    console.error(
+      "[barcode] result not cached, this UPC will be looked up again:",
+      cacheWriteError.message
+    );
+  }
+
   return {
     ok: true,
     cached: false,
@@ -89,6 +122,9 @@ export async function lookupBarcodeAction(
     category,
     confidence,
     note,
+    warning: cacheWriteError
+      ? "Couldn't save this to your barcode list, so scanning it again will look it up again."
+      : undefined,
   };
 }
 
