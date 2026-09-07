@@ -83,3 +83,52 @@ Each has a SKIP-REASON comment in the test file.
 
   Fix: render a sign-out control on `/onboarding` — a form posting to `/api/auth/signout`, plus the
   signed-in email so the mistake is visible before the tap. Cheap; no schema change.
+
+## Process and tooling
+
+- **Merging a stacked PR's parent with `--delete-branch` closes the child, irrecoverably.**
+  GitHub auto-closes any pull request whose base branch is deleted, and a closed PR whose base no
+  longer exists cannot be reopened or retargeted — `reopenPullRequest` fails with *"Could not open
+  the pull request"*, and `updatePullRequest` with *"Cannot change the base branch of a closed pull
+  request"*. The PR number, its review thread, and its comments are gone.
+
+  Hit on 2026-09-07 merging #19 → #20 → #21. #19 was squash-merged with `--delete-branch`; #20 was
+  based on `fix/ci-that-can-see` and closed the instant that branch went. #20 no longer exists.
+
+  Recovery, which is what was done: rebase the child onto `main` with the parent's commits dropped
+  (`git rebase --onto main <parent-tip> <child-branch>`), force-push, and open a **new** PR carrying
+  the old body over, with a comment on the closed one pointing at its replacement. #20 became #22.
+
+  Prevention, in order of preference: retarget the child to `main` *before* merging the parent
+  (`gh pr edit <child> --base main`), which works while the child is still open; or merge the parent
+  without `--delete-branch` and clean up afterwards. Squash-merging a parent also means the child's
+  copies of the parent's commits will not match, so a rebase is needed regardless — the `--onto` form
+  above is the one that does not produce conflicts.
+
+- **Playwright `workers` must stay at 3. Raising it will look exactly like flake.**
+  `playwright.config.ts` pins `workers: 3` and `retries: 0`. The default is half the CPU count, which
+  on a 16-core machine is 8.
+
+  Measured 2026-09-07, full suite, `retries: 0`, against a server whose build id was verified against
+  `.next/BUILD_ID`:
+
+  | workers | result |
+  |---|---|
+  | 8 (default) | 5–8 failures, **a different set on each run** |
+  | 4 | 1 failure |
+  | 3 | 174/174, three consecutive runs |
+
+  Every one of those failures passed in isolation, and the shifting set was the tell: this is a
+  capacity ceiling, not a set of bugs. The system under test is **one `next start` process** talking
+  to **one hosted Supabase** with **one shared fixture family** in it, and none of that scales with
+  the number of cores the test runner happens to have. Eight workers is a load test with functional
+  assertions bolted on — sixteen pages rendered at once, each making several sequential round trips
+  to a database in another region.
+
+  The trap: someone reads "5 failures, different every time", concludes the suite is flaky, and
+  either raises `retries` or is told the tests are unreliable. Both hide it. If this suite goes red,
+  it is a real failure.
+
+  Whether a dedicated CI database would lift the ceiling is unknown and probably no — the constraint
+  looks like the Node process, not the database. The experiment is one command
+  (`--workers=8` against a CI database) and is written up in `docs/CI-DATABASE-SCOPE.md` §5.
