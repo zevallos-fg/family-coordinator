@@ -8,6 +8,7 @@ import { Sheet } from "@/components/ui/Sheet";
 import { BabyTiles } from "./BabyTiles";
 import { BabyToday } from "./BabyToday";
 import { ContractionTimer } from "./ContractionTimer";
+import { NursingTimers } from "./NursingTimers";
 import { ShareLinks } from "./ShareLinks";
 import {
   TILE_MODE,
@@ -289,6 +290,14 @@ export function BabySheet({ familyId, open, onClose }: Props) {
             blockedReason={blockedReason}
             pendingType={pending as BabyEventType | null}
             onTap={tapTile}
+          />
+
+          <NursingTimers
+            events={data.events}
+            kidId={kidId}
+            familyId={familyId}
+            blockedReason={blockedReason}
+            onChanged={refresh}
           />
 
           <ContractionTimer

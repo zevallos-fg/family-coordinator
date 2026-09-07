@@ -77,7 +77,7 @@ function EventRow({
   const [saving, setSaving] = useState(false);
 
   const payload = (event.payload ?? {}) as Record<string, Json>;
-  const chips = DETAIL_CHIPS[event.event_type as BabyEventType] ?? null;
+  const chipGroups = DETAIL_CHIPS[event.event_type as BabyEventType] ?? [];
   const running = event.ended_at === null && event.event_type !== "diaper";
 
   const durationSeconds = event.ended_at
@@ -118,7 +118,12 @@ function EventRow({
     });
   }
 
-  const chipValue = chips ? (payload[chips.key] as string | undefined) : undefined;
+  // Only the groups whose question still makes sense given what is answered.
+  const visibleGroups = chipGroups.filter((g) => !g.showIf || g.showIf(payload));
+  // The collapsed row shows the first answered chip, which is the headline detail.
+  const summaryChip = visibleGroups
+    .map((g) => payload[g.key])
+    .find((v): v is string => typeof v === "string" && v.length > 0);
 
   return (
     <li>
@@ -131,9 +136,9 @@ function EventRow({
           <span className="text-sm text-stone-800">
             {EVENT_LABEL[event.event_type] ?? event.event_type}
           </span>
-          {chipValue && (
+          {summaryChip && (
             <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-[11px] text-stone-600">
-              {chipValue}
+              {summaryChip}
             </span>
           )}
           {event.note && (
@@ -152,31 +157,39 @@ function EventRow({
 
       {expanded && (
         <div className="space-y-3 border-t border-stone-100 bg-stone-50 px-3 py-3">
-          {chips && (
-            <div className="flex flex-wrap gap-1.5">
-              {chips.options.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  disabled={saving}
-                  onClick={() =>
-                    save({
-                      payload: {
-                        [chips.key]: chipValue === option ? null : option,
-                      },
-                    })
-                  }
-                  className={`rounded-full px-3 py-1 text-xs disabled:opacity-50 ${
-                    chipValue === option
-                      ? "bg-stone-800 text-white"
-                      : "bg-white text-stone-600 ring-1 ring-stone-200"
-                  }`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          )}
+          {visibleGroups.map((group) => {
+            const current = payload[group.key] as string | undefined;
+            return (
+              <div key={group.key} className="space-y-1">
+                <p className="text-[11px] uppercase tracking-wide text-stone-400">
+                  {group.label}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.options.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      disabled={saving}
+                      data-testid={`chip-${group.key}-${option}`}
+                      onClick={() =>
+                        // Tapping the answer again clears it. Nothing here is
+                        // required, and a wrong chip must be as cheap to undo as
+                        // it was to set.
+                        save({ payload: { [group.key]: current === option ? null : option } })
+                      }
+                      className={`rounded-full px-3 py-1 text-xs disabled:opacity-50 ${
+                        current === option
+                          ? "bg-stone-800 text-white"
+                          : "bg-white text-stone-600 ring-1 ring-stone-200"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
 
           <div className="flex gap-2">
             <input

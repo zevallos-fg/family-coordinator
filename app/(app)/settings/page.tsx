@@ -8,7 +8,7 @@ export default async function SettingsPage() {
 
   const { data: family, error: familyError } = await supabase
     .from("families")
-    .select("name, default_serves")
+    .select("name, default_serves, day_start_time")
     .eq("id", familyId)
     .maybeSingle();
   if (familyError) throw new Error(`Could not load your settings: ${familyError.message}`);
@@ -22,6 +22,7 @@ export default async function SettingsPage() {
       <FamilySettingsForm
         familyId={familyId}
         defaultServes={family?.default_serves ?? 4}
+        dayStartTime={family?.day_start_time ?? "07:00:00"}
       />
     </div>
   );
