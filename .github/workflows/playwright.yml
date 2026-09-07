@@ -1,4 +1,5 @@
-name: Playwright E2E
+name: CI
+
 on:
   pull_request:
     branches: [main]
@@ -6,8 +7,21 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    timeout-minutes: 20
+  # ── The gate that always runs ────────────────────────────────────────────────
+  #
+  # No Supabase credentials, no secrets of any kind. That is deliberate: this is
+  # the check that has to be trustworthy whether or not a database is reachable
+  # from CI, and it gates every pull request and every push.
+  #
+  # The 216 unit tests below have never once run in CI.
+  #
+  # `npm run test` also includes tests/smoke.test.ts, which builds a live
+  # Supabase client and asserts database contracts — an integration test that had
+  # been sitting in the unit suite. It cannot run without credentials, so it runs
+  # as `test:contract` in the e2e job instead of quietly failing here.
+  checks:
+    name: types, lint, unit
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,26 +30,149 @@ jobs:
           node-version: 20
           cache: "npm"
       - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # A ratchet, not a ceiling. 99 is exactly what main carries today (76 of
+      # them no-floating-supabase-error), so the count can fall and cannot
+      # climb. Lower it as they go; at zero the rule becomes "error" and this
+      # flag comes out.
+      - name: Lint
+        run: npx eslint app components lib skills --max-warnings 99
+
+      - name: Unit tests
+        run: npm run test:unit
+
+  # ── Is there a database for the e2e suite to talk to? ────────────────────────
+  #
+  # The `secrets` context cannot be read from a job-level `if`, so presence has
+  # to be turned into an output by a job that can. The comparison happens inside
+  # the expression, so what lands in the environment is the string "true" or
+  # "false" and never the key itself.
+  gate:
+    name: e2e prerequisites
+    runs-on: ubuntu-latest
+    outputs:
+      run_e2e: ${{ steps.probe.outputs.run_e2e }}
+    steps:
+      - id: probe
+        env:
+          HAVE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
+        run: echo "run_e2e=$HAVE_SERVICE_KEY" >> "$GITHUB_OUTPUT"
+
+  # ── The e2e suite, when it can actually run ──────────────────────────────────
+  e2e:
+    name: playwright
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    needs: [checks, gate]
+    if: needs.gate.outputs.run_e2e == 'true'
+
+    # Scoped to this job rather than the workflow, so a pull request's `checks`
+    # never queues behind someone else's browser run. The thing being protected
+    # is the fixture family, and this is the only job that touches it: the suite
+    # runs against one shared fixture family in one Supabase project, and two
+    # concurrent runs would wipe each other's rows — the cross-talk that turned
+    # two PRs red locally. Queued, not cancelled, so a merge to main is never
+    # skipped.
+    concurrency:
+      group: e2e-fixture-family
+      cancel-in-progress: false
+
+    # The build embeds NEXT_PUBLIC_* at compile time, and the Playwright
+    # webServer and globalSetup both need these at run time. Declaring them on
+    # the job rather than on one step is the fix for the original failure: they
+    # were passed to `npm run build` only, so `npm run test:e2e` started a server
+    # with no Supabase config and every request died with "Your project's URL and
+    # Key are required to create a Supabase client!".
+    #
+    # Sentry and PostHog are deliberately absent. A CI run must not write into
+    # real error tracking or product analytics, or upload a source map for every
+    # pull request.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      # The gate above proves the service key exists. These two can still be
+      # missing on their own, and four minutes of install and build to arrive at
+      # a server that cannot boot is how this workflow spent every run for
+      # months. Say what is wrong, in one second.
+      #
+      # Actions runs this with `bash -eo pipefail`, so `[ -z x ] && y` would fail
+      # the step by its own falsiness. An if is the only safe form.
+      - name: Require the public Supabase secrets
+        run: |
+          missing=""
+          for name in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY; do
+            if [ -z "${!name}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — set them with: gh secret set <NAME>"
+            exit 1
+          fi
+
+      - run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
       - name: Build
         run: npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          NEXT_PUBLIC_WORKER_URL: ${{ secrets.NEXT_PUBLIC_WORKER_URL }}
-          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
-          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
+
+      # The database-contract tests, which need a real Supabase to assert
+      # against. Cheap, and they fail fast if a migration has drifted.
+      - name: Contract tests
+        run: npm run test:contract
+
       - name: Run Playwright tests
         run: npm run test:e2e
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
+
+  # ── The e2e suite, when it cannot ────────────────────────────────────────────
+  #
+  # Green, and says why. A permanently red check that everyone has learned to
+  # scroll past is worse than no check: it is the same shape as a spend ceiling
+  # reporting $0.00 because it cannot see. This one states the missing secret and
+  # what it would take to turn the suite on, and stays out of the way until then.
+  e2e-skipped:
+    name: playwright (skipped)
+    runs-on: ubuntu-latest
+    needs: [gate]
+    if: needs.gate.outputs.run_e2e != 'true'
+    steps:
+      - name: Explain
+        run: |
+          echo "::notice title=Playwright suite not run::SUPABASE_SERVICE_ROLE_KEY is not set on this repository, so the end-to-end suite was skipped. It is not a failure and nothing is broken."
+          cat <<'MSG'
+          The Playwright suite did not run.
+
+            Missing secret : SUPABASE_SERVICE_ROLE_KEY
+            Needed by      : tests/e2e/global-setup.ts, which creates the fixture
+                             user through the Supabase admin API and seeds the
+                             fixture family. There is no anon-key path to that.
+
+          This is a deliberate hold, not an oversight. The key bypasses RLS on the
+          database that holds real family data, and this repository is public.
+
+          Also not running, for the same reason: `npm run test:contract`, the 14
+          database-contract tests in tests/smoke.test.ts.
+
+          Until a dedicated CI Supabase project exists, both run locally
+          (`npm run test:e2e`, `npm run test:contract`), and the `checks` job —
+          typecheck, lint and 216 unit tests — is what gates this pull request.
+          MSG

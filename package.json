@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude \"**/node_modules/**\" --exclude \"**/tests/e2e/**\" --exclude \"**/tests/smoke.test.ts\"",
+    "test:contract": "vitest run tests/smoke.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
