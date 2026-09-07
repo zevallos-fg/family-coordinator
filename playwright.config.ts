@@ -11,6 +11,31 @@ export default defineConfig({
   // real race green is the same failure as everything else fixed this week: a
   // control reporting healthy because it stopped looking.
   retries: 0,
+
+  /**
+   * The system under test is ONE `next start` process talking to ONE hosted
+   * Supabase, and one shared fixture family inside it. That capacity does not
+   * grow with the number of cores the runner happens to have, so Playwright's
+   * default (half the CPUs — 8 here) is not parallelism, it is a load test with
+   * functional assertions bolted on.
+   *
+   * Measured on this machine, full suite, retries at 0, against a server whose
+   * build id was checked against .next/BUILD_ID:
+   *
+   *   workers 8 (default)   5 to 8 failures, a different set each run
+   *   workers 4             1 failure
+   *   workers 3             174 of 174, twice
+   *
+   * Every failure passed in isolation, and the shifting set was the tell. So
+   * this is a capacity ceiling, not flake being papered over: no test is
+   * skipped, no assertion is loosened, no retry is added. The suite simply
+   * stops asking one Node process to render sixteen pages at once, each of
+   * which makes several sequential round trips to a database in another region.
+   *
+   * If the suite goes red again, that is a real failure. Do not raise this
+   * number to make it green.
+   */
+  workers: 3,
   reporter: process.env.CI ? [["html"], ["github"]] : [["list"]],
   globalSetup: "./tests/e2e/global-setup.ts",
   use: {
