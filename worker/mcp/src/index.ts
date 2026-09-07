@@ -54,10 +54,21 @@ export default {
       return json({ ok: true, server: SERVER_INFO.name });
     }
 
-    if (url.pathname !== "/mcp") return json({ error: "not found" }, 404);
+    // The MCP endpoint is whatever URL the connector was configured with — the
+    // spec says only "a single HTTP endpoint path ... that supports POST", and
+    // the example `https://example.com/mcp` is an example, not a requirement.
+    // Claude.ai was configured with the bare origin and posted every request to
+    // "/", where the old `pathname !== "/mcp"` check 404'd it before routing,
+    // auth, or anything else could run. Both are served now: "/mcp" keeps
+    // working for anything already pointed at it.
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    if (path !== "/" && path !== "/mcp") return json({ error: "not found" }, 404);
 
-    // No GET/SSE stream: this server never initiates messages, so there is nothing
-    // for a long-lived channel to carry. Say so rather than hanging.
+    // No GET/SSE stream. Revision 2026-07-28 removed the standalone GET stream
+    // outright, and tells a server that implements only this shape to answer
+    // "HTTP GET or DELETE to the MCP endpoint: respond with 405 Method Not
+    // Allowed". A client probing with `Accept: text/event-stream` needs that 405
+    // to move on; a 404 reads as "wrong URL" and it gives up on the endpoint.
     if (request.method !== "POST") {
       return json({ error: "method not allowed" }, 405, { Allow: "POST" });
     }
@@ -86,6 +97,30 @@ export default {
           serverInfo: SERVER_INFO,
         });
       }
+      // Revision 2026-07-28 removed the initialize handshake and made every
+      // request self-contained, so a modern client opens with this instead:
+      // "server/discover lets a client query a server's supported protocol
+      // versions, capabilities, and identity before sending any other requests.
+      // Servers MUST implement it."
+      //
+      // We answer with the versions we actually implement, and deliberately do
+      // NOT claim 2026-07-28. Advertising a version we do not speak would invite
+      // per-request `_meta`, Mcp-Method/body validation and `resultType` results
+      // we have not built. The client is expected to "select a mutually
+      // supported version from the `supported` list and retry", which lands it
+      // on the initialize path below.
+      case "server/discover":
+        return rpcResult(body.id, {
+          resultType: "complete",
+          supportedVersions: SUPPORTED_PROTOCOLS,
+          capabilities: { tools: {} },
+          instructions:
+            "Family Co AI: household memory for one family. Tools write facts, " +
+            "decisions, terms and corrections, and read what is due. Every call " +
+            "is scoped by RLS to the family of the connector token presented.",
+          _meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO },
+        });
+
       case "notifications/initialized":
       case "notifications/cancelled":
         return new Response(null, { status: 202 });
@@ -94,6 +129,31 @@ export default {
     }
 
     // ---- Authenticated surface ---------------------------------------------
+    // Which credential arrived, without ever logging one.
+    //
+    // Cloudflare's log stream redacts the Authorization header, so "a bearer
+    // token is present" is all it can tell us — not whether it is the token we
+    // issued. A short SHA-256 prefix is comparable against a locally computed
+    // fingerprint of the known tokens and is not reversible into the token.
+    // Remove this once the connector is working; it exists to answer one
+    // question and should not outlive it.
+    {
+      const authz = request.headers.get("Authorization");
+      const presented = /^Bearer\s+(.+)$/i.exec((authz ?? "").trim())?.[1]?.trim();
+      let fp = "none";
+      if (presented) {
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(presented));
+        fp = [...new Uint8Array(digest)].slice(0, 4).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      console.log(
+        `mcp auth probe path=${path} method=${body.method} ` +
+          `authz=${authz ? "present" : "absent"} scheme=${authz?.split(" ")[0] ?? "-"} ` +
+          `token_sha256_prefix=${fp} len=${presented?.length ?? 0} ` +
+          `mcp-protocol-version=${request.headers.get("MCP-Protocol-Version") ?? "-"} ` +
+          `mcp-method=${request.headers.get("Mcp-Method") ?? "-"}`
+      );
+    }
+
     let userId: string;
     try {
       userId = await resolveUserId(request.headers.get("Authorization"), env.CONNECTOR_TOKEN_MAP ?? "{}");
