@@ -2,6 +2,13 @@ name = "aged-dust-551a"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+# Same reason as worker/mcp: the deploy token carries Workers Scripts:Edit and
+# Workers KV Storage:Edit and nothing else. Without an account pinned here,
+# wrangler calls /memberships to choose one, which needs User Details:Read and
+# fails as "Authentication error [code: 10000]" — a message that reads like a
+# missing Workers permission and is not one.
+account_id = "7093d01612de7f4615fa5bc9c49a8fb6"
+
 [vars]
 # Public project URL. Used only to fetch the JWKS that verifies caller tokens —
 # no key material lives here.
@@ -23,7 +30,7 @@ SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
 # then paste the returned id below.
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "b5bc4b0441b14b31a80c41f01e2aecdd"
 
 [env.dev.vars]
 SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
