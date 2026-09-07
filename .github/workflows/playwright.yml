@@ -31,6 +31,27 @@ jobs:
           cache: "npm"
       - run: npm ci
 
+      # worker/wrangler.toml carried id = "REPLACE_WITH_KV_NAMESPACE_ID" from the
+      # hardening PR onward. The namespace was never created, so `wrangler deploy`
+      # could not succeed, so the auth gate that PR added was never deployed —
+      # written, reviewed, merged, and not running, while everyone believed it was
+      # live. What was actually serving forwarded unauthenticated requests
+      # upstream on our Anthropic key. It was dormant only because the key had
+      # been revoked; setting a working one is what armed it.
+      #
+      # This catches placeholders, not staleness. It would not notice a correct
+      # config that was simply never deployed. The honest version compares a
+      # deployed build id against the merge commit and does not exist yet.
+      # .github is excluded because this step's own pattern and comment contain
+      # the literal, so scanning itself would fail every build. Workflows carry no
+      # namespace ids, so nothing is lost.
+      - name: No placeholders in deployable config
+        run: |
+          if grep -rn "REPLACE_WITH_" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.github; then
+            echo "::error::A placeholder is still in deployable config. Something can merge that cannot deploy."
+            exit 1
+          fi
+
       - name: Typecheck
         run: npx tsc --noEmit
 

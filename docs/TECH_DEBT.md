@@ -132,3 +132,90 @@ Each has a SKIP-REASON comment in the test file.
   Whether a dedicated CI database would lift the ceiling is unknown and probably no — the constraint
   looks like the Node process, not the database. The experiment is one command
   (`--workers=8` against a CI database) and is written up in `docs/CI-DATABASE-SCOPE.md` §5.
+
+- **A vendor key was rotated out from under us and nothing noticed for 141 days.**
+
+  Here is the whole month in two strings. Both are `api_usage.error_message`, both describe the same
+  broken key, and they are eight hours apart on 2026-09-07:
+
+  ```
+  upstream returned no completion (0 input tokens): API key is invalid.
+  anthropic upstream error 401: API key is invalid.
+  ```
+
+  The first is a failure **deduced from an empty success**. The Worker returned HTTP 200 wrapping
+  Anthropic's error body, so `response.ok` was true and the only clue was that a call which claimed
+  to succeed had somehow used zero tokens. The second is a failure that **arrived as one**.
+
+  Everything else here follows from that difference. If a broken thing answers 200, the only
+  detector you can build is "this success looks wrong", and nobody builds those. 52 of the 81 rows in
+  `api_usage` are the first kind.
+
+  **What happened:** on 2026-04-20 a vendor security incident required rotating all Anthropic API
+  keys. Family Coordinator was not on the list of things to update, so the Worker went on presenting
+  a key that had been revoked underneath it. Every skill call from **2026-04-19 to 2026-09-06**
+  failed. `usage.input_tokens ?? 0` read `0` off an error payload and a clean zero-token row landed
+  in `api_usage` with `error_message` never set. The UI showed nothing — indistinguishable from
+  nobody having used the feature.
+
+  The loudness fixes are in (`skills/_lib/runner.test.ts` pins them, and Gate D re-proved them
+  against the deployed Worker on 2026-09-07). What is *not* fixed is the thing that let it happen:
+  **there was no list of external credentials, so this project could not be on anyone's rotation
+  list.** Here is the list. Keep it current.
+
+  | credential | lives in | who rotates it | breaks what, how loudly |
+  |---|---|---|---|
+  | `ANTHROPIC_KEY` | Worker `aged-dust-551a` secret | **vendor-driven — the one that caused this** | all 23 skills; now a non-200 with `X-Upstream-Error` and a populated `api_usage.error_message` |
+  | `SUPABASE_SERVICE_ROLE_KEY` | `.env.local`, Vercel env | Supabase dashboard, manual | e2e fixture setup, `link-user.mjs`. Never in Actions, never in a Worker |
+  | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `.env.local`, Vercel, GitHub Actions, Worker `familyco-mcp` secret | Supabase dashboard, manual | everything. A wrong value surfaces as `401 {"message":"Invalid API key"}` — see the `familyId` PR for how badly that used to read |
+  | `CONNECTOR_TOKEN_MAP` | Worker `familyco-mcp` secret | us, per person | the Claude.ai connector. Write-only in Cloudflare — it cannot be read back, only tested by calling |
+  | Supabase refresh tokens | Worker `familyco-mcp` KV, `refresh:<uuid>` | rotate on every use; revoked by signing the user out | one person's connector |
+  | `CLOUDFLARE_API_TOKEN` | 1Password, injected by `op run --env-file=.env.op` | us | all deploys. Scoped to Workers Scripts:Edit + Workers KV Storage:Edit on one account |
+  | Supabase DB password | Supabase dashboard, cached by the CLI | Supabase dashboard, manual | `supabase db pull/push/dump` |
+  | `SENTRY_AUTH_TOKEN` | `.env.local`, Vercel | Sentry, manual | source-map upload at build time only |
+  | `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_SENTRY_DSN` | `.env.local`, Vercel | PostHog / Sentry | analytics and error reporting. Public by design |
+  | `USDA_FDC_KEY` | Worker secret — **not set** | us, if ever | nothing; the barcode chain skips USDA until it exists |
+
+  Two that deliberately do not exist and must not be created: `SUPABASE_JWT_SECRET` anywhere (it
+  could sign `role:"service_role"` and bypass RLS entirely), and `SUPABASE_SERVICE_ROLE_KEY` in
+  GitHub Actions (public repo, real family data).
+
+- **"Merged" and "deployed" are different states, and nothing was checking the gap.**
+  `worker/wrangler.toml` carried `id = "REPLACE_WITH_KV_NAMESPACE_ID"` from the hardening PR onward.
+  The `RATE_LIMIT` namespace was never created, so `wrangler deploy` could not succeed, so **the auth
+  gate that PR added was never deployed**. The fix was written, reviewed, merged, and not running.
+  Everyone believed it was live, including the assistant that wrote it.
+
+  What was actually serving on 2026-09-07, verified by request:
+
+  ```
+  POST https://aged-dust-551a.zevallos-fg.workers.dev/    (no Authorization header)
+  HTTP/1.1 200 OK
+  {"type":"error","error":{"type":"invalid_request_error","message":"model: Field required"},
+   "request_id":"req_011CepiAbARQN4PNyjMTNPDG"}
+  ```
+
+  No 401, no `WWW-Authenticate`, and an Anthropic `request_id` — an unauthenticated stranger's request
+  forwarded upstream on our key. `invalid_request_error` rather than `authentication_error` means
+  Anthropic **accepted the credential** and rejected only the body shape.
+
+  The vulnerability was dormant for 141 days for the worst possible reason: an open proxy holding a
+  revoked key spends nothing. **The dead key was the only thing protecting it.** Setting a working
+  key on 2026-09-07 is what armed it, and the exposure ran hours, not months.
+
+  The smallest check that closes this: **grep for `REPLACE_WITH_` in the repository and fail the
+  build.** One line, no credentials, catches this exact class the day it is introduced.
+
+  ```yaml
+  - name: No placeholders in deployable config
+    run: |
+      if grep -rn "REPLACE_WITH_" --include="*.toml" --include="*.json" --include="*.yml" .; then
+        echo "::error::placeholder left in config — something merged that cannot deploy"
+        exit 1
+      fi
+  ```
+
+  That catches placeholders, not staleness. The larger version — asserting that what is deployed
+  matches `main` — is real work and is not done. A cheap approximation already exists and was used
+  here: `GET /health` returned 405 before the deploy and 200 after, because the route only exists in
+  the new code. A deployed build id, checked against the merge commit, is the honest version.
