@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import type { BabyEvent } from "@/lib/baby/events";
+import { updateEvent } from "@/lib/baby/write";
 import {
   type FeedPayload,
   type NursingSide,
@@ -88,15 +89,13 @@ export function NursingTimers({ events, kidId, familyId, blockedReason, onChange
         return;
       }
     } else {
-      const { error } = await supabase
-        .from("baby_events")
-        .update({
-          payload: next as never,
-          ...(opts?.end ? { ended_at: new Date().toISOString() } : {}),
-        })
-        .eq("id", open.id);
+      const result = await updateEvent({
+        id: open.id,
+        payload: next,
+        ...(opts?.end ? { endedAt: new Date().toISOString() } : {}),
+      });
       setPending(false);
-      if (error) {
+      if (!result.ok) {
         // Saying nothing here would leave a timer that looks like it is running
         // and a database that never heard about it.
         toast.error("Couldn't save that — the timer may not be recorded.");

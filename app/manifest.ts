@@ -38,6 +38,21 @@ export default function manifest(): MetadataRoute.Manifest {
         url: "/grocery",
         icons: [{ src: "/icon-192.png", sizes: "192x192" }],
       },
+      // The baby lane is routes rather than a sheet, which is what makes these
+      // possible: a long-press lands directly on the timer, mid-feed, without
+      // passing through /now and a tap to open an overlay.
+      {
+        name: "Log a feed",
+        short_name: "Feed",
+        url: "/baby/feed",
+        icons: [{ src: "/icon-192.png", sizes: "192x192" }],
+      },
+      {
+        name: "Log a diaper",
+        short_name: "Diaper",
+        url: "/baby/diaper",
+        icons: [{ src: "/icon-192.png", sizes: "192x192" }],
+      },
     ],
   };
 }

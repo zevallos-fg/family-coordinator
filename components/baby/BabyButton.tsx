@@ -1,8 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { BabySheet } from "./BabySheet";
 import { EVENT_LABEL } from "@/lib/baby/events";
 import { formatClock, secondsBetween } from "@/lib/baby/format";
 
@@ -30,14 +30,13 @@ async function loadRunning(familyId: string): Promise<Running> {
 /**
  * The baby lane's front door, sitting above the fold on /now.
  *
- * It carries a live badge when something is running, because the alternative is
- * a contraction timer that only exists while the sheet is open — and the one
- * thing a timer has to survive is the app being closed.
+ * A link to /baby rather than a sheet trigger. The lane is routes now: they can
+ * be deep-linked, they survive being dismissed, and a launcher long-press can
+ * land straight on a running timer. The live badge stays, because the one thing
+ * a timer has to survive is the app being closed.
  */
 export function BabyButton({ familyId }: { familyId: string }) {
-  const [open, setOpen] = useState(false);
   const [running, setRunning] = useState<Running>(null);
-  const [reloads, setReloads] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -48,7 +47,7 @@ export function BabyButton({ familyId }: { familyId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [familyId, reloads]);
+  }, [familyId]);
 
   useEffect(() => {
     if (!running) return;
@@ -57,11 +56,9 @@ export function BabyButton({ familyId }: { familyId: string }) {
   }, [running]);
 
   return (
-    <>
-      <button
-        type="button"
+      <Link
+        href="/baby"
         data-testid="baby-open"
-        onClick={() => setOpen(true)}
         className="mb-5 flex w-full items-center justify-between rounded-2xl bg-rose-50 px-4 py-3.5 text-left ring-1 ring-rose-100 active:bg-rose-100"
       >
         <span className="flex items-center gap-2.5">
@@ -87,16 +84,6 @@ export function BabyButton({ familyId }: { familyId: string }) {
             ›
           </span>
         )}
-      </button>
-
-      <BabySheet
-        familyId={familyId}
-        open={open}
-        onClose={() => {
-          setOpen(false);
-          setReloads((n) => n + 1);
-        }}
-      />
-    </>
+      </Link>
   );
 }

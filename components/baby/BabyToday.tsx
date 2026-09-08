@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import type { Json } from "@/lib/supabase/database.types";
 import { deleteWithUndo } from "@/lib/undo";
+import { updateEvent } from "@/lib/baby/write";
 import {
-  DETAIL_CHIPS,
   EVENT_LABEL,
   type BabyEvent,
-  type BabyEventType,
+  visibleChipGroups,
 } from "@/lib/baby/events";
 import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/baby/format";
 
@@ -77,30 +76,31 @@ function EventRow({
   const [saving, setSaving] = useState(false);
 
   const payload = (event.payload ?? {}) as Record<string, Json>;
-  const chipGroups = DETAIL_CHIPS[event.event_type as BabyEventType] ?? [];
   const running = event.ended_at === null && event.event_type !== "diaper";
 
   const durationSeconds = event.ended_at
     ? secondsBetween(event.started_at, new Date(event.ended_at).getTime())
     : null;
 
+  /**
+   * Corrections go through fn_baby_update, never a table UPDATE — the same path
+   * the per-type pages use, so the dashboard and the pages cannot disagree about
+   * who is allowed to fix what.
+   */
   async function save(patch: { note?: string; payload?: Record<string, Json> }) {
     setSaving(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("baby_events")
-      .update({
-        note: patch.note !== undefined ? patch.note || null : event.note,
-        payload:
-          patch.payload !== undefined
-            ? { ...payload, ...patch.payload }
-            : (event.payload ?? {}),
-      })
-      .eq("id", event.id);
+    const result = await updateEvent({
+      id: event.id,
+      // The chips send one key at a time, so the merge happens here; the function
+      // replaces rather than merges, which is what makes a chip clearable.
+      ...(patch.payload !== undefined ? { payload: { ...payload, ...patch.payload } } : {}),
+      // "" is meaningful: it is how a note is erased.
+      ...(patch.note !== undefined ? { note: patch.note } : {}),
+    });
     setSaving(false);
 
-    if (error) {
-      toast.error("Couldn't save that detail.");
+    if (!result.ok) {
+      toast.error(result.message);
       return;
     }
     onChanged();
@@ -119,7 +119,7 @@ function EventRow({
   }
 
   // Only the groups whose question still makes sense given what is answered.
-  const visibleGroups = chipGroups.filter((g) => !g.showIf || g.showIf(payload));
+  const visibleGroups = visibleChipGroups(event.event_type, payload);
   // The collapsed row shows the first answered chip, which is the headline detail.
   const summaryChip = visibleGroups
     .map((g) => payload[g.key])
