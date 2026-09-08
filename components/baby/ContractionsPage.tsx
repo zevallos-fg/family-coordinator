@@ -5,8 +5,9 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ContractionTimer } from "./ContractionTimer";
+import { RecentList } from "./RecentList";
 import { toggleTimer } from "@/lib/baby/write";
-import type { ContractionRow } from "@/lib/baby/events";
+import type { BabyEvent, ContractionRow } from "@/lib/baby/events";
 
 /**
  * /baby/contractions — the timer itself is kept exactly as built.
@@ -19,6 +20,7 @@ import type { ContractionRow } from "@/lib/baby/events";
  */
 export function ContractionsPage({ familyId }: { familyId: string }) {
   const [rows, setRows] = useState<ContractionRow[]>([]);
+  const [recent, setRecent] = useState<BabyEvent[]>([]);
   const [pending, setPending] = useState(false);
 
   const load = useCallback(async () => {
@@ -38,6 +40,17 @@ export function ContractionsPage({ familyId }: { familyId: string }) {
         .order("started_at", { ascending: false })
         .limit(1),
     ]);
+
+    // The view is read-only and carries no payload, so the editable rows are
+    // fetched alongside it rather than reconstructed from it.
+    const { data: rawRows } = await supabase
+      .from("baby_events")
+      .select("*")
+      .eq("family_id", familyId)
+      .eq("event_type", "contraction")
+      .order("started_at", { ascending: false })
+      .limit(10);
+    setRecent((rawRows ?? []) as BabyEvent[]);
 
     const viewRows = (viewRes.data ?? []) as ContractionRow[];
     const running = openRes.data?.[0];
@@ -101,6 +114,8 @@ export function ContractionsPage({ familyId }: { familyId: string }) {
       </header>
 
       <ContractionTimer rows={rows} pending={pending} onToggle={toggle} />
+
+      <RecentList events={recent} type="contraction" onChanged={load} />
     </div>
   );
 }

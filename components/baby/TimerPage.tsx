@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
+import { RecentList } from "./RecentList";
 import { ManualRow } from "./FeedPage";
 import { useBabyLane } from "./useBabyLane";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
@@ -163,6 +164,7 @@ export function TimerPage({
           })}
         </section>
       )}
+      <RecentList events={lane.events} type={type} onChanged={lane.refresh} />
     </BabyPageShell>
   );
 }

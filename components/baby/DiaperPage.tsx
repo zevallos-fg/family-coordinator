@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
+import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 import { logPoint } from "@/lib/baby/write";
@@ -171,6 +172,7 @@ export function DiaperPage({ familyId }: { familyId: string }) {
           })}
         </section>
       )}
+      <RecentList events={lane.events} type="diaper" onChanged={lane.refresh} />
     </BabyPageShell>
   );
 }

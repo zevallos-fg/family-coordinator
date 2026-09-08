@@ -6,7 +6,8 @@ import { BabyToday } from "./BabyToday";
 import { ShareLinks } from "./ShareLinks";
 import { lastEventOf, useBabyLane } from "./useBabyLane";
 import { createClient } from "@/lib/supabase/client";
-import { formatAgo, formatClock, secondsBetween } from "@/lib/baby/format";
+import { formatAgo, formatClock, formatDuration, secondsBetween } from "@/lib/baby/format";
+import { eventDuration, eventSummary, todayTotals } from "@/lib/baby/summary";
 import type { ShareLink } from "@/lib/baby/events";
 
 const CARDS = [
@@ -24,7 +25,38 @@ const TIMER_TYPES = new Set(["feed", "sleep", "pump", "contraction"]);
 const BABY_SCOPES = ["contractions", "baby_today"];
 
 /**
- * /baby — a stack of last-event cards, one per type, each the door to its page.
+ * "3h 12m ago · 1h 40m", or the live clock while it is running.
+ *
+ * markNextSide is on for feeds so the card carries the star: which side to start
+ * on next is the single most useful thing this screen can say, and it is the one
+ * thing nobody can reconstruct from memory.
+ */
+function detailLine(
+  last: { started_at: string; ended_at: string | null; event_type: string; payload: unknown } | null,
+  running: boolean,
+  nowMs: number
+): string {
+  if (!last) return "no entries yet";
+  const ago = formatAgo(last.started_at, nowMs);
+  const summary = eventSummary(last.event_type, last.payload as Record<string, unknown>, {
+    markNextSide: last.event_type === "feed",
+  });
+  if (running) return summary ? `running · ${summary}` : "running";
+  const duration = eventDuration(last.started_at, last.ended_at);
+  return [ago, duration, summary].filter(Boolean).join(" · ");
+}
+
+/**
+ * /baby — a dashboard, not a menu.
+ *
+ * Every card answers "how is she doing" without a tap: time since the last one,
+ * and the salient detail of that last one. "Feeding · 47m ago" answers nothing a
+ * parent asks at 4am; "47m ago · (L) 10m, (R*) 13m" answers all of it — how
+ * long, which sides, and where to start next.
+ *
+ * Types with no entries keep their card and say so. On this screen an absence is
+ * information: "no entries yet" under Diaper at 6pm is the thing you needed to
+ * know, and a card that vanished would have hidden it.
  *
  * The live elapsed time on a running card is the reason the restructure was
  * worth doing. `ended_at IS NULL` is the source of truth, so a timer started on
@@ -36,6 +68,10 @@ export function BabyIndex({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [links, setLinks] = useState<ShareLink[]>([]);
+
+  const visibleForKid = lane.events.filter(
+    (e) => e.event_type === "contraction" || lane.kidId === null || e.kid_id === lane.kidId
+  );
 
   const anyRunning = lane.events.some(
     (e) => e.ended_at === null && TIMER_TYPES.has(e.event_type)
@@ -69,9 +105,9 @@ export function BabyIndex({ familyId }: { familyId: string }) {
     };
   }, [familyId, lane.events.length]);
 
-  const visibleToday = lane.events.filter(
-    (e) => e.event_type === "contraction" || lane.kidId === null || e.kid_id === lane.kidId
-  );
+  const totals = todayTotals(visibleForKid, nowMs);
+
+  const visibleToday = visibleForKid;
 
   return (
     <div className="mx-auto max-w-md space-y-5">
@@ -104,6 +140,27 @@ export function BabyIndex({ familyId }: { familyId: string }) {
         </p>
       )}
 
+      {/* The today strip: what a parent is asked for at a handover or an
+          appointment, and the reason this page is not a menu. */}
+      <dl className="grid grid-cols-3 gap-2" data-testid="baby-today-strip">
+        {[
+          { label: "Feeds", value: String(totals.feeds), testId: "today-feeds" },
+          { label: "Diapers", value: String(totals.diapers), testId: "today-diapers" },
+          {
+            label: "Sleep",
+            value: totals.sleepSeconds > 0 ? formatDuration(totals.sleepSeconds) : "—",
+            testId: "today-sleep",
+          },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-stone-200 bg-white px-3 py-2.5">
+            <dt className="text-[11px] uppercase tracking-wide text-stone-400">{s.label}</dt>
+            <dd className="mt-0.5 text-lg tabular-nums text-stone-800" data-testid={s.testId}>
+              {s.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
       <ul className="space-y-2.5">
         {CARDS.map((card) => {
           const last = lastEventOf(lane.events, card.type, lane.kidId);
@@ -120,18 +177,17 @@ export function BabyIndex({ familyId }: { familyId: string }) {
                     : "bg-white ring-stone-200 active:bg-stone-50"
                 }`}
               >
-                <span className="flex items-center gap-3">
+                <span className="flex min-w-0 items-center gap-3">
                   <span aria-hidden className="text-2xl">
                     {card.emoji}
                   </span>
-                  <span>
+                  <span className="min-w-0">
                     <span className="block text-sm font-medium text-stone-800">{card.label}</span>
-                    <span className="block text-[11px] text-stone-500">
-                      {running
-                        ? "running"
-                        : last
-                          ? formatAgo(last.started_at, nowMs)
-                          : "nothing logged yet"}
+                    <span
+                      className="block truncate text-[11px] text-stone-500"
+                      data-testid={`baby-detail-${card.type}`}
+                    >
+                      {detailLine(last, running, nowMs)}
                     </span>
                   </span>
                 </span>

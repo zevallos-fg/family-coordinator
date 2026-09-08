@@ -342,3 +342,103 @@ test("a nursing session in progress survives the app closing", async ({ page }) 
   await page.goto("/baby");
   await expect(page.getByTestId("baby-card-feed")).toHaveAttribute("data-running", "true");
 });
+
+test("a start time can be corrected while the timer is still running", async ({ page }) => {
+  const { error } = await admin
+    .from("kids")
+    .insert({ family_id: familyId, name: KID_NAME, birth_date: "2026-09-01" });
+  expect(error).toBeNull();
+
+  await page.goto("/baby/sleep");
+  await page.getByTestId("sleep-toggle").click();
+  await expect(page.getByTestId("sleep-toggle")).toHaveAttribute("data-running", "true");
+
+  const before = await admin
+    .from("baby_events")
+    .select("id, started_at, ended_at")
+    .eq("family_id", familyId)
+    .eq("event_type", "sleep");
+  expect(before.data).toHaveLength(1);
+  const row = before.data![0];
+
+  // Correcting a start must never require stopping first: the nap began before
+  // anyone got to the phone, and the timer is still counting.
+  await page.getByTestId(`recent-row-${row.id}`).click();
+  const startField = page.getByTestId("edit-started-at");
+  const corrected = new Date(new Date(row.started_at).getTime() - 40 * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  await startField.fill(
+    `${corrected.getFullYear()}-${pad(corrected.getMonth() + 1)}-${pad(corrected.getDate())}` +
+      `T${pad(corrected.getHours())}:${pad(corrected.getMinutes())}`
+  );
+  await startField.blur();
+
+  await expect
+    .poll(async () => {
+      const { data } = await admin
+        .from("baby_events")
+        .select("started_at, ended_at")
+        .eq("id", row.id)
+        .single();
+      return data ? `${new Date(data.started_at).getTime()}|${data.ended_at}` : null;
+    })
+    .toBe(`${corrected.setSeconds(0, 0)}|null`);
+
+  // Still running, on the page and on the dashboard.
+  await expect(page.getByTestId("sleep-toggle")).toHaveAttribute("data-running", "true");
+  await page.goto("/baby");
+  await expect(page.getByTestId("baby-card-sleep")).toHaveAttribute("data-running", "true");
+});
+
+test("deleting an entry and undoing it restores the row with its payload", async ({ page }) => {
+  const { error } = await admin
+    .from("kids")
+    .insert({ family_id: familyId, name: KID_NAME, birth_date: "2026-09-01" });
+  expect(error).toBeNull();
+
+  await page.goto("/baby/diaper");
+  await page.getByTestId("diaper-poo").click();
+  await page.getByTestId("chip-consistency-loose").click();
+
+  const before = await admin
+    .from("baby_events")
+    .select("id, payload")
+    .eq("family_id", familyId)
+    .eq("event_type", "diaper");
+  expect(before.data).toHaveLength(1);
+  const original = before.data![0];
+  expect((original.payload as { consistency?: string }).consistency).toBe("loose");
+
+  await page.getByTestId(`recent-row-${original.id}`).click();
+  await page.getByTestId("edit-delete").click();
+
+  await expect
+    .poll(async () => {
+      const { count } = await admin
+        .from("baby_events")
+        .select("id", { count: "exact", head: true })
+        .eq("family_id", familyId)
+        .eq("event_type", "diaper");
+      return count;
+    })
+    .toBe(0);
+
+  // The undo toast has 8 seconds. What comes back has to be the row, not a
+  // reconstruction of it — the detail added after the fact is the part that
+  // would be silently lost.
+  await page.getByRole("button", { name: /undo/i }).click();
+
+  await expect
+    .poll(async () => {
+      const { data } = await admin
+        .from("baby_events")
+        .select("id, payload")
+        .eq("family_id", familyId)
+        .eq("event_type", "diaper");
+      const row = data?.[0];
+      if (!row) return null;
+      const p = row.payload as { contents?: string; consistency?: string };
+      return `${p.contents}|${p.consistency}`;
+    })
+    .toBe("poo|loose");
+});
