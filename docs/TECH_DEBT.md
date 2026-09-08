@@ -219,3 +219,29 @@ Each has a SKIP-REASON comment in the test file.
   matches `main` — is real work and is not done. A cheap approximation already exists and was used
   here: `GET /health` returned 405 before the deploy and 200 after, because the route only exists in
   the new code. A deployed build id, checked against the merge commit, is the honest version.
+
+- **A debug probe printed a live connector token into Cloudflare's logs in cleartext.**
+  Removed 2026-09-08. Recorded because the shape of the mistake is more instructive than the fix.
+
+  The MCP worker's temporary auth probe logged `authz.split(" ")[0]` as "the scheme". That is correct
+  for `Authorization: Bearer <token>`, and it is the **entire credential** for a header sent without
+  a scheme — which is exactly what Claude.ai sends. So the one client whose behaviour the probe
+  existed to investigate was the one client whose token it printed.
+
+  The probe was written to be safe: it fingerprinted the credential with SHA-256 precisely so a token
+  would never be logged. What defeated that was not the fingerprinting but an assumption **upstream**
+  of it — that the header had a scheme at all. A field that is safe under the expected input and
+  catastrophic under the unexpected one is not a safe field, and the unexpected input is the reason
+  a debug probe is being written in the first place.
+
+  Two consequences worth keeping:
+
+  - Fernando's connector token had to be rotated. Cloudflare's log retention means "delete the log"
+    is not a remedy; the only remedy is a new token.
+  - It was this bug that made the real one legible. The scheme-less header showed up in the logs as a
+    43-character "scheme", which is what identified the missing `Bearer ` prefix after four wrong
+    hypotheses. The leak and the diagnosis were the same line of code.
+
+  The worker now logs status, byte count and latency, and reads the Authorization header in exactly
+  one place: the gate that authenticates it. Nothing logs any part of that header, in any form,
+  fingerprinted or otherwise.

@@ -2698,6 +2698,7 @@ export type Database = {
         Row: {
           completed_at: string | null
           created_at: string
+          created_by_user_id: string | null
           description: string | null
           due_at: string | null
           family_id: string
@@ -2706,10 +2707,12 @@ export type Database = {
           source_capture_id: string | null
           status: Database["public"]["Enums"]["task_status"]
           title: string
+          written_by: string
         }
         Insert: {
           completed_at?: string | null
           created_at?: string
+          created_by_user_id?: string | null
           description?: string | null
           due_at?: string | null
           family_id: string
@@ -2718,10 +2721,12 @@ export type Database = {
           source_capture_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title: string
+          written_by?: string
         }
         Update: {
           completed_at?: string | null
           created_at?: string
+          created_by_user_id?: string | null
           description?: string | null
           due_at?: string | null
           family_id?: string
@@ -2730,6 +2735,7 @@ export type Database = {
           source_capture_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
+          written_by?: string
         }
         Relationships: [
           {
@@ -2737,6 +2743,13 @@ export type Database = {
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {

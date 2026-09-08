@@ -313,42 +313,6 @@ async function route(request: Request, env: Env): Promise<Response> {
       return rpcError(body.id, -32601, `Method not found: ${body.method}`, 404);
     }
 
-    // Which credential arrived, without ever logging one.
-    //
-    // Cloudflare's log stream redacts the Authorization header, so "a bearer
-    // token is present" is all it can tell us — not whether it is the token we
-    // issued. A short SHA-256 prefix is comparable against a locally computed
-    // fingerprint of the known tokens and is not reversible into the token.
-    // Remove this once the connector is working; it exists to answer one
-    // question and should not outlive it.
-    {
-      const raw = (request.headers.get("Authorization") ?? "").trim();
-
-      // Split scheme from credential ONLY on a well-formed `<scheme> <value>`.
-      // The previous version printed `raw.split(" ")[0]` as the scheme, which for
-      // a header sent without a scheme is the entire credential — and it logged
-      // one in cleartext the first time a client sent a bare token. Never print
-      // any part of this header again: a scheme is echoed only when it matches
-      // the RFC 9110 token grammar, and everything else is fingerprinted.
-      const parts = /^([A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]*)[ \t]+(.+)$/.exec(raw);
-      const scheme = parts ? parts[1] : raw ? "(absent — value sent with no scheme)" : "-";
-      const credential = parts ? parts[2].trim() : raw;
-
-      let fp = "none";
-      if (credential) {
-        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
-        fp = [...new Uint8Array(digest)].slice(0, 4).map((b) => b.toString(16).padStart(2, "0")).join("");
-      }
-
-      console.log(
-        `mcp auth probe path=${path} method=${body.method} ` +
-          `authz=${raw ? "present" : "absent"} scheme=${scheme} ` +
-          `token_sha256_prefix=${fp} len=${credential.length} ` +
-          `mcp-protocol-version=${request.headers.get("MCP-Protocol-Version") ?? "-"} ` +
-          `mcp-method=${request.headers.get("Mcp-Method") ?? "-"}`
-      );
-    }
-
     let userId: string;
     try {
       userId = await resolveUserId(request.headers.get("Authorization"), env.CONNECTOR_TOKEN_MAP ?? "{}");
@@ -419,28 +383,26 @@ export default {
     const started = Date.now();
     const res = await route(request, env);
 
-    // What the client actually received. The probe above records what arrived;
-    // without this we could see a well-formed request carrying the right token
-    // and still not know whether it was answered with eight tools or a refusal.
-    // Cloudflare's request log shows the URL and nothing else.
+    // Status, size and latency for every request. Not a debugging leftover: a
+    // connector that answers 200 with an empty tool list and one that answers
+    // 401 look identical in Cloudflare's request log, which records the URL and
+    // nothing else.
     //
-    // Temporary, like the probe. Cloning is safe here — every response this
-    // worker produces is a small JSON document, and the body is read only to
-    // measure it. Tool names are not secret; a JSON-RPC error message is the
-    // thing worth seeing, so non-2xx bodies are logged in full up to 300 chars.
+    // The body is deliberately NOT logged, and neither is any part of the
+    // Authorization header. An earlier probe here printed what it believed was
+    // the auth scheme, which for a header sent without one is the entire
+    // credential — that is how a live connector token reached these logs in
+    // cleartext. Nothing in this worker reads that header for logging again.
     let bytes = -1;
-    let detail = "";
     try {
-      const text = await res.clone().text();
-      bytes = text.length;
-      if (res.status >= 400) detail = ` body=${text.slice(0, 300)}`;
+      bytes = (await res.clone().text()).length;
     } catch {
-      detail = " body=<unreadable>";
+      bytes = -1;
     }
 
     console.log(
-      `mcp resp ${new URL(request.url).pathname} ${request.method} ` +
-        `status=${res.status} bytes=${bytes} ms=${Date.now() - started}${detail}`
+      `mcp ${new URL(request.url).pathname} ${request.method} ` +
+        `status=${res.status} bytes=${bytes} ms=${Date.now() - started}`
     );
 
     return res;
