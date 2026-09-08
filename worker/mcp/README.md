@@ -56,12 +56,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 ## Tools
 
-Eight, all append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
+Nine, all append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 
 | Tool | Writes to |
 |---|---|
 | `remember_fact` | `memory_facts` |
 | `remember_decision` | `memory_decisions` |
+| `remember_task` | `tasks` |
 | `define_term` | `memory_lexicon` |
 | `record_correction` | `memory_corrections` |
 | `recall` | reads `fn_memory_recall` |
@@ -69,8 +70,26 @@ Eight, all append-only. No UPDATE, no DELETE, no SQL passthrough, no schema acce
 | `add_grocery` | `grocery_items` |
 | `add_chore` | `maintenance` |
 
-`observed_at`, `decided_at` and `occurred_at` are required and are **never**
-defaulted to `now()`. The column comment on `memory_facts.observed_at` is the
+### Task or decision?
+
+**A dated one-off is a task. A stated intention is a decision.**
+
+"Book the dentist by Friday" is a `remember_task`: there is a thing to do and a
+date it has to be done by. "We're switching Mateo to the later nap" is a
+`remember_decision`: the family has settled something, and nothing is scheduled.
+
+Before `remember_task` existed, dated one-offs rode in as decisions carrying a
+`due_at`. That landed in `v_whats_due` correctly — the view unions both — so
+nothing looked broken. What it lost was the distinction between something the
+family *said they would do* and *a thing with a date*, which is the difference
+between a record and a commitment.
+
+A decision may still carry `due_at`; that is a decision with a deadline, not a
+task. If you are unsure, ask whether the row would still make sense with the date
+removed. A decision would; a task would not.
+
+`observed_at`, `decided_at`, `occurred_at` and `due_at` are required and are
+**never** defaulted to `now()`. The column comment on `memory_facts.observed_at` is the
 reason: it records when the fact became true, not when it was typed, and stamping
 it at write time destroys the only timing signal the row carries. A missing value
 is an error that tells the model to ask.

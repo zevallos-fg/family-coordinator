@@ -1,0 +1,4 @@
+# SQL migrations are replayed byte-for-byte into Postgres and their text is
+# stored in function bodies, so a CRLF checkout on Windows ends up inside
+# prosrc and makes a restored database differ from production. Pin them to LF.
+*.sql text eol=lf

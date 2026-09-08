@@ -64,6 +64,39 @@ jobs:
       - name: Migration drift
         run: npm run migrations:verify
 
+      # Runs against a local `wrangler dev`, which needs no Cloudflare account:
+      # every assertion resolves before the auth gate, so nothing here needs a
+      # connector token, a secret, or a database. `.dev.vars` is gitignored and
+      # deliberately absent — the worker only reads those at token exchange,
+      # which none of these tests reach.
+      #
+      # The test that matters is the negative one: declare protocol version
+      # 1900-01-01 and assert -32022 with a supported list, and assert it does
+      # NOT answer 200 with resultType "complete". That exact shape shipped, and
+      # a client handed a success for a version that never existed has no defined
+      # error to act on.
+      - name: MCP protocol conformance
+        working-directory: worker/mcp
+        run: |
+          # A throwaway token map, supplied with --var so no file is written and
+          # a developer's real .dev.vars is never involved. The UUID is fictional
+          # and reaches nothing: tools/list returns static definitions
+          # immediately after the auth gate and never calls Supabase, so these
+          # tests need no real credential and touch no database.
+          npx --yes wrangler@4.83.0 dev --local --port 8788 \
+            --var 'CONNECTOR_TOKEN_MAP:{"mcp-ci-test-token":"00000000-0000-4000-8000-000000000001"}' \
+            > /tmp/wrangler-dev.log 2>&1 &
+          for i in $(seq 1 45); do
+            if curl -sf http://127.0.0.1:8788/health > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          if ! curl -sf http://127.0.0.1:8788/health > /dev/null 2>&1; then
+            echo "::error::wrangler dev never became ready; log follows"
+            cat /tmp/wrangler-dev.log
+            exit 1
+          fi
+          node test/protocol.test.mjs
+
       - name: Typecheck
         run: npx tsc --noEmit
 
