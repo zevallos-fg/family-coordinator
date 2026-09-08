@@ -13,7 +13,43 @@ import { SupabaseError, UserClient } from "./supabase";
 import { HANDLERS, TOOL_DEFINITIONS, ToolError } from "./tools";
 
 const SERVER_INFO = { name: "familyco-mcp", version: "0.1.0" };
-const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26"];
+
+/**
+ * Two eras, served side by side.
+ *
+ * Modern (2026-07-28) carries version, identity and capabilities as per-request
+ * `_meta` and has no session. Legacy establishes one with an `initialize`
+ * handshake. This server is dual-era: "A dual-era server selects its behavior
+ * from how the client opens."
+ *
+ * Statelessness — the expensive half of the modern revision — was already true
+ * here: nothing about a caller survives a request except the KV-cached access
+ * token, which is keyed by user and not by connection.
+ */
+const MODERN_PROTOCOLS = ["2026-07-28"];
+const LEGACY_PROTOCOLS = ["2025-06-18", "2025-03-26"];
+const SUPPORTED_PROTOCOLS = [...MODERN_PROTOCOLS, ...LEGACY_PROTOCOLS];
+
+/**
+ * A request that declares no version at all.
+ *
+ * Permitted: "A server that supports clients implementing protocol versions
+ * earlier than 2025-06-18 (which did not define the MCP-Protocol-Version header)
+ * MAY treat a request that omits the header as protocol version 2025-03-26."
+ *
+ * Taken deliberately rather than rejecting: curl, the acceptance suite and every
+ * legacy client send no version, and turning those into 400s would break working
+ * callers to satisfy a rule that explicitly allows this.
+ */
+const ASSUMED_WHEN_ABSENT = "2025-03-26";
+
+const META_VERSION = "io.modelcontextprotocol/protocolVersion";
+const META_CLIENT_CAPS = "io.modelcontextprotocol/clientCapabilities";
+const META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
+
+/** Error codes the MCP specification reserves in -32020..-32099. */
+const HEADER_MISMATCH = -32020;
+const UNSUPPORTED_PROTOCOL_VERSION = -32022;
 
 interface RpcRequest {
   jsonrpc: string;
@@ -22,12 +58,55 @@ interface RpcRequest {
   params?: Record<string, unknown>;
 }
 
+/**
+ * Every result carries `resultType` and the server's identity.
+ *
+ * `resultType` is required from 2026-07-28 on. It is emitted for legacy callers
+ * too: a JSON-RPC result is an object and an unrecognised member is ignored, so
+ * one shape serves both eras rather than two that can drift apart.
+ */
 function rpcResult(id: RpcRequest["id"], result: unknown) {
-  return json({ jsonrpc: "2.0", id, result });
+  let payload = result;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const r = payload as Record<string, unknown>;
+    payload = {
+      resultType: "complete",
+      ...r,
+      _meta: { [META_SERVER_INFO]: SERVER_INFO, ...((r._meta as object) ?? {}) },
+    };
+  }
+  return json({ jsonrpc: "2.0", id, result: payload });
 }
 
 function rpcError(id: RpcRequest["id"], code: number, message: string, status = 200) {
   return json({ jsonrpc: "2.0", id, error: { code, message } }, status);
+}
+
+/** A spec-defined error, which unlike the plain form carries structured `data`. */
+function rpcSpecError(
+  id: RpcRequest["id"],
+  code: number,
+  message: string,
+  data: unknown,
+  status: number
+) {
+  return json({ jsonrpc: "2.0", id, error: { code, message, data } }, status);
+}
+
+/**
+ * `Mcp-Name` and `Mcp-Param-*` may arrive Base64-wrapped when the value cannot
+ * be represented as a plain ASCII header. Servers "MUST decode an encoded
+ * Mcp-Name ... before comparing it to the corresponding request body value".
+ */
+function decodeHeaderValue(value: string): string {
+  const wrapped = /^=\?base64\?(.*)\?=$/.exec(value);
+  if (!wrapped) return value;
+  try {
+    const bytes = Uint8Array.from(atob(wrapped[1]), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return value;
+  }
 }
 
 function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
@@ -85,6 +164,97 @@ async function route(request: Request, env: Env): Promise<Response> {
     // Notifications carry no id and expect no body.
     const isNotification = body.id === undefined || body.id === null;
 
+    // ---- Era detection and protocol-version validation ----------------------
+    //
+    // This block exists because of a real defect: the server answered a request
+    // declaring 2026-07-28 — and one declaring 1900-01-01 — with HTTP 200 and
+    // resultType "complete", claiming to have completed a request in a protocol
+    // version it does not implement, while the body's supportedVersions said
+    // otherwise. A client given a success has no defined error to act on.
+    //
+    // `initialize` is exempt by definition: "An initialize request selects
+    // legacy semantics."
+    let modern = false;
+    if (body.method !== "initialize") {
+      const versionHeader = request.headers.get("MCP-Protocol-Version");
+      const meta = (body.params?._meta ?? {}) as Record<string, unknown>;
+      const versionMeta = typeof meta[META_VERSION] === "string" ? (meta[META_VERSION] as string) : null;
+
+      // "The header value MUST match the io.modelcontextprotocol/protocolVersion
+      // field carried in the request body's _meta. If the values do not match,
+      // the server MUST reject the request with 400 Bad Request and a
+      // HeaderMismatch JSON-RPC error." The point is that an intermediary may
+      // route on the header while this worker executes on the body.
+      if (versionHeader && versionMeta && versionHeader !== versionMeta) {
+        return rpcSpecError(
+          body.id,
+          HEADER_MISMATCH,
+          `Header mismatch: MCP-Protocol-Version header '${versionHeader}' does not match body value '${versionMeta}'`,
+          { header: "MCP-Protocol-Version" },
+          400
+        );
+      }
+
+      const declared = versionMeta ?? versionHeader ?? ASSUMED_WHEN_ABSENT;
+
+      if (!SUPPORTED_PROTOCOLS.includes(declared)) {
+        return rpcSpecError(
+          body.id,
+          UNSUPPORTED_PROTOCOL_VERSION,
+          "Unsupported protocol version",
+          { supported: SUPPORTED_PROTOCOLS, requested: declared },
+          400
+        );
+      }
+
+      modern = MODERN_PROTOCOLS.includes(declared);
+
+      if (modern) {
+        // "A request missing any required field is malformed; the server MUST
+        // reject it with JSON-RPC error code -32602 (Invalid params). On HTTP,
+        // the response status MUST be 400 Bad Request."
+        if (!versionMeta) {
+          return rpcError(body.id, -32602, `Invalid params: params._meta['${META_VERSION}'] is required`, 400);
+        }
+        if (meta[META_CLIENT_CAPS] === undefined) {
+          return rpcError(body.id, -32602, `Invalid params: params._meta['${META_CLIENT_CAPS}'] is required`, 400);
+        }
+
+        // Mcp-Method is REQUIRED on all requests and mirrors `method`.
+        const methodHeader = request.headers.get("Mcp-Method");
+        if (!methodHeader) {
+          return rpcSpecError(body.id, HEADER_MISMATCH, "Header mismatch: Mcp-Method header is required", { header: "Mcp-Method" }, 400);
+        }
+        if (methodHeader !== body.method) {
+          return rpcSpecError(
+            body.id,
+            HEADER_MISMATCH,
+            `Header mismatch: Mcp-Method header value '${methodHeader}' does not match body value '${body.method}'`,
+            { header: "Mcp-Method" },
+            400
+          );
+        }
+
+        // Mcp-Name is REQUIRED for tools/call and mirrors params.name.
+        if (body.method === "tools/call") {
+          const nameHeader = request.headers.get("Mcp-Name");
+          const bodyName = typeof body.params?.name === "string" ? body.params.name : "";
+          if (!nameHeader) {
+            return rpcSpecError(body.id, HEADER_MISMATCH, "Header mismatch: Mcp-Name header is required for tools/call", { header: "Mcp-Name" }, 400);
+          }
+          if (decodeHeaderValue(nameHeader) !== bodyName) {
+            return rpcSpecError(
+              body.id,
+              HEADER_MISMATCH,
+              `Header mismatch: Mcp-Name header value does not match body value '${bodyName}'`,
+              { header: "Mcp-Name" },
+              400
+            );
+          }
+        }
+      }
+    }
+
     // ---- Unauthenticated surface -------------------------------------------
     // Only the handshake. Everything that can touch data is gated below.
     switch (body.method) {
@@ -110,14 +280,12 @@ async function route(request: Request, env: Env): Promise<Response> {
       // on the initialize path below.
       case "server/discover":
         return rpcResult(body.id, {
-          resultType: "complete",
           supportedVersions: SUPPORTED_PROTOCOLS,
           capabilities: { tools: {} },
           instructions:
             "Family Co AI: household memory for one family. Tools write facts, " +
             "decisions, terms and corrections, and read what is due. Every call " +
             "is scoped by RLS to the family of the connector token presented.",
-          _meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO },
         });
 
       case "notifications/initialized":
@@ -128,6 +296,23 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
 
     // ---- Authenticated surface ---------------------------------------------
+    // Unknown methods are refused before the auth gate, not after.
+    //
+    // "If the server does not implement the requested RPC method, it MUST respond
+    // with 404 Not Found and a JSON-RPC error with code -32601" — and a dual-era
+    // client uses exactly that to tell a modern server from a legacy one. Behind
+    // the gate it answered 401 instead, which tells a prober nothing about which
+    // era it is talking to.
+    //
+    // Nothing leaks by answering first: these are the protocol's own method
+    // names, identical on every MCP server. What is actually private — the tool
+    // list, and every tool result — stays behind the gate below.
+    const AUTHENTICATED_METHODS = new Set(["tools/list", "tools/call"]);
+    if (!AUTHENTICATED_METHODS.has(body.method)) {
+      if (isNotification) return new Response(null, { status: 202 });
+      return rpcError(body.id, -32601, `Method not found: ${body.method}`, 404);
+    }
+
     // Which credential arrived, without ever logging one.
     //
     // Cloudflare's log stream redacts the Authorization header, so "a bearer
@@ -218,7 +403,15 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
 
     if (isNotification) return new Response(null, { status: 202 });
-    return rpcError(body.id, -32601, `method not found: ${body.method}`);
+
+    // "If the server does not implement the requested RPC method, it MUST
+    // respond with 404 Not Found and a JSON-RPC error with code -32601. The
+    // JSON-RPC error body distinguishes this case from a 404 returned by a
+    // legacy HTTP+SSE server that does not host the modern MCP endpoint."
+    //
+    // This used to answer 200, which made an unimplemented method look like a
+    // successful exchange to anything reading the status alone.
+    return rpcError(body.id, -32601, `Method not found: ${body.method}`, 404);
 }
 
 export default {
