@@ -43,13 +43,17 @@ export function ContractionsPage({ familyId }: { familyId: string }) {
 
     // The view is read-only and carries no payload, so the editable rows are
     // fetched alongside it rather than reconstructed from it.
-    const { data: rawRows } = await supabase
+    const { data: rawRows, error: rawError } = await supabase
       .from("baby_events")
       .select("*")
       .eq("family_id", familyId)
       .eq("event_type", "contraction")
       .order("started_at", { ascending: false })
       .limit(10);
+    // A failed read here would empty the editable list while the timer above
+    // kept working, which reads as "the entries are gone" rather than "the
+    // request failed" — the exact shape this rule exists to catch.
+    if (rawError) toast.error("Couldn't load recent contractions.");
     setRecent((rawRows ?? []) as BabyEvent[]);
 
     const viewRows = (viewRes.data ?? []) as ContractionRow[];
