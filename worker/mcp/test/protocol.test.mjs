@@ -216,6 +216,65 @@ console.log("\n[transport] method and verb handling");
     `got ${JSON.stringify(ping.body?.result)}`);
 }
 
+// ── Authorization framing ───────────────────────────────────────────────────
+//
+// The regression that cost an evening. Claude.ai's connector sends
+// `Authorization: <token>` with no scheme; the worker required `Bearer ` and
+// refused it. Discovery and initialize are unauthenticated so they succeeded —
+// the connector said "connected" — and tools/list, the first authenticated call,
+// 401'd every time. An empty tool list forever, and eventually a client that
+// decided the connection had expired against a server that holds no sessions.
+//
+// TOKEN maps to a throwaway UUID and reaches no database: tools/list returns the
+// static tool definitions immediately after the auth gate and never calls
+// Supabase. CI writes a .dev.vars containing it; to run these locally, add the
+// same entry to your own CONNECTOR_TOKEN_MAP or set MCP_TEST_TOKEN.
+console.log("\n[authorization] a bare token and a Bearer token must behave identically");
+{
+  const TOKEN = process.env.MCP_TEST_TOKEN ?? "mcp-ci-test-token";
+  const BAD = "definitely-not-a-real-connector-token";
+
+  async function toolsList(authHeader) {
+    return post({ jsonrpc: "2.0", id: 20, method: "tools/list" }, authHeader ? { Authorization: authHeader } : {});
+  }
+
+  const bearerValid = await toolsList(`Bearer ${TOKEN}`);
+  check("Bearer <valid>: HTTP 200", bearerValid.status === 200, `got ${bearerValid.status} ${JSON.stringify(bearerValid.body?.error)}`);
+  check("Bearer <valid>: 8 tools", (bearerValid.body?.result?.tools ?? []).length === 8,
+    `got ${(bearerValid.body?.result?.tools ?? []).length}`);
+
+  const bareValid = await toolsList(TOKEN);
+  check("bare <valid>: HTTP 200  [the regression]", bareValid.status === 200,
+    `got ${bareValid.status} ${JSON.stringify(bareValid.body?.error)}`);
+  check("bare <valid>: 8 tools  [the regression]", (bareValid.body?.result?.tools ?? []).length === 8,
+    `got ${(bareValid.body?.result?.tools ?? []).length}`);
+
+  // Framing must not change the outcome — that is the whole property.
+  check("bare and Bearer agree on the tool list",
+    JSON.stringify(bareValid.body?.result?.tools) === JSON.stringify(bearerValid.body?.result?.tools),
+    "the two framings returned different tool lists");
+
+  const bearerBad = await toolsList(`Bearer ${BAD}`);
+  check("Bearer <bad>: 401", bearerBad.status === 401, `got ${bearerBad.status}`);
+  check("Bearer <bad>: refused as unrecognised, not as malformed",
+    /unrecognised connector token/i.test(bearerBad.body?.error?.message ?? ""),
+    `got ${bearerBad.body?.error?.message}`);
+
+  const bareBad = await toolsList(BAD);
+  check("bare <bad>: 401", bareBad.status === 401, `got ${bareBad.status}`);
+  // The specific thing that used to be wrong: a bare token was rejected for its
+  // FRAMING before its value was ever looked at.
+  check("bare <bad>: refused as unrecognised, not for lacking a scheme",
+    /unrecognised connector token/i.test(bareBad.body?.error?.message ?? ""),
+    `got ${bareBad.body?.error?.message}`);
+
+  const absent = await toolsList(null);
+  check("no Authorization header: 401", absent.status === 401, `got ${absent.status}`);
+  check("no Authorization header: says the header is missing",
+    /missing Authorization header/i.test(absent.body?.error?.message ?? ""),
+    `got ${absent.body?.error?.message}`);
+}
+
 console.log(`\n=== ${passed} passed, ${failures.length} failed ===`);
 if (failures.length) {
   for (const f of failures) console.log("  FAILED:", f);

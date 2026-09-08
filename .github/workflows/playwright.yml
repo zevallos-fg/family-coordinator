@@ -78,7 +78,14 @@ jobs:
       - name: MCP protocol conformance
         working-directory: worker/mcp
         run: |
-          npx --yes wrangler@4.83.0 dev --local --port 8788 > /tmp/wrangler-dev.log 2>&1 &
+          # A throwaway token map, supplied with --var so no file is written and
+          # a developer's real .dev.vars is never involved. The UUID is fictional
+          # and reaches nothing: tools/list returns static definitions
+          # immediately after the auth gate and never calls Supabase, so these
+          # tests need no real credential and touch no database.
+          npx --yes wrangler@4.83.0 dev --local --port 8788 \
+            --var 'CONNECTOR_TOKEN_MAP:{"mcp-ci-test-token":"00000000-0000-4000-8000-000000000001"}' \
+            > /tmp/wrangler-dev.log 2>&1 &
           for i in $(seq 1 45); do
             if curl -sf http://127.0.0.1:8788/health > /dev/null 2>&1; then break; fi
             sleep 2

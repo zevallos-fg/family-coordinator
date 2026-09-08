@@ -55,10 +55,22 @@ export async function resolveUserId(
 ): Promise<string> {
   if (!authorization) throw new AuthError("missing Authorization header");
 
-  const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
-  if (!match) throw new AuthError("Authorization must be 'Bearer <token>'");
-  const presented = match[1].trim();
-  if (!presented) throw new AuthError("empty bearer token");
+  // The `Bearer ` prefix is optional.
+  //
+  // RFC 6750 requires it and every well-behaved client sends it — curl, the
+  // acceptance suite, mcp-remote and Claude Desktop all do. Claude.ai's connector
+  // does not: it sends `Authorization: <token>` with no scheme at all. Requiring
+  // the prefix meant every authenticated call from it was refused, which is why
+  // the connector reported "connected" (discovery and initialize are
+  // unauthenticated and succeeded) and then showed an empty tool list forever.
+  //
+  // Accepting both costs nothing in security. The presented value is compared
+  // against the connector token map in constant time either way; a credential is
+  // in the map or it is not, and how it was framed changes neither.
+  const raw = authorization.trim();
+  const withScheme = /^Bearer[ \t]+(.*)$/i.exec(raw);
+  const presented = (withScheme ? withScheme[1] : raw).trim();
+  if (!presented) throw new AuthError("empty Authorization header");
 
   let map: Record<string, string>;
   try {
