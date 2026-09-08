@@ -3382,6 +3382,16 @@ export type Database = {
           state: string
         }[]
       }
+      fn_baby_update: {
+        Args: {
+          p_ended_at?: string
+          p_id: string
+          p_note?: string
+          p_payload?: Json
+          p_started_at?: string
+        }
+        Returns: Database["public"]["Tables"]["baby_events"]["Row"]
+      }
       fn_chore_done: {
         Args: { p_chore_id: string; p_done_on?: string }
         Returns: {

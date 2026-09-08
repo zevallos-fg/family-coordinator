@@ -73,4 +73,16 @@ $$;
 comment on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) is
   'Correct a baby event. NULL arguments mean leave unchanged, so a running timer can have its start fixed without being stopped; an empty p_note clears the note. SECURITY INVOKER: RLS decides.';
 
+-- Supabase's ambient ALTER DEFAULT PRIVILEGES hands anon EXECUTE on every new
+-- function, and Postgres itself hands EXECUTE to PUBLIC. Neither is dangerous
+-- here — the function is SECURITY INVOKER, so an anonymous caller gets 42501
+-- from RLS rather than a write — but "harmless because something else stops it"
+-- is not a grant worth keeping, and leaving it in place would mean a replay of
+-- this file lands a DIFFERENT ACL than production carries. Revoked explicitly so
+-- the result is the same whatever the ambient defaults happen to be.
+revoke all on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) from public;
+revoke all on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) from anon;
+-- service_role too. It bypasses RLS, and a function whose entire purpose is to
+-- let RLS decide has no business being callable by the one role RLS ignores.
+revoke all on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) from service_role;
 grant execute on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) to authenticated;

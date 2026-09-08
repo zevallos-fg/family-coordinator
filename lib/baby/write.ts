@@ -134,20 +134,14 @@ export async function updateEvent(opts: {
   note?: string;
 }): Promise<WriteResult> {
   const supabase = createClient();
-  // Cast because lib/supabase/database.types.ts is generated from the APPLIED
-  // schema, and 20260908120000_fn_baby_update.sql has not been applied yet.
-  // Remove it the moment types are regenerated after that lands — a permanent
-  // cast here would hide a genuinely missing function behind a passing compile.
-  const rpc = supabase.rpc as unknown as (
-    fn: string,
-    args: Record<string, unknown>
-  ) => Promise<{ error: { message: string } | null }>;
-
-  const { error } = await rpc("fn_baby_update", {
+  const { error } = await supabase.rpc("fn_baby_update", {
     p_id: opts.id,
     ...(opts.startedAt ? { p_started_at: opts.startedAt } : {}),
     ...(opts.endedAt ? { p_ended_at: opts.endedAt } : {}),
-    ...(opts.payload ? { p_payload: opts.payload } : {}),
+    // FeedPayload is JSON-shaped in every field, but an interface without an
+    // index signature is not assignable to Json, so the conversion is spelled
+    // out once here rather than as `as never` at each call site.
+    ...(opts.payload ? { p_payload: opts.payload as Json } : {}),
     // Compared against undefined, not truthiness: "" is the value that clears it.
     ...(opts.note !== undefined ? { p_note: opts.note } : {}),
   });
