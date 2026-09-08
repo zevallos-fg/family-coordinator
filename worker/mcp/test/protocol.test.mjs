@@ -240,16 +240,26 @@ console.log("\n[authorization] a bare token and a Bearer token must behave ident
 
   const bearerValid = await toolsList(`Bearer ${TOKEN}`);
   check("Bearer <valid>: HTTP 200", bearerValid.status === 200, `got ${bearerValid.status} ${JSON.stringify(bearerValid.body?.error)}`);
-  check("Bearer <valid>: 8 tools", (bearerValid.body?.result?.tools ?? []).length === 8,
+  check("Bearer <valid>: 9 tools", (bearerValid.body?.result?.tools ?? []).length === 9,
     `got ${(bearerValid.body?.result?.tools ?? []).length}`);
 
   const bareValid = await toolsList(TOKEN);
   check("bare <valid>: HTTP 200  [the regression]", bareValid.status === 200,
     `got ${bareValid.status} ${JSON.stringify(bareValid.body?.error)}`);
-  check("bare <valid>: 8 tools  [the regression]", (bareValid.body?.result?.tools ?? []).length === 8,
+  check("bare <valid>: 9 tools  [the regression]", (bareValid.body?.result?.tools ?? []).length === 9,
     `got ${(bareValid.body?.result?.tools ?? []).length}`);
 
   // Framing must not change the outcome — that is the whole property.
+  const names = (bearerValid.body?.result?.tools ?? []).map((t) => t.name);
+  check("remember_task is advertised", names.includes("remember_task"), `got ${names.join(", ")}`);
+  const task = (bearerValid.body?.result?.tools ?? []).find((t) => t.name === "remember_task");
+  check("remember_task requires title and due_at",
+    JSON.stringify(task?.inputSchema?.required ?? []) === JSON.stringify(["title", "due_at"]),
+    `got ${JSON.stringify(task?.inputSchema?.required)}`);
+  check("remember_task does NOT require owner (optional, but must error when unknown)",
+    !(task?.inputSchema?.required ?? []).includes("owner"),
+    `got ${JSON.stringify(task?.inputSchema?.required)}`);
+
   check("bare and Bearer agree on the tool list",
     JSON.stringify(bareValid.body?.result?.tools) === JSON.stringify(bearerValid.body?.result?.tools),
     "the two framings returned different tool lists");
