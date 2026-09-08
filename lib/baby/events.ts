@@ -144,3 +144,21 @@ export function defaultKidId(
   });
   return sorted[0].id;
 }
+
+/**
+ * The chip groups worth offering for an event, given what has been answered.
+ *
+ * One function rather than the same `!g.showIf || g.showIf(payload)` line in
+ * four components: the rule it encodes — a wet-only change is never asked about
+ * poo consistency — is a product decision, and four copies of it can drift into
+ * three. The dashboard, the diaper page, the timer pages and the edit rows all
+ * ask here.
+ */
+export function visibleChipGroups(
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined
+): ChipGroup[] {
+  const groups = DETAIL_CHIPS[eventType as BabyEventType] ?? [];
+  const p = payload ?? {};
+  return groups.filter((g) => !g.showIf || g.showIf(p));
+}

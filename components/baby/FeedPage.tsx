@@ -8,7 +8,7 @@ import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
-import { logCompleted } from "@/lib/baby/write";
+import { logCompleted, updateEvent } from "@/lib/baby/write";
 import {
   SIDE_LABEL,
   displaySeconds,
@@ -103,15 +103,13 @@ export function FeedPage({ familyId }: { familyId: string }) {
         return;
       }
     } else {
-      const { error } = await supabase
-        .from("baby_events")
-        .update({
-          payload: next as never,
-          ...(opts?.end ? { ended_at: new Date().toISOString() } : {}),
-        })
-        .eq("id", open.id);
+      const result = await updateEvent({
+        id: open.id,
+        payload: next,
+        ...(opts?.end ? { endedAt: new Date().toISOString() } : {}),
+      });
       setPending(false);
-      if (error) {
+      if (!result.ok) {
         // Saying nothing here would leave a timer that looks like it is running
         // and a database that never heard about it.
         toast.error("Couldn't save that — the timer may not be recorded.");

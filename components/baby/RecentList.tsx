@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { deleteWithUndo } from "@/lib/undo";
-import { DETAIL_CHIPS, EVENT_LABEL, type BabyEvent, type BabyEventType } from "@/lib/baby/events";
+import { updateEvent } from "@/lib/baby/write";
+import { EVENT_LABEL, visibleChipGroups, type BabyEvent } from "@/lib/baby/events";
 import { eventDuration, eventSummary } from "@/lib/baby/summary";
 import { formatTimeOfDay } from "@/lib/baby/format";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
@@ -77,40 +77,20 @@ function RecentRow({
   const duration = eventDuration(event.started_at, event.ended_at);
 
   /**
-   * Every write goes through fn_baby_update rather than a direct table update:
-   * the function is SECURITY INVOKER with a pinned search_path, so RLS decides,
-   * and null arguments mean "leave alone" — which is what lets a running timer
-   * have its start corrected without being stopped.
+   * Corrections go through lib/baby/write.ts, which calls fn_baby_update rather
+   * than updating the table: an omitted field means "leave alone", which is what
+   * lets a running timer have its start corrected without being stopped.
    */
   async function patch(args: {
-    started_at?: string | null;
-    ended_at?: string | null;
+    startedAt?: string;
+    endedAt?: string;
     payload?: Record<string, Json>;
   }) {
     setSaving(true);
-    const supabase = createClient();
-    // Cast because lib/supabase/database.types.ts is generated from the applied
-    // schema, and 20260908120000_fn_baby_update.sql is not applied yet. Remove
-    // this the moment types are regenerated after it lands — a permanent cast
-    // here would hide a genuinely missing function behind a compile that passes.
-    const rpc = supabase.rpc as unknown as (
-      fn: string,
-      args: Record<string, unknown>
-    ) => Promise<{ error: { message: string } | null }>;
-    const { error } = await rpc("fn_baby_update", {
-      p_id: event.id,
-      ...(args.started_at ? { p_started_at: args.started_at } : {}),
-      ...(args.ended_at ? { p_ended_at: args.ended_at } : {}),
-      ...(args.payload ? { p_payload: args.payload as never } : {}),
-    });
+    const result = await updateEvent({ id: event.id, ...args });
     setSaving(false);
-    if (error) {
-      // 23514 is baby_events_interval_sane: an end before a start.
-      toast.error(
-        error.message.includes("interval_sane")
-          ? "That would end before it starts."
-          : "Couldn't save that change."
-      );
+    if (!result.ok) {
+      toast.error(result.message);
       return;
     }
     onChanged();
@@ -130,9 +110,7 @@ function RecentRow({
     });
   }
 
-  const groups = (DETAIL_CHIPS[event.event_type as BabyEventType] ?? []).filter(
-    (g) => !g.showIf || g.showIf(payload)
-  );
+  const groups = visibleChipGroups(event.event_type, payload);
 
   return (
     <li>
@@ -163,7 +141,7 @@ function RecentRow({
               const iso = fromLocalInputValue(startAt);
               // Only the start is sent. A running event keeps ended_at null and
               // keeps running — correcting a start must never require stopping.
-              if (iso) void patch({ started_at: iso });
+              if (iso) void patch({ startedAt: iso });
             }}
           />
 
@@ -176,7 +154,7 @@ function RecentRow({
               onChange={setEndAt}
               onCommit={() => {
                 const iso = fromLocalInputValue(endAt);
-                if (iso) void patch({ ended_at: iso });
+                if (iso) void patch({ endedAt: iso });
               }}
             />
           )}

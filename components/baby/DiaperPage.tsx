@@ -3,13 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
-import { logPoint } from "@/lib/baby/write";
-import { DETAIL_CHIPS } from "@/lib/baby/events";
+import { logPoint, updateEvent } from "@/lib/baby/write";
+import { visibleChipGroups } from "@/lib/baby/events";
 import type { Json } from "@/lib/supabase/database.types";
 
 type Mode = "diaper" | "potty";
@@ -77,17 +76,15 @@ export function DiaperPage({ familyId }: { familyId: string }) {
     if (!justLogged) return;
     const next = { ...justLogged.payload, [key]: value };
     setJustLogged({ ...justLogged, payload: next });
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("baby_events")
-      .update({ payload: next as never })
-      .eq("id", justLogged.id);
-    if (error) toast.error("Couldn't save that detail.");
+    const result = await updateEvent({ id: justLogged.id, payload: next });
+    if (!result.ok) toast.error(result.message);
     else await lane.refresh();
   }
 
-  const groups = DETAIL_CHIPS.diaper.filter(
-    (g) => g.key !== "contents" && (!g.showIf || g.showIf(justLogged?.payload ?? {}))
+  // Contents is the log itself, not a refinement, so it is dropped here — it was
+  // already answered by the tap that created the entry.
+  const groups = visibleChipGroups("diaper", justLogged?.payload ?? {}).filter(
+    (g) => g.key !== "contents"
   );
 
   return (

@@ -18,12 +18,18 @@
 -- its start corrected while ended_at stays null and the timer keeps running.
 -- Stopping a timer is fn_baby_toggle's job and stays there; this function has no
 -- way to express "clear ended_at", which is the one edit nobody asked for.
+--
+-- p_note is the exception to that rule and says so out loud: NULL still means
+-- leave alone, and an EMPTY STRING clears it. A note has to be erasable —
+-- "spat up" typed onto the wrong feed has to come off it — and an empty note and
+-- no note read identically, so collapsing '' to NULL loses nothing.
 
 create or replace function public.fn_baby_update(
   p_id uuid,
   p_started_at timestamptz default null,
   p_ended_at timestamptz default null,
-  p_payload jsonb default null
+  p_payload jsonb default null,
+  p_note text default null
 )
 returns public.baby_events
 language plpgsql
@@ -39,7 +45,12 @@ begin
          -- Replace rather than merge. The client sends the whole payload it is
          -- showing, so a merge would make it impossible to clear a chip — and
          -- clearing a wrong chip has to be as cheap as setting it.
-         payload    = coalesce(p_payload, payload)
+         payload    = coalesce(p_payload, payload),
+         note       = case
+                        when p_note is null then note
+                        when p_note = '' then null
+                        else p_note
+                      end
    where id = p_id
   returning * into v_row;
 
@@ -59,7 +70,7 @@ begin
 end;
 $$;
 
-comment on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb) is
-  'Correct a baby event. NULL arguments mean leave unchanged, so a running timer can have its start fixed without being stopped. SECURITY INVOKER: RLS decides.';
+comment on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) is
+  'Correct a baby event. NULL arguments mean leave unchanged, so a running timer can have its start fixed without being stopped; an empty p_note clears the note. SECURITY INVOKER: RLS decides.';
 
-grant execute on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb) to authenticated;
+grant execute on function public.fn_baby_update(uuid, timestamptz, timestamptz, jsonb, text) to authenticated;

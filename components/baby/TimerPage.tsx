@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { ManualRow } from "./FeedPage";
 import { useBabyLane } from "./useBabyLane";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
-import { logCompleted, toggleTimer } from "@/lib/baby/write";
-import { DETAIL_CHIPS, type BabyEventType } from "@/lib/baby/events";
+import { logCompleted, toggleTimer, updateEvent } from "@/lib/baby/write";
+import { visibleChipGroups, type BabyEventType } from "@/lib/baby/events";
 import { formatClock, secondsBetween } from "@/lib/baby/format";
 import type { Json } from "@/lib/supabase/database.types";
 
@@ -84,19 +83,15 @@ export function TimerPage({
     const target = open ?? lane.events.find((e) => e.event_type === type);
     if (!target) return;
     const current = (target.payload ?? {}) as Record<string, Json>;
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("baby_events")
-      .update({ payload: { ...current, [key]: value } as never })
-      .eq("id", target.id);
-    if (error) toast.error("Couldn't save that detail.");
+    const result = await updateEvent({ id: target.id, payload: { ...current, [key]: value } });
+    if (!result.ok) toast.error(result.message);
     else await lane.refresh();
   }
 
   const elapsed = open ? (secondsBetween(open.started_at, nowMs) ?? 0) : 0;
   const latest = open ?? lane.events.find((e) => e.event_type === type) ?? null;
   const payload = (latest?.payload ?? {}) as Record<string, Json>;
-  const groups = DETAIL_CHIPS[type].filter((g) => !g.showIf || g.showIf(payload));
+  const groups = visibleChipGroups(type, payload);
 
   return (
     <BabyPageShell
