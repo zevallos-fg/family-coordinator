@@ -12,6 +12,10 @@
     {
       "version": "20260907150000",
       "name": "baseline_production_schema"
+    },
+    {
+      "version": "20260908050000",
+      "name": "tasks_attribution"
     }
   ]
 }

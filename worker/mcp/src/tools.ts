@@ -161,6 +161,28 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "remember_task",
+    description:
+      "Record a one-off thing that has to be done by a date. Use this when there " +
+      "is a date; use remember_decision when the family has settled on something " +
+      "but nothing is scheduled. 'Book the dentist by Friday' is a task; " +
+      "'we're switching Mateo to the later nap' is a decision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "The thing to be done, in a few words." },
+        description: { type: "string", description: "Anything needed to actually do it." },
+        due_at: {
+          type: "string",
+          description:
+            "ISO-8601. When it is due. Required — a task without a date is a decision.",
+        },
+        owner: { type: "string", description: "Full name of the family member who owns it." },
+      },
+      required: ["title", "due_at"],
+    },
+  },
+  {
     name: "whats_due",
     description: "Everything currently due for the family: chores, tasks and dated decisions.",
     inputSchema: { type: "object", properties: {} },
@@ -270,6 +292,26 @@ export const HANDLERS: Record<string, Handler> = {
       target_family_id: familyId,
       p_query: str(args, "query"),
     });
+  },
+
+  async remember_task(db, userId, familyId, args) {
+    const ownerName = str(args, "owner", false);
+    const row = await db.insert<{ id: string }>("tasks", {
+      family_id: familyId,
+      title: str(args, "title"),
+      description: str(args, "description", false) || null,
+      // Required, and for the same reason observed_at is on remember_fact: a
+      // task is the shape that HAS a date. Defaulting it would quietly turn
+      // every undated intention into something claiming to be due now, and
+      // v_whats_due only shows tasks whose due_at is set — so a defaulted value
+      // would be both wrong and invisible.
+      due_at: requiredTimestamp(args, "due_at"),
+      owner_user_id: ownerName ? await resolveFamilyUser(db, ownerName) : null,
+      status: "open",
+      created_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "task", id: row.id };
   },
 
   async whats_due(db, _userId, familyId) {

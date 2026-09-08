@@ -16,6 +16,13 @@ compatibility_date = "2025-09-01"
 # credential; the token that can act on it is not in this repo.
 account_id = "7093d01612de7f4615fa5bc9c49a8fb6"
 
+# Persist console.log to Workers Logs, queryable in the dashboard.
+# `wrangler tail` has now failed twice on this machine — it dies on Windows with
+# "error while propagating signal to process: not supported by windows" and
+# captures nothing — so the observability path needs to not depend on it.
+[observability]
+enabled = true
+
 [vars]
 # Non-secret. The one project this Worker may talk to; enforced in code, and the
 # only Supabase origin any request is allowed to reach.
