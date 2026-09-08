@@ -173,12 +173,25 @@ test("one tap logs a diaper and one tap starts a feed once the baby exists", asy
   // One tap logs. Nothing is asked before it.
   await page.getByTestId("diaper-pee").click();
 
+  // The tap fires the insert and returns; the row lands a round trip later. Polled
+  // for the same reason every other database assertion in this file is, and the
+  // claim is unchanged — exactly one diaper, on this kid, wet.
+  await expect
+    .poll(async () => {
+      const { data } = await admin
+        .from("baby_events")
+        .select("id")
+        .eq("family_id", familyId)
+        .eq("event_type", "diaper");
+      return data?.length ?? 0;
+    })
+    .toBe(1);
+
   const diapers = await admin
     .from("baby_events")
     .select("id, kid_id, payload")
     .eq("family_id", familyId)
     .eq("event_type", "diaper");
-  expect(diapers.data).toHaveLength(1);
   expect(diapers.data![0].kid_id).toBe(kid!.id);
   expect((diapers.data![0].payload as { contents?: string }).contents).toBe("pee");
 
@@ -400,14 +413,26 @@ test("deleting an entry and undoing it restores the row with its payload", async
   await page.getByTestId("diaper-poo").click();
   await page.getByTestId("chip-consistency-loose").click();
 
+  // Both the tap and the chip are writes in flight, so the shape is polled for
+  // rather than read once. The claim is the same one: exactly one diaper, loose.
+  await expect
+    .poll(async () => {
+      const { data } = await admin
+        .from("baby_events")
+        .select("id, payload")
+        .eq("family_id", familyId)
+        .eq("event_type", "diaper");
+      if (data?.length !== 1) return `rows=${data?.length ?? 0}`;
+      return (data[0].payload as { consistency?: string }).consistency ?? "unset";
+    })
+    .toBe("loose");
+
   const before = await admin
     .from("baby_events")
     .select("id, payload")
     .eq("family_id", familyId)
     .eq("event_type", "diaper");
-  expect(before.data).toHaveLength(1);
   const original = before.data![0];
-  expect((original.payload as { consistency?: string }).consistency).toBe("loose");
 
   await page.getByTestId(`recent-row-${original.id}`).click();
   await page.getByTestId("edit-delete").click();

@@ -68,6 +68,11 @@ export function BabyIndex({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [links, setLinks] = useState<ShareLink[]>([]);
+  // Bumped whenever a link is minted or revoked. The list used to key off
+  // lane.events.length, which is a proxy for the wrong thing: creating a share
+  // link adds no event, so a link you had just made never appeared and could not
+  // be revoked without reloading the page.
+  const [linksVersion, setLinksVersion] = useState(0);
 
   const visibleForKid = lane.events.filter(
     (e) => e.event_type === "contraction" || lane.kidId === null || e.kid_id === lane.kidId
@@ -103,7 +108,7 @@ export function BabyIndex({ familyId }: { familyId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [familyId, lane.events.length]);
+  }, [familyId, linksVersion]);
 
   const totals = todayTotals(visibleForKid, nowMs);
 
@@ -212,7 +217,14 @@ export function BabyIndex({ familyId }: { familyId: string }) {
 
       <BabyToday events={visibleToday} onChanged={lane.refresh} />
 
-      <ShareLinks familyId={familyId} links={links} onChanged={lane.refresh} />
+      <ShareLinks
+        familyId={familyId}
+        links={links}
+        onChanged={() => {
+          void lane.refresh();
+          setLinksVersion((v) => v + 1);
+        }}
+      />
     </div>
   );
 }
