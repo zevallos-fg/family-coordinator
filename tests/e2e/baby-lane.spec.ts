@@ -45,7 +45,7 @@ test.afterAll(async () => {
   await wipe();
 });
 
-test("the baby button is on /now before any scrolling, and opens a sheet", async ({
+test("the baby button is on /now before any scrolling, and goes to the lane", async ({
   page,
 }) => {
   await page.goto("/now");
@@ -60,9 +60,11 @@ test("the baby button is on /now before any scrolling, and opens a sheet", async
   expect(box!.y + box!.height).toBeLessThan(viewport!.height);
 
   await button.click();
-  await expect(page.getByRole("dialog", { name: "Baby" })).toBeVisible();
-  // A sheet, not a page: the route must not change.
-  expect(new URL(page.url()).pathname).toBe("/now");
+  // A route, not a sheet. Deep-linkable, survives dismissal, and lets a launcher
+  // long-press land straight on a timer.
+  await expect(page).toHaveURL(/\/baby$/);
+  await expect(page.getByTestId("baby-card-feed")).toBeVisible();
+  await expect(page.getByTestId("baby-card-contraction")).toBeVisible();
 });
 
 test("the contraction timer starts and stops with no child record at all", async ({
@@ -74,8 +76,7 @@ test("the contraction timer starts and stops with no child record at all", async
     .eq("family_id", familyId);
   expect(count, "this test is about the state before the baby exists").toBe(0);
 
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
+  await page.goto("/baby/contractions");
 
   const toggle = page.getByTestId("contraction-toggle");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -105,8 +106,7 @@ test("the contraction timer starts and stops with no child record at all", async
 });
 
 test("a running contraction survives a full page reload", async ({ page }) => {
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
+  await page.goto("/baby/contractions");
   await page.getByTestId("contraction-toggle").click();
   await expect(page.getByTestId("contraction-toggle")).toHaveAttribute(
     "aria-pressed",
@@ -116,25 +116,39 @@ test("a running contraction survives a full page reload", async ({ page }) => {
   // Closing the app is the case that matters. Local state cannot survive it;
   // ended_at IS NULL has to be what the UI reads back.
   await page.reload();
-  await expect(page.getByTestId("baby-open")).toContainText("Contraction running");
-
-  await page.getByTestId("baby-open").click();
   await expect(page.getByTestId("contraction-toggle")).toHaveAttribute(
     "aria-pressed",
     "true"
   );
+
+  // And it is still visibly running from the index and from /now, because
+  // ended_at IS NULL is the source of truth rather than anything in this tab.
+  await page.goto("/baby");
+  await expect(page.getByTestId("baby-card-contraction")).toHaveAttribute(
+    "data-running",
+    "true"
+  );
+  await page.goto("/now");
+  await expect(page.getByTestId("baby-open")).toContainText("Contraction running");
 });
 
-test("tiles explain themselves and write nothing while there is no child record", async ({
+test("each page explains itself and writes nothing while there is no child record", async ({
   page,
 }) => {
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
+  await page.goto("/baby/feed");
+  await expect(page.getByTestId("baby-blocked")).toBeVisible();
+  await expect(page.getByTestId("nursing-L")).toBeDisabled();
+  await expect(page.getByTestId("nursing-R")).toBeDisabled();
 
-  await expect(page.getByTestId("baby-tiles-blocked")).toBeVisible();
-  for (const type of ["feed", "diaper", "sleep", "pump"]) {
-    await expect(page.getByTestId(`baby-tile-${type}`)).toBeDisabled();
+  await page.goto("/baby/diaper");
+  await expect(page.getByTestId("baby-blocked")).toBeVisible();
+  for (const contents of ["pee", "poo", "both", "dry"]) {
+    await expect(page.getByTestId(`diaper-${contents}`)).toBeDisabled();
   }
+
+  await page.goto("/baby/sleep");
+  await expect(page.getByTestId("baby-blocked")).toBeVisible();
+  await expect(page.getByTestId("sleep-toggle")).toBeDisabled();
 
   const { count } = await admin
     .from("baby_events")
@@ -153,38 +167,53 @@ test("one tap logs a diaper and one tap starts a feed once the baby exists", asy
     .single();
   expect(error).toBeNull();
 
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
-  await expect(page.getByTestId("baby-tiles-blocked")).toHaveCount(0);
+  await page.goto("/baby/diaper");
+  await expect(page.getByTestId("baby-blocked")).toHaveCount(0);
 
-  // Point event: one tap, done. No form, no modal, no confirm.
-  await page.getByTestId("baby-tile-diaper").click();
-  await expect(page.getByTestId("baby-tile-diaper")).toContainText("1");
+  // One tap logs. Nothing is asked before it.
+  await page.getByTestId("diaper-pee").click();
 
   const diapers = await admin
     .from("baby_events")
-    .select("id, kid_id, ended_at")
+    .select("id, kid_id, payload")
     .eq("family_id", familyId)
     .eq("event_type", "diaper");
   expect(diapers.data).toHaveLength(1);
   expect(diapers.data![0].kid_id).toBe(kid!.id);
+  expect((diapers.data![0].payload as { contents?: string }).contents).toBe("pee");
 
-  // Timer event: first tap starts it, and the tile says so.
-  const feed = page.getByTestId("baby-tile-feed");
-  await feed.click();
-  await expect(feed).toHaveAttribute("aria-pressed", "true");
-  await expect(feed).toContainText("Tap to stop");
+  // Detail is offered only AFTER, and only where it makes sense: a wet-only
+  // change is never asked about poo consistency.
+  await expect(page.getByTestId("chip-pee_amount-medium")).toBeVisible();
+  await expect(page.getByTestId("chip-consistency-loose")).toHaveCount(0);
 
-  await feed.click();
-  await expect(feed).toHaveAttribute("aria-pressed", "false");
+  await page.getByTestId("chip-pee_amount-medium").click();
+  await expect
+    .poll(async () => {
+      const { data } = await admin
+        .from("baby_events")
+        .select("payload")
+        .eq("family_id", familyId)
+        .eq("event_type", "diaper");
+      return (data?.[0]?.payload as { pee_amount?: string })?.pee_amount ?? null;
+    })
+    .toBe("medium");
 
-  const feeds = await admin
+  // Sleep is a timer, on its own page, and one tap starts it.
+  await page.goto("/baby/sleep");
+  const sleep = page.getByTestId("sleep-toggle");
+  await sleep.click();
+  await expect(sleep).toHaveAttribute("data-running", "true");
+  await sleep.click();
+  await expect(sleep).toHaveAttribute("data-running", "false");
+
+  const sleeps = await admin
     .from("baby_events")
     .select("id, ended_at")
     .eq("family_id", familyId)
-    .eq("event_type", "feed");
-  expect(feeds.data).toHaveLength(1);
-  expect(feeds.data![0].ended_at).not.toBeNull();
+    .eq("event_type", "sleep");
+  expect(sleeps.data).toHaveLength(1);
+  expect(sleeps.data![0].ended_at).not.toBeNull();
 });
 
 test("a share link reads anonymously, shows its URL once, and dies on revoke", async ({
@@ -194,13 +223,13 @@ test("a share link reads anonymously, shows its URL once, and dies on revoke", a
   page: import("@playwright/test").Page;
   browser: Browser;
 }) => {
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
-
   // One contraction to read back through the link.
+  await page.goto("/baby/contractions");
   await page.getByTestId("contraction-toggle").click();
   await page.getByTestId("contraction-toggle").click();
 
+  // Share links live on the lane's index.
+  await page.goto("/baby");
   await page.getByPlaceholder("Who is this for?").fill("E2E Midwife");
   await page.getByRole("button", { name: "Create link" }).click();
 
@@ -218,10 +247,9 @@ test("a share link reads anonymously, shows its URL once, and dies on revoke", a
   // A public page must carry no app shell and no way into the family's data.
   await expect(anonPage.getByRole("navigation")).toHaveCount(0);
 
-  // Scoped to the share box. Unscoped, this matched a second button: the sheet
-  // opens over /now, and a chore row there is labelled "Mark <item> done", which
-  // an accessible-name lookup for "Done" also matches. It only collided while
-  // now.spec.ts had its chore seeded, so it passed alone and failed in the suite.
+  // Scoped to the share box. Unscoped this once matched a second button, back
+  // when the lane opened over /now and a chore row labelled "Mark <item> done"
+  // also answered to "Done". The scope stays regardless of the route move.
   await page.getByTestId("fresh-share-url").getByRole("button", { name: "Done" }).click();
   await expect(page.getByTestId("fresh-share-url")).toHaveCount(0);
   await expect(page.getByText(shareUrl)).toHaveCount(0);
@@ -244,8 +272,7 @@ test("nursing records two ordered segments in one session, and suggests the othe
     .single();
   expect(error).toBeNull();
 
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
+  await page.goto("/baby/feed");
 
   // With no history, a first feed has to start somewhere, and the badge says where.
   await expect(page.getByTestId("nursing-suggested-L")).toBeVisible();
@@ -285,14 +312,13 @@ test("nursing records two ordered segments in one session, and suggests the othe
   };
   expect(payload.method).toBe("breast");
   expect(payload.segments?.map((s) => s.side)).toEqual(["R", "L"]);
-  // Nothing may be left running on a finished session, or the sheet reopens
-  // with a clock that never stops.
+  // Nothing may be left running on a finished session, or the page reopens with
+  // a clock that never stops.
   expect(payload.running ?? null).toBeNull();
   expect(payload.last_side).toBe("L");
 
   // Next session starts on the opposite side to the one that finished last.
   await page.reload();
-  await page.getByTestId("baby-open").click();
   await expect(page.getByTestId("nursing-suggested-R")).toBeVisible();
 });
 
@@ -302,15 +328,17 @@ test("a nursing session in progress survives the app closing", async ({ page }) 
     .insert({ family_id: familyId, name: KID_NAME, birth_date: "2026-09-01" });
   expect(error).toBeNull();
 
-  await page.goto("/now");
-  await page.getByTestId("baby-open").click();
+  await page.goto("/baby/feed");
   await page.getByTestId("nursing-L").click();
   await expect(page.getByTestId("nursing-L")).toHaveAttribute("data-running", "true");
 
   // The clock lives in the row's payload, not in a setInterval that dies with
   // the tab. A full reload is the closest a test gets to closing the app.
   await page.reload();
-  await page.getByTestId("baby-open").click();
   await expect(page.getByTestId("nursing-L")).toHaveAttribute("data-running", "true");
   await expect(page.getByTestId("nursing-done")).toBeVisible();
+
+  // ...and the index shows it running too, from a cold load.
+  await page.goto("/baby");
+  await expect(page.getByTestId("baby-card-feed")).toHaveAttribute("data-running", "true");
 });
