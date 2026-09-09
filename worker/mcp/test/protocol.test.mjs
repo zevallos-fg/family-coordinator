@@ -227,8 +227,9 @@ console.log("\n[transport] method and verb handling");
 //
 // TOKEN maps to a throwaway UUID and reaches no database: tools/list returns the
 // static tool definitions immediately after the auth gate and never calls
-// Supabase. CI writes a .dev.vars containing it; to run these locally, add the
-// same entry to your own CONNECTOR_TOKEN_MAP or set MCP_TEST_TOKEN.
+// Supabase. CI seeds it into the local KV as token:<sha256>; to run these
+// locally do the same (see the MCP protocol conformance step in the workflow),
+// or set MCP_TEST_TOKEN to a token your own local KV already knows.
 console.log("\n[authorization] a bare token and a Bearer token must behave identically");
 {
   const TOKEN = process.env.MCP_TEST_TOKEN ?? "mcp-ci-test-token";
@@ -283,6 +284,50 @@ console.log("\n[authorization] a bare token and a Bearer token must behave ident
   check("no Authorization header: says the header is missing",
     /missing Authorization header/i.test(absent.body?.error?.message ?? ""),
     `got ${absent.body?.error?.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// THE UNMINTED TOKEN. The other evening this cost.
+//
+// A family member held a token that was 43 valid base64url characters, correctly
+// formed in every respect a human could check by eye, and that the gate had never
+// heard of — a second run of link-user.mjs had minted it while the connector token
+// map still held the first. Every instinct said "it looks right, put it in the
+// map", and doing that would have made an unverifiable string into a live
+// credential for a real family's data.
+//
+// Shape is not provenance. Only having been minted is provenance, and after the
+// move to KV that means exactly one thing: an entry exists under the SHA-256 of
+// the token. This asserts the property directly rather than leaving it implied by
+// the storage mechanism, because the storage mechanism is precisely what changed.
+console.log("\n[authorization] a well-formed token that was never minted must be refused");
+{
+  const TOKEN = process.env.MCP_TEST_TOKEN ?? "mcp-ci-test-token";
+
+  // Deliberately the same shape link-user.mjs produces: 32 random bytes, base64url,
+  // 43 characters, no padding. Indistinguishable from a real one by inspection.
+  const unminted = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+  check("the fixture is genuinely token-shaped", /^[A-Za-z0-9_-]{43}$/.test(unminted),
+    `built a ${unminted.length}-char fixture, which would make the test prove nothing`);
+
+  for (const [label, header] of [["Bearer", `Bearer ${unminted}`], ["bare", unminted]]) {
+    const res = await post({ jsonrpc: "2.0", id: 30, method: "tools/list" }, { Authorization: header });
+    check(`unminted 43-char token (${label}): 401`, res.status === 401, `got ${res.status}`);
+    check(`unminted 43-char token (${label}): no tools leaked`,
+      res.body?.result === undefined,
+      `got a result: ${JSON.stringify(res.body?.result)?.slice(0, 120)}`);
+    check(`unminted 43-char token (${label}): refused as unrecognised, not as malformed`,
+      /unrecognised connector token/i.test(res.body?.error?.message ?? ""),
+      `got ${res.body?.error?.message}`);
+  }
+
+  // The control, without which the above proves only that the worker refuses
+  // things. A token of the SAME shape that WAS minted has to be accepted, or the
+  // refusal above could be about length, charset, or nothing at all.
+  const minted = await post({ jsonrpc: "2.0", id: 31, method: "tools/list" }, { Authorization: `Bearer ${TOKEN}` });
+  check("a minted token of the same shape is still accepted",
+    minted.status === 200 && (minted.body?.result?.tools ?? []).length === 9,
+    `got ${minted.status} with ${(minted.body?.result?.tools ?? []).length} tools`);
 }
 
 console.log(`\n=== ${passed} passed, ${failures.length} failed ===`);

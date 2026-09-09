@@ -121,11 +121,21 @@ async function main() {
 
   assert(admin, "harness needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local");
 
-  // Which user is the connector token supposed to be? Read from the map so the
-  // test cannot disagree with the server about it.
-  const tokenMap = JSON.parse(devVars.CONNECTOR_TOKEN_MAP ?? "{}");
-  const mappedUserId = tokenMap[CONNECTOR_TOKEN];
-  assert(mappedUserId, "TEST_CONNECTOR_TOKEN is not present in CONNECTOR_TOKEN_MAP in .dev.vars");
+  // Which user is the connector token supposed to be?
+  //
+  // This used to be derived from the CONNECTOR_TOKEN_MAP in .dev.vars, which had
+  // the nice property that the harness could not disagree with the server. Tokens
+  // live in KV now, keyed by a hash the harness cannot invert, so the expectation
+  // has to be stated instead of derived — and stating it is the point: the tests
+  // below assert that rows are attributed to THIS user, so a wrong value here
+  // fails loudly rather than passing against whoever the token happens to
+  // resolve to.
+  const mappedUserId = devVars.TEST_CONNECTOR_USER_ID;
+  assert(
+    mappedUserId,
+    "set TEST_CONNECTOR_USER_ID in .dev.vars to the Supabase user id that " +
+      "TEST_CONNECTOR_TOKEN was minted for (link-user.mjs prints it)"
+  );
 
   // Probe once: can the server actually act as this user? That needs a refresh
   // token in KV for them. Anything else and the write tests skip with the real

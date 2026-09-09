@@ -31,7 +31,12 @@ SUPABASE_URL = "https://pmficrajnyeuworrqytn.supabase.co"
 # Secrets — set with `wrangler secret put <NAME>`, never committed:
 #   SUPABASE_ANON_KEY    public anon key; required as the `apikey` header. Not a
 #                        privilege: on its own it is role=anon and RLS-bound.
-#   CONNECTOR_TOKEN_MAP  JSON: {"<connector-token>":"<supabase auth user uuid>"}
+#
+# Connector tokens are NOT a secret here. They live in the TOKENS KV namespace,
+# keyed by SHA-256, written by scripts/link-user.mjs — the single writer of both
+# halves of a linked user. They used to be a secret map maintained by hand from a
+# value that script printed, which drifted from the KV half exactly as that
+# arrangement invites.
 #
 # Explicitly NOT set here, and the code has no path that would use one:
 #   SUPABASE_SERVICE_ROLE_KEY, any Supabase PAT, and — since the switch to

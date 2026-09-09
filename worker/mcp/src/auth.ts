@@ -14,8 +14,7 @@
 export interface Env {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
-  CONNECTOR_TOKEN_MAP: string;
-  /** Per-user refresh tokens and cached access tokens. */
+  /** Connector tokens, per-user refresh tokens, and cached access tokens. */
   TOKENS: KVNamespace;
 }
 
@@ -26,33 +25,37 @@ const ACCESS_TOKEN_SAFETY_MARGIN_SECONDS = 60;
 
 export class AuthError extends Error {}
 
-// Length-independent comparison. Hashing both sides first means the compare runs
-// over fixed-width digests, so neither the token's length nor its first differing
-// byte is observable from timing.
-async function safeEqual(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const [ha, hb] = await Promise.all([
-    crypto.subtle.digest("SHA-256", enc.encode(a)),
-    crypto.subtle.digest("SHA-256", enc.encode(b)),
-  ]);
-  const va = new Uint8Array(ha);
-  const vb = new Uint8Array(hb);
-  let diff = 0;
-  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
-  return diff === 0;
+/**
+ * KV key for a connector token.
+ *
+ * The token is HASHED into the key rather than used as one. KV key names are
+ * returned in full by `wrangler kv key list`, so a raw-token key would put every
+ * live credential in the output of a read-only listing — worse than the secret it
+ * replaces. A SHA-256 digest is not reversible and is just as good a lookup key.
+ */
+async function tokenKey(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `token:${hex}`;
 }
 
 /**
  * Resolve the bearer token to a Supabase auth user id.
  *
- * The map is the ONLY source of user identity. A request cannot name the user it
- * wants to act as: an unmapped token is rejected outright rather than falling back
- * to a default or to anything in the request body.
+ * KV is the ONLY source of user identity. A request cannot name the user it wants
+ * to act as: a token with no KV entry is rejected outright rather than falling
+ * back to a default or to anything in the request body.
+ *
+ * This used to read a JSON map held as a Worker secret. The map was written by
+ * hand from a value `link-user.mjs` printed, while the same script wrote the
+ * user's refresh token to KV itself — so one half of a linked user was automatic
+ * and the other was a manual step in a console scroll-back. They drifted, exactly
+ * as that arrangement invites: a family member ended up holding a correctly
+ * formed token the gate had never heard of, because a second run of the script
+ * had minted a new one and the map still held the first. `link-user.mjs` is now
+ * the single writer of both halves.
  */
-export async function resolveUserId(
-  authorization: string | null,
-  tokenMapJson: string
-): Promise<string> {
+export async function resolveUserId(authorization: string | null, env: Env): Promise<string> {
   if (!authorization) throw new AuthError("missing Authorization header");
 
   // The `Bearer ` prefix is optional.
@@ -64,28 +67,24 @@ export async function resolveUserId(
   // the connector reported "connected" (discovery and initialize are
   // unauthenticated and succeeded) and then showed an empty tool list forever.
   //
-  // Accepting both costs nothing in security. The presented value is compared
-  // against the connector token map in constant time either way; a credential is
-  // in the map or it is not, and how it was framed changes neither.
+  // Accepting both costs nothing in security. Either framing produces the same
+  // lookup key; a credential has a KV entry or it does not, and how it was framed
+  // changes neither.
   const raw = authorization.trim();
-  const withScheme = /^Bearer[ \t]+(.*)$/i.exec(raw);
+  const withScheme = /^Bearer[ 	]+(.*)$/i.exec(raw);
   const presented = (withScheme ? withScheme[1] : raw).trim();
   if (!presented) throw new AuthError("empty Authorization header");
 
-  let map: Record<string, string>;
-  try {
-    map = JSON.parse(tokenMapJson);
-  } catch {
-    throw new AuthError("connector token map is not valid JSON");
-  }
+  // A single lookup by digest, where the old code compared against every entry in
+  // constant time. That loop existed so a near-miss could not be distinguished
+  // from a miss by timing; a hash lookup gives that away for free, because the
+  // work done is identical whatever the token is. What remains observable is hit
+  // versus miss, which the response states outright anyway.
+  const userId = await env.TOKENS.get(await tokenKey(presented));
 
-  // Compare against every entry rather than a map lookup, so a miss costs the same
-  // as a hit and the loop cannot be short-circuited by a near-miss token.
-  let userId: string | null = null;
-  for (const [token, mappedUser] of Object.entries(map)) {
-    if (await safeEqual(token, presented)) userId = mappedUser;
-  }
-
+  // Deliberately the same message whether the token was never minted, was minted
+  // for another deployment, or has been revoked by deleting its key. A caller who
+  // is not recognised learns that and nothing else.
   if (!userId) throw new AuthError("unrecognised connector token");
   if (!UUID_RE.test(userId)) {
     throw new AuthError("connector token maps to something that is not a user id");
