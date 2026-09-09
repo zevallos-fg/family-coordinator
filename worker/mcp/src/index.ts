@@ -315,7 +315,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
     let userId: string;
     try {
-      userId = await resolveUserId(request.headers.get("Authorization"), env.CONNECTOR_TOKEN_MAP ?? "{}");
+      userId = await resolveUserId(request.headers.get("Authorization"), env);
     } catch (err) {
       if (!(err instanceof AuthError)) throw err;
       // 401 with a challenge, never a silent empty result: a caller that is not

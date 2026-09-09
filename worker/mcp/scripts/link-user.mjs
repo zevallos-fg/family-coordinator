@@ -4,8 +4,17 @@
 //
 // What this does:
 //   1. signs the user in (magic link, consumed here — no email is sent to them)
-//   2. writes the resulting REFRESH token to KV as refresh:<user-id>
-//   3. prints the connector-token map entry to set as a Worker secret
+//   2. revokes that user's PREVIOUS connector token, if they had one
+//   3. writes the new connector token to KV as token:<sha256>
+//   4. writes the resulting REFRESH token to KV as refresh:<user-id>
+//   5. prints the connector token once
+//
+// This script is the SINGLE WRITER of everything a linked user consists of.
+// It used to write the refresh token itself and merely print the connector-token
+// map entry for a human to set as a Worker secret — one half automatic, the other
+// a manual step in a console scroll-back. They drifted: a second run minted a new
+// token, the map was never updated, and a family member spent an evening holding
+// a correctly formed credential the gate had never heard of.
 //
 // The Worker then exchanges that refresh token for access tokens on demand. It
 // never holds a signing secret, so the worst a compromise yields is one user's
@@ -20,7 +29,7 @@ import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createClient } from "@supabase/supabase-js";
 
@@ -84,52 +93,92 @@ if (otpErr) {
 const session = sessionData.session;
 const userId = session.user.id;
 
-// Store the refresh token, not the access token: access tokens expire in an hour
-// and the Worker needs to keep working without anyone re-running this.
-//
-// The value goes via --path rather than as an argument. A refresh token on a
-// command line would be visible to `ps` and would land in shell history, and
-// passing it through a shell would make its contents parseable as syntax.
-const tmp = resolve(tmpdir(), `fc-refresh-${randomBytes(8).toString("hex")}`);
-writeFileSync(tmp, session.refresh_token, { mode: 0o600 });
+// Every KV operation this script performs, in one place. shell:true is needed
+// for npx on Windows and is safe here: every argument is a fixed string, a UUID
+// Supabase gave us, a SHA-256 digest, or a hex temp path. No secret is ever an
+// argument — the two that are secret (the refresh token, the connector token)
+// travel by --path.
+const SCOPE = local ? "--local" : "--remote";
 
-const kvArgs = [
-  "wrangler",
-  "kv",
-  "key",
-  "put",
-  "--binding",
-  "TOKENS",
-  `refresh:${userId}`,
-  "--path",
-  tmp,
-  local ? "--local" : "--remote",
-];
+function kv(...args) {
+  return execFileSync("npx", ["wrangler", "kv", "key", ...args, "--binding", "TOKENS", SCOPE], {
+    cwd: resolve(HERE, ".."),
+    stdio: ["ignore", "pipe", "inherit"],
+    shell: true,
+    encoding: "utf8",
+  });
+}
 
-try {
-  // shell:true is needed for npx on Windows, and is safe here: every argument is
-  // either a fixed string, a UUID Supabase gave us, or a hex temp path. The one
-  // value an attacker could influence — the refresh token — is in the file, not
-  // on the command line.
-  execFileSync("npx", kvArgs, { cwd: resolve(HERE, ".."), stdio: "inherit", shell: true });
-} finally {
-  rmSync(tmp, { force: true });
+function kvPutFile(key, secret) {
+  // A secret on a command line is visible to `ps` and lands in shell history, and
+  // passing it through a shell makes its contents parseable as syntax.
+  const tmp = resolve(tmpdir(), `fc-kv-${randomBytes(8).toString("hex")}`);
+  writeFileSync(tmp, secret, { mode: 0o600 });
+  try {
+    kv("put", key, "--path", tmp);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+function kvGet(key) {
+  try {
+    return kv("get", key).trim() || null;
+  } catch {
+    // wrangler exits non-zero on a missing key rather than printing nothing.
+    return null;
+  }
 }
 
 const connectorToken = randomBytes(32).toString("base64url");
+const tokenKey = `token:${createHash("sha256").update(connectorToken).digest("hex")}`;
+const pointerKey = `tokenkey:${userId}`;
+
+// REVOKE FIRST, then mint. Reminting used to revoke implicitly, because the
+// connector token map was rewritten wholesale and the old entry simply ceased to
+// exist. KV entries do not vanish when a new one is written, so without this the
+// previous token would stay valid forever and "rotating" would mean handing out a
+// second key to the same door.
+//
+// The reverse index exists for exactly this: finding the old token from the user
+// id, without listing every key in the namespace and reading each one back.
+// Ordering is deliberate — there is a brief window with NO valid token for this
+// user, which is the right way round. The alternative leaves a window with two.
+const previous = kvGet(pointerKey);
+if (previous) {
+  kv("delete", previous);
+  console.log(`revoked previous connector token (${previous.slice(0, 14)}…)`);
+}
+// The cached access token is a live credential for this user. If this run is a
+// response to a suspected leak, leaving it in place would keep that leak useful
+// for up to an hour.
+try {
+  kv("delete", `access:${userId}`);
+} catch {
+  // Nothing cached. Not an error.
+}
+
+kvPutFile(`refresh:${userId}`, session.refresh_token);
+kvPutFile(tokenKey, userId);
+kvPutFile(pointerKey, tokenKey);
 
 console.log(`
 
 Linked ${email}
   user id        ${userId}
-  refresh token  stored at refresh:${userId} in KV (${local ? "local" : "remote"})
+  refresh token  stored at refresh:${userId} (${local ? "local" : "remote"})
+  connector      stored at ${tokenKey.slice(0, 20)}…
 
-Set the connector token map so the Worker can recognise this person:
+  ${connectorToken}
 
-  npx wrangler secret put CONNECTOR_TOKEN_MAP
-  {"${connectorToken}":"${userId}"}
+That is the connector token. It is shown ONCE and is stored nowhere in readable
+form — KV holds only its SHA-256, because \`wrangler kv key list\` prints key names
+in full and a raw-token key would put every live credential in the output of a
+read-only listing.
 
-Give ${email} the connector token above. It is shown once and is not stored here.
-Signing this user out in the Supabase dashboard revokes the stored refresh token
-and disables the connector immediately.
+Give it to ${email}. Nothing else needs setting: this script wrote both halves of
+the link, so there is no secret to update and nothing to keep in step by hand.
+
+To revoke: delete ${tokenKey.slice(0, 20)}… , or sign the user out in Supabase,
+which kills the stored refresh token immediately.
 `);

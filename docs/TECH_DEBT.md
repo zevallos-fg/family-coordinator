@@ -245,3 +245,31 @@ Each has a SKIP-REASON comment in the test file.
   The worker now logs status, byte count and latency, and reads the Authorization header in exactly
   one place: the gate that authenticates it. Nothing logs any part of that header, in any form,
   fingerprinted or otherwise.
+
+- **Two writers kept one fact, and the fact drifted.** Resolved 2026-09-08 by moving connector
+  tokens into KV; recorded because the failure was structural, not careless.
+
+  `link-user.mjs` linked a user in two halves. It wrote the refresh token to KV **itself**, and it
+  *printed* the connector-token map entry for a human to set as a Worker secret. One half could not
+  be forgotten; the other was a manual step in a console scroll-back. Run the script twice, apply
+  the map once, and a family member holds a correctly formed token the gate has never heard of.
+
+  That is exactly what happened. Yenny's token was 43 valid base64url characters, indistinguishable
+  by eye from a real one, and 401'd — because a second run had minted it while the map still held
+  the first. Two evenings were lost between the two halves of this: one to the missing `Bearer `
+  prefix, one to this.
+
+  The tempting fix was to put the token she held into the map. It would have worked. It would also
+  have made a string of unverifiable origin into a live credential for a real family's data on the
+  strength of its **length** — and shape is not provenance. The right question was not "is this
+  token valid?" but "can I establish where it came from?", and the answer was no.
+
+  Fixed by deleting the manual half rather than automating it: KV holds `token:<sha256>` → user id,
+  and `link-user.mjs` writes it. One writer. Re-minting now also revokes the previous token, which
+  the map did implicitly by being rewritten wholesale and KV does not — a reverse index,
+  `tokenkey:<uuid>`, exists solely so that revocation does not require scanning the namespace.
+
+  The general lesson, worth more than the specific fix: **if a single fact is maintained in two
+  places by two different mechanisms, one automatic and one manual, it will drift, and the drift
+  will surface as an authentication failure nobody can explain.** Prefer deleting a writer to
+  synchronising two.

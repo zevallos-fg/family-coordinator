@@ -78,13 +78,23 @@ jobs:
       - name: MCP protocol conformance
         working-directory: worker/mcp
         run: |
-          # A throwaway token map, supplied with --var so no file is written and
-          # a developer's real .dev.vars is never involved. The UUID is fictional
-          # and reaches nothing: tools/list returns static definitions
-          # immediately after the auth gate and never calls Supabase, so these
-          # tests need no real credential and touch no database.
+          # Tokens live in KV now, so the fixture is seeded into the LOCAL KV
+          # rather than passed as a --var. Same persistence directory that
+          # wrangler dev --local reads from, and nothing is written outside the
+          # runner.
+          #
+          # The UUID is fictional and reaches nothing: tools/list returns static
+          # definitions immediately after the auth gate and never calls Supabase,
+          # so these tests need no real credential and touch no database.
+          #
+          # The key is the SHA-256 of the token, because that is what the worker
+          # looks up. Computed here rather than hardcoded, so the fixture and the
+          # worker cannot disagree about the hashing.
+          TOKEN_HASH=$(printf %s 'mcp-ci-test-token' | sha256sum | cut -d' ' -f1)
+          npx --yes wrangler@4.83.0 kv key put --local --binding TOKENS \
+            "token:$TOKEN_HASH" '00000000-0000-4000-8000-000000000001'
+
           npx --yes wrangler@4.83.0 dev --local --port 8788 \
-            --var 'CONNECTOR_TOKEN_MAP:{"mcp-ci-test-token":"00000000-0000-4000-8000-000000000001"}' \
             > /tmp/wrangler-dev.log 2>&1 &
           for i in $(seq 1 45); do
             if curl -sf http://127.0.0.1:8788/health > /dev/null 2>&1; then break; fi

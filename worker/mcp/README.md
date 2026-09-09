@@ -36,12 +36,35 @@ Set with `wrangler secret put <NAME>`:
 | Name | What |
 |---|---|
 | `SUPABASE_ANON_KEY` | Public anon key. Required as the `apikey` header; on its own it is `role=anon`. |
-| `CONNECTOR_TOKEN_MAP` | `{"<connector-token>":"<supabase auth user uuid>"}` |
+
+Connector tokens are **not** secrets here — see below.
 
 Never set here, and no code path uses one: service-role key, Supabase PAT, and the
 project JWT secret (see *Why not a signing secret* below).
 
-Per-user refresh tokens live in the `TOKENS` KV namespace, not in secrets:
+## Linked users live entirely in KV
+
+A linked user is four keys, and `scripts/link-user.mjs` writes all of them. That
+matters more than it sounds: connector tokens used to live in a
+`CONNECTOR_TOKEN_MAP` secret that a human set by hand from a value the script
+printed, while the script wrote the refresh token itself. One half automatic, one
+half a manual step in a console scroll-back — and they drifted. A family member
+ended up holding a correctly formed token the gate had never heard of, because a
+second run had minted a new one and the map still held the first.
+
+| Key | Value |
+|---|---|
+| `token:<sha256 of the connector token>` | the user's uuid — the only thing the auth gate reads |
+| `tokenkey:<user uuid>` | the `token:` key above, so a re-mint can revoke the previous one |
+| `refresh:<user uuid>` | that user's Supabase refresh token |
+| `access:<user uuid>` | cached access token, expiring |
+
+The token is **hashed** into the key rather than used as one, because
+`wrangler kv key list` prints key names in full: a raw-token key would put every
+live credential in the output of a read-only listing.
+
+To revoke one person immediately, delete their `token:` key. To revoke their
+session, sign them out in Supabase, which kills the refresh token.
 
 ```bash
 wrangler kv namespace create TOKENS      # paste the id into wrangler.toml
