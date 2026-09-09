@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8788",
     "deploy": "wrangler deploy",
-    "test": "node test/protocol.test.mjs"
+    "test": "node test/protocol.test.mjs",
+    "predeploy": "node scripts/assert-deployable.mjs"
   }
 }

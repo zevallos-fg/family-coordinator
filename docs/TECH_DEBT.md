@@ -245,3 +245,31 @@ Each has a SKIP-REASON comment in the test file.
   The worker now logs status, byte count and latency, and reads the Authorization header in exactly
   one place: the gate that authenticates it. Nothing logs any part of that header, in any form,
   fingerprinted or otherwise.
+
+- **`wrangler deploy` ships the working tree, and says nothing about which branch that is.**
+  Guarded 2026-09-08 by `worker/mcp/scripts/assert-deployable.mjs`, wired as an npm `predeploy` hook.
+
+  A rotation script called `op run -- wrangler deploy` while the checkout sat on a feature branch
+  from an hour earlier. It shipped a KV-backed auth gate whose KV entries did not exist yet, and
+  both connectors 401'd — including the one belonging to the person running the script. The deploy
+  **succeeded**. It printed a version id and looked exactly like the deploy that was intended.
+
+  Same class as the build-id probe in `tests/e2e/global-setup.ts`: a command acting on ambient state
+  nobody checked will eventually act on the wrong ambient state, and the failure will present as
+  something else entirely. Here it presented as "the tokens are wrong".
+
+  The guard refuses unless the branch is `main`, the tree is clean, and HEAD matches its origin.
+  `ALLOW_DEPLOY_FROM=<branch>` excuses the first of those and deliberately not the other two —
+  naming the branch is a deliberate act; shipping code the repository has never seen is not
+  something an override should be able to buy.
+
+  Two smaller lessons from the same incident, both worth more than the guard:
+
+  - **`op run` has to wrap the outermost process.** `link-user.mjs` shells out to `wrangler`, so
+    wrapping the wrangler calls inside it does nothing: children inherit an environment, they do not
+    create one. The script now proves the credential works *before* it signs anyone in, because it
+    did its Supabase work first and its KV writes second — so a missing credential minted a session
+    and a token that went nowhere.
+  - **PowerShell does not stop on a failed native command.** That script had no
+    `$ErrorActionPreference = "Stop"` and no exit-code checks between steps, so a crashed `node`
+    ran straight on into the next step. Any runbook with ordered steps needs both.

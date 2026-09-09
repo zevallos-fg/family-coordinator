@@ -56,6 +56,48 @@ if (!SUPABASE_URL || !ANON_KEY || !SERVICE_KEY) {
   process.exit(2);
 }
 
+// Prove the Cloudflare credential works BEFORE signing anyone in.
+//
+// This script does its Supabase work first and its KV writes second, so a missing
+// Cloudflare credential fails halfway: the user is signed in, a token is minted,
+// and then every `wrangler` child process dies because CLOUDFLARE_API_TOKEN is not
+// in ITS environment. That is what happened on 2026-09-08.
+//
+// Wrapping the individual wrangler commands in `op run` does NOT fix it. This
+// script is the parent process, so the credential has to be in the environment
+// this script was launched with; children inherit an environment, they do not
+// create one.
+//
+// Checked with a real call rather than a presence test: an env var that exists but
+// is wrong fails in exactly the same place, only later and with a worse message.
+function assertCloudflareCredential() {
+  try {
+    execFileSync(
+      "npx",
+      ["wrangler", "kv", "key", "list", "--binding", "TOKENS", "--remote", "--prefix", "__preflight__"],
+      { cwd: resolve(HERE, ".."), stdio: ["ignore", "ignore", "pipe"], shell: true }
+    );
+  } catch (err) {
+    // wrangler's last lines are a path to a log file, which is not the reason.
+    // Keep the lines that name one.
+    const stderr = (err.stderr?.toString() ?? "").split("\n").map((l) => l.trim());
+    const detail = stderr
+      .filter((l) => /error|unauthor|forbidden|token|credential|api/i.test(l) && !/Logs were written/i.test(l))
+      .slice(0, 3)
+      .join("\n  ");
+    console.error(
+      "\nCannot reach Cloudflare KV. Nothing has been signed in and nothing has been\n" +
+        "written. Almost certainly this was not run under `op run`:\n\n" +
+        "  op run --env-file=..\\..\\.env.op -- node scripts/link-user.mjs <email>\n\n" +
+        "The wrapper belongs on THIS process, not on the wrangler commands inside it.\n" +
+        (detail ? `\n  ${detail}\n` : "")
+    );
+    process.exit(2);
+  }
+}
+
+assertCloudflareCredential();
+
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });

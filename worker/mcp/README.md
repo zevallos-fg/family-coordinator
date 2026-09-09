@@ -136,3 +136,29 @@ problems, both fatal:
 
 A refresh token is scoped to one user, cannot be widened, and is revoked by signing
 that user out. Rotation is handled on every exchange.
+
+## Deploying
+
+```bash
+op run --env-file=../../.env.op -- npm run deploy
+```
+
+`npm run deploy`, not `wrangler deploy` directly. The `predeploy` hook
+(`scripts/assert-deployable.mjs`) refuses unless the branch is `main`, the tree is
+clean, and HEAD matches origin. `wrangler deploy` ships the working tree and tells
+you nothing about which branch that is — on 2026-09-08 it shipped a feature branch
+to production, successfully and silently, and the resulting outage read as an
+authentication problem for an hour.
+
+`ALLOW_DEPLOY_FROM=<branch>` excuses the branch check and nothing else.
+
+**`op run` wraps the outermost process.** Every script here that touches Cloudflare
+shells out to `wrangler` as a child, so wrapping the inner commands achieves
+nothing — children inherit an environment, they do not create one:
+
+```bash
+op run --env-file=../../.env.op -- node scripts/link-user.mjs <email>
+```
+
+`link-user.mjs` proves the credential works before it signs anyone in, so a
+forgotten wrapper costs you an error message rather than a half-linked user.
