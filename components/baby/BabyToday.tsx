@@ -32,9 +32,9 @@ export function BabyToday({ events, onChanged }: Props) {
     return (
       <section className="space-y-3">
         <h3 className="text-xs font-medium uppercase tracking-wide text-stone-400">
-          Today
+          Last 24 hours
         </h3>
-        <p className="text-xs text-stone-400">Nothing logged yet today.</p>
+        <p className="text-xs text-stone-400">Nothing logged in the last 24 hours.</p>
       </section>
     );
   }
@@ -42,7 +42,7 @@ export function BabyToday({ events, onChanged }: Props) {
   return (
     <section className="space-y-3">
       <h3 className="text-xs font-medium uppercase tracking-wide text-stone-400">
-        Today
+        Last 24 hours
       </h3>
       <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200">
         {events.map((e) => (

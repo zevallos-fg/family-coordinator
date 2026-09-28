@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { defaultKidId, startOfToday, type BabyEvent } from "@/lib/baby/events";
+import { defaultKidId, type BabyEvent } from "@/lib/baby/events";
 
 export type Kid = { id: string; name: string; birth_date: string | null };
 
@@ -19,7 +19,7 @@ export interface BabyLane {
   kids: Kid[];
   kidId: string | null;
   chooseKid: (id: string) => void;
-  /** Everything from today, plus anything still running from before midnight. */
+  /** The last 24 hours, plus anything still running from before that. */
   events: BabyEvent[];
   refresh: () => Promise<void>;
 }
@@ -56,7 +56,11 @@ export function useBabyLane(familyId: string): BabyLane {
 
   const load = useCallback(async () => {
     const supabase = createClient();
-    const since = startOfToday();
+    // A rolling 24 hours, not since midnight. Roughly a quarter of sleeps cross
+    // midnight, and a since-midnight window dropped a finished 11pm-6am sleep
+    // from every list the moment it ended. The today strip filters to today on
+    // its own.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const [kidsRes, todayRes, openRes] = await Promise.all([
       supabase.from("kids").select("id, name, birth_date").eq("family_id", familyId).order("name"),

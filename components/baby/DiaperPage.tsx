@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
-import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
+import { useStartTime } from "./useStartTime";
 import { logPoint, updateEvent } from "@/lib/baby/write";
 import { visibleChipGroups } from "@/lib/baby/events";
 import type { Json } from "@/lib/supabase/database.types";
@@ -33,7 +33,7 @@ const CONTENTS = [
 export function DiaperPage({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
   const [mode, setMode] = useState<Mode>("diaper");
-  const [startAt, setStartAt] = useState(() => toLocalInputValue());
+  const start = useStartTime();
   const [pending, setPending] = useState<string | null>(null);
   /** The row just written, which is the only thing the chips below can edit. */
   const [justLogged, setJustLogged] = useState<{ id: string; payload: Record<string, Json> } | null>(
@@ -60,7 +60,7 @@ export function DiaperPage({ familyId }: { familyId: string }) {
       type: "diaper",
       kidId: lane.kidId,
       payload,
-      at: fromLocalInputValue(startAt),
+      at: start.instant(),
     });
     setPending(null);
     if (!result.ok) {
@@ -69,7 +69,7 @@ export function DiaperPage({ familyId }: { familyId: string }) {
     }
     if (result.id) setJustLogged({ id: result.id, payload });
     await lane.refresh();
-    setStartAt(toLocalInputValue());
+    start.reset();
   }
 
   async function setDetail(key: string, value: string | null) {
@@ -94,8 +94,8 @@ export function DiaperPage({ familyId }: { familyId: string }) {
       kids={lane.kids}
       kidId={lane.kidId}
       onChooseKid={lane.chooseKid}
-      startAt={startAt}
-      onStartAt={setStartAt}
+      startAt={start.value}
+      onStartAt={start.set}
       reminderLabel="Diaper"
       blockedReason={blocked}
       segmented={

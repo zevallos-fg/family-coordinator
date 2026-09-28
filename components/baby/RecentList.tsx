@@ -43,7 +43,12 @@ export function RecentList({ events, type, onChanged, limit = 10 }: Props) {
         <ul className="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white">
           {rows.map((e) => (
             <RecentRow
-              key={e.id}
+              // Keyed on the times as well as the id. The row copies started/ended
+              // into local state when it mounts; keyed on id alone it kept the
+              // values from before a timer was stopped, so "Ended" stayed blank.
+              // A new key remounts it with what the database now says. The open
+              // row stays open because openId lives up here, keyed on id.
+              key={`${e.id}:${e.started_at}:${e.ended_at ?? ""}`}
               event={e}
               open={openId === e.id}
               onToggle={() => setOpenId((c) => (c === e.id ? null : e.id))}
@@ -68,7 +73,10 @@ function RecentRow({
   onChanged: () => void;
 }) {
   const payload = (event.payload ?? {}) as Record<string, Json>;
-  const running = event.ended_at === null && event.event_type !== "diaper" && event.event_type !== "growth";
+  // Diapers and growth are instants: they have a start and never an end, so
+  // they get no "Ended" field rather than one that is always empty.
+  const isPoint = event.event_type === "diaper" || event.event_type === "growth";
+  const running = event.ended_at === null && !isPoint;
   const [startAt, setStartAt] = useState(() => toLocalInputValue(event.started_at));
   const [endAt, setEndAt] = useState(() => (event.ended_at ? toLocalInputValue(event.ended_at) : ""));
   const [saving, setSaving] = useState(false);
@@ -145,7 +153,7 @@ function RecentRow({
             }}
           />
 
-          {!running && (
+          {!running && !isPoint && (
             <TimeField
               label="Ended"
               value={endAt}
@@ -232,9 +240,9 @@ function TimeField({
         data-testid={testId}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        // Committed on blur and on change rather than behind a Save button: the
-        // control is already a deliberate two-step interaction, and a row that
-        // needs a second confirmation to fix a typo is a row nobody fixes.
+        // Committed on blur rather than behind a Save button: a row that needs a
+        // second confirmation to fix a typo is a row nobody fixes. Blur is the
+        // commit point on mobile, where the native picker closes in one step.
         onBlur={onCommit}
         className="bg-transparent text-sm tabular-nums text-stone-800 focus:outline-none disabled:opacity-50"
       />
