@@ -42,7 +42,8 @@ function detailLine(
     markNextSide: last.event_type === "feed",
   });
   if (running) return summary ? `running · ${summary}` : "running";
-  const duration = eventDuration(last.started_at, last.ended_at);
+  // "ago" stays measured from the start; the length is the sides' sum for a feed.
+  const duration = eventDuration(last);
   return [ago, duration, summary].filter(Boolean).join(" · ");
 }
 

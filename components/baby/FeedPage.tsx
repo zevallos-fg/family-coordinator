@@ -13,6 +13,7 @@ import { logCompleted, updateEvent } from "@/lib/baby/write";
 import {
   SIDE_LABEL,
   displaySeconds,
+  finishSession,
   formatDuration,
   lastSideOf,
   segmentsOf,
@@ -85,7 +86,7 @@ export function FeedPage({ familyId }: { familyId: string }) {
    * as its `p_at`, so a feed written up twenty minutes later is filed when it
    * happened rather than when it was typed.
    */
-  async function write(next: FeedPayload, opts?: { end?: boolean }) {
+  async function write(next: FeedPayload, opts?: { end?: string }) {
     if (blocked || !lane.kidId) return;
     setPending(true);
     const supabase = createClient();
@@ -108,7 +109,7 @@ export function FeedPage({ familyId }: { familyId: string }) {
       const result = await updateEvent({
         id: open.id,
         payload: next,
-        ...(opts?.end ? { endedAt: new Date().toISOString() } : {}),
+        ...(opts?.end ? { endedAt: opts.end } : {}),
       });
       setPending(false);
       if (!result.ok) {
@@ -129,9 +130,9 @@ export function FeedPage({ familyId }: { familyId: string }) {
   }
 
   function finish() {
-    const nowIso = new Date().toISOString();
-    const ended = running ? stopRunning(payload, Date.parse(nowIso)) : payload;
-    void write({ ...ended, running: null }, { end: true });
+    // The feed ends when its last side stopped, not when Done was tapped.
+    const done = finishSession(payload, new Date().toISOString());
+    void write(done.payload, { end: done.endedAt });
   }
 
   const total = sessionSeconds(payload, nowMs);

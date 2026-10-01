@@ -6,7 +6,16 @@ import { deleteWithUndo } from "@/lib/undo";
 import { updateEvent } from "@/lib/baby/write";
 import { EVENT_LABEL, visibleChipGroups, type BabyEvent } from "@/lib/baby/events";
 import { eventDuration, eventSummary } from "@/lib/baby/summary";
-import { formatTimeOfDay } from "@/lib/baby/format";
+import { formatClock, formatTimeOfDay } from "@/lib/baby/format";
+import {
+  SIDE_LABEL,
+  hasSpellStamps,
+  planSideEdit,
+  segmentsOf,
+  sideTotals,
+  type FeedPayload,
+  type NursingSide,
+} from "@/lib/baby/nursing";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 import type { Json } from "@/lib/supabase/database.types";
 
@@ -82,7 +91,8 @@ function RecentRow({
   const [saving, setSaving] = useState(false);
 
   const summary = eventSummary(event.event_type, payload);
-  const duration = eventDuration(event.started_at, event.ended_at);
+  // A breast feed's length is Left + Right, never end − start.
+  const duration = eventDuration(event);
 
   /**
    * Corrections go through lib/baby/write.ts, which calls fn_baby_update rather
@@ -92,7 +102,7 @@ function RecentRow({
   async function patch(args: {
     startedAt?: string;
     endedAt?: string;
-    payload?: Record<string, Json>;
+    payload?: Record<string, Json> | FeedPayload;
   }) {
     setSaving(true);
     const result = await updateEvent({ id: event.id, ...args });
@@ -119,6 +129,33 @@ function RecentRow({
   }
 
   const groups = visibleChipGroups(event.event_type, payload);
+
+  // A finished nursing session can have each side's time corrected. Bottles
+  // have no sides, and a running feed is still being timed on the feed page.
+  const feed = payload as FeedPayload;
+  const nursing =
+    event.event_type === "feed" && !running && feed.method !== "bottle" && typeof feed.volume_ml !== "number";
+  const totals = sideTotals(segmentsOf(feed));
+  // Once spells carry their stop instant, the end is derived from them and
+  // typing over it would only make the two disagree. Legacy rows keep the field.
+  const endDerived = nursing && hasSpellStamps(feed);
+
+  /**
+   * Which spell moves, and whether the end moves with it, is planSideEdit's
+   * decision — tested there, not here. Returns false when nothing was written,
+   * so the field can go back to what the row really holds.
+   */
+  function saveSide(side: NursingSide, input: string): boolean {
+    const plan = planSideEdit(
+      { started_at: event.started_at, ended_at: event.ended_at, payload: feed },
+      side,
+      input
+    );
+    if (plan.kind === "refuse") toast.error(plan.message);
+    if (plan.kind !== "write") return false;
+    void patch({ payload: plan.payload, ...(plan.endedAt ? { endedAt: plan.endedAt } : {}) });
+    return true;
+  }
 
   return (
     <li>
@@ -153,7 +190,14 @@ function RecentRow({
             }}
           />
 
-          {!running && !isPoint && (
+          {endDerived && event.ended_at && (
+            <div className="flex items-center justify-between gap-3" data-testid="edit-ended-at-derived">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-stone-400">Ended</span>
+              <span className="text-sm tabular-nums text-stone-500">{formatTimeOfDay(event.ended_at)}</span>
+            </div>
+          )}
+
+          {!running && !isPoint && !endDerived && (
             <TimeField
               label="Ended"
               value={endAt}
@@ -166,6 +210,19 @@ function RecentRow({
               }}
             />
           )}
+
+          {nursing &&
+            (["L", "R"] as const).map((side) => (
+              <SideField
+                // Remounts with the saved value after every write.
+                key={`${side}:${totals[side]}`}
+                label={SIDE_LABEL[side]}
+                seconds={totals[side]}
+                testId={`edit-side-${side}`}
+                disabled={saving}
+                onSave={(input) => saveSide(side, input)}
+              />
+            ))}
 
           {groups.map((group) => {
             const current = payload[group.key] as string | undefined;
@@ -247,5 +304,61 @@ function TimeField({
         className="bg-transparent text-sm tabular-nums text-stone-800 focus:outline-none disabled:opacity-50"
       />
     </label>
+  );
+}
+
+/**
+ * One side's total, typed rather than picked: "10", "10:00" or "10m 0s". Saved
+ * with a button, not on blur — a correction to a feed's length is deliberate,
+ * and a stray tap away mid-edit must not rewrite it.
+ */
+function SideField({
+  label,
+  seconds,
+  testId,
+  disabled,
+  onSave,
+}: {
+  label: string;
+  seconds: number;
+  testId: string;
+  disabled: boolean;
+  onSave: (input: string) => boolean;
+}) {
+  const shown = formatClock(seconds);
+  const [value, setValue] = useState(shown);
+  const save = () => {
+    if (!onSave(value)) setValue(shown);
+  };
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <label htmlFor={testId} className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
+        {label}
+      </label>
+      <span className="flex items-center gap-2">
+        <input
+          id={testId}
+          type="text"
+          value={value}
+          data-testid={testId}
+          disabled={disabled}
+          placeholder="mm:ss"
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+          }}
+          className="w-20 rounded-lg border border-stone-200 bg-white px-2 py-1 text-right text-sm tabular-nums text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={disabled || value.trim() === shown}
+          data-testid={`${testId}-save`}
+          className="rounded-lg bg-stone-800 px-3 py-1 text-xs text-white disabled:opacity-40"
+        >
+          Save
+        </button>
+      </span>
+    </div>
   );
 }

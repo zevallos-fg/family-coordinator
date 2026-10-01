@@ -1,5 +1,12 @@
 import { formatDuration } from "./format";
-import { SIDE_LABEL, segmentsOf, lastSideOf, suggestedSide, type FeedPayload } from "./nursing";
+import {
+  SIDE_LABEL,
+  eventDurationSeconds,
+  segmentsOf,
+  lastSideOf,
+  suggestedSide,
+  type FeedPayload,
+} from "./nursing";
 
 /**
  * The one line that says what an event actually was.
@@ -134,11 +141,18 @@ export function eventSummary(
   }
 }
 
-/** Duration of a finished event; null while it is still running. */
-export function eventDuration(startedAt: string, endedAt: string | null): string | null {
-  if (!endedAt) return null;
-  const seconds = Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1000));
-  return formatDuration(seconds);
+/**
+ * Duration of a finished event; null while it is still running. A timed breast
+ * feed is the sum of its sides — see eventDurationSeconds.
+ */
+export function eventDuration(event: {
+  event_type: string;
+  started_at: string;
+  ended_at: string | null;
+  payload: unknown;
+}): string | null {
+  const seconds = eventDurationSeconds(event);
+  return seconds === null ? null : formatDuration(seconds);
 }
 
 /** The today strip: what a parent is asked for at a handover or an appointment. */

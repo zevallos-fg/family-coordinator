@@ -10,7 +10,8 @@ import {
   type BabyEvent,
   visibleChipGroups,
 } from "@/lib/baby/events";
-import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/baby/format";
+import { formatDuration, formatTimeOfDay } from "@/lib/baby/format";
+import { eventDurationSeconds } from "@/lib/baby/nursing";
 
 interface Props {
   events: BabyEvent[];
@@ -78,9 +79,8 @@ function EventRow({
   const payload = (event.payload ?? {}) as Record<string, Json>;
   const running = event.ended_at === null && event.event_type !== "diaper";
 
-  const durationSeconds = event.ended_at
-    ? secondsBetween(event.started_at, new Date(event.ended_at).getTime())
-    : null;
+  // A breast feed is Left + Right, not end − start; everything else is unchanged.
+  const durationSeconds = eventDurationSeconds(event);
 
   /**
    * Corrections go through fn_baby_update, never a table UPDATE — the same path
