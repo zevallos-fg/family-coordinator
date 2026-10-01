@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
-import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
+import { useStartTime } from "./useStartTime";
 import { logPoint } from "@/lib/baby/write";
 import type { Json } from "@/lib/supabase/database.types";
 
@@ -26,7 +26,7 @@ const FIELDS = [
 
 export function GrowthPage({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
-  const [startAt, setStartAt] = useState(() => toLocalInputValue());
+  const start = useStartTime();
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -64,7 +64,7 @@ export function GrowthPage({ familyId }: { familyId: string }) {
       type: "growth",
       kidId: lane.kidId,
       payload,
-      at: fromLocalInputValue(startAt),
+      at: start.instant(),
     });
     setSaving(false);
     if (!result.ok) {
@@ -73,7 +73,7 @@ export function GrowthPage({ familyId }: { familyId: string }) {
     }
     setValues({});
     await lane.refresh();
-    setStartAt(toLocalInputValue());
+    start.reset();
     toast.success("Measurement saved");
   }
 
@@ -84,8 +84,8 @@ export function GrowthPage({ familyId }: { familyId: string }) {
       kids={lane.kids}
       kidId={lane.kidId}
       onChooseKid={lane.chooseKid}
-      startAt={startAt}
-      onStartAt={setStartAt}
+      startAt={start.value}
+      onStartAt={start.set}
       reminderLabel="Weigh-in"
       blockedReason={blocked}
     >

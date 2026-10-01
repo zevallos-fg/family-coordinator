@@ -10,7 +10,8 @@ import {
   type BabyEvent,
   visibleChipGroups,
 } from "@/lib/baby/events";
-import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/baby/format";
+import { formatDuration, formatTimeOfDay } from "@/lib/baby/format";
+import { eventDurationSeconds } from "@/lib/baby/nursing";
 
 interface Props {
   events: BabyEvent[];
@@ -32,9 +33,9 @@ export function BabyToday({ events, onChanged }: Props) {
     return (
       <section className="space-y-3">
         <h3 className="text-xs font-medium uppercase tracking-wide text-stone-400">
-          Today
+          Last 24 hours
         </h3>
-        <p className="text-xs text-stone-400">Nothing logged yet today.</p>
+        <p className="text-xs text-stone-400">Nothing logged in the last 24 hours.</p>
       </section>
     );
   }
@@ -42,7 +43,7 @@ export function BabyToday({ events, onChanged }: Props) {
   return (
     <section className="space-y-3">
       <h3 className="text-xs font-medium uppercase tracking-wide text-stone-400">
-        Today
+        Last 24 hours
       </h3>
       <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200">
         {events.map((e) => (
@@ -78,9 +79,8 @@ function EventRow({
   const payload = (event.payload ?? {}) as Record<string, Json>;
   const running = event.ended_at === null && event.event_type !== "diaper";
 
-  const durationSeconds = event.ended_at
-    ? secondsBetween(event.started_at, new Date(event.ended_at).getTime())
-    : null;
+  // A breast feed is Left + Right, not end − start; everything else is unchanged.
+  const durationSeconds = eventDurationSeconds(event);
 
   /**
    * Corrections go through fn_baby_update, never a table UPDATE — the same path

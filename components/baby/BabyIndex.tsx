@@ -8,7 +8,7 @@ import { lastEventOf, useBabyLane } from "./useBabyLane";
 import { createClient } from "@/lib/supabase/client";
 import { formatAgo, formatClock, formatDuration, secondsBetween } from "@/lib/baby/format";
 import { eventDuration, eventSummary, todayTotals } from "@/lib/baby/summary";
-import type { ShareLink } from "@/lib/baby/events";
+import { startOfToday, type ShareLink } from "@/lib/baby/events";
 
 const CARDS = [
   { type: "feed", label: "Feed", emoji: "🍼", href: "/baby/feed" },
@@ -42,7 +42,8 @@ function detailLine(
     markNextSide: last.event_type === "feed",
   });
   if (running) return summary ? `running · ${summary}` : "running";
-  const duration = eventDuration(last.started_at, last.ended_at);
+  // "ago" stays measured from the start; the length is the sides' sum for a feed.
+  const duration = eventDuration(last);
   return [ago, duration, summary].filter(Boolean).join(" · ");
 }
 
@@ -110,7 +111,20 @@ export function BabyIndex({ familyId }: { familyId: string }) {
     };
   }, [familyId, linksVersion]);
 
-  const totals = todayTotals(visibleForKid, nowMs);
+  // The lane loads a rolling 24 hours; the strip is labelled today, so it counts
+  // only what started today.
+  // Compared as instants, not strings: the database writes "+00:00" where
+  // toISOString writes "Z". A still-running timer counts even if it began
+  // yesterday; a diaper's ended_at is null forever, so it only counts by start.
+  const todayStartMs = Date.parse(startOfToday());
+  const totals = todayTotals(
+    visibleForKid.filter(
+      (e) =>
+        Date.parse(e.started_at) >= todayStartMs ||
+        (e.ended_at === null && TIMER_TYPES.has(e.event_type))
+    ),
+    nowMs
+  );
 
   const visibleToday = visibleForKid;
 

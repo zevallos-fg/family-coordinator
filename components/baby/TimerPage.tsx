@@ -7,6 +7,7 @@ import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { ManualRow } from "./FeedPage";
 import { useBabyLane } from "./useBabyLane";
+import { useStartTime } from "./useStartTime";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 import { logCompleted, toggleTimer, updateEvent } from "@/lib/baby/write";
 import { visibleChipGroups, type BabyEventType } from "@/lib/baby/events";
@@ -34,7 +35,7 @@ export function TimerPage({
   emoji: string;
 }) {
   const lane = useBabyLane(familyId);
-  const [startAt, setStartAt] = useState(() => toLocalInputValue());
+  const start = useStartTime();
   const [pending, setPending] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -66,17 +67,22 @@ export function TimerPage({
       familyId,
       type,
       kidId: lane.kidId,
-      // Only meaningful when starting: fn_baby_toggle ignores it when closing an
-      // open row, which is why the control resets to now after a stop.
-      at: open ? null : fromLocalInputValue(startAt),
+      // Only meaningful when starting, and only when someone changed the start
+      // time. Untouched, p_at is omitted and the server stamps now() to the
+      // second — the control's minute resolution is what made a new timer open
+      // at 0:49 instead of 0:00.
+      at: open ? null : start.instant(),
     });
     setPending(false);
     if (!result.ok) {
       toast.error(result.message);
       return;
     }
+    // The clock's "now" froze when the last timer stopped. Refresh it before the
+    // new row renders so the first frame is not measured against a stale tick.
+    setNowMs(Date.now());
     await lane.refresh();
-    if (open) setStartAt(toLocalInputValue());
+    start.reset();
   }
 
   async function setDetail(key: string, value: string | null) {
@@ -100,8 +106,8 @@ export function TimerPage({
       kids={lane.kids}
       kidId={lane.kidId}
       onChooseKid={lane.chooseKid}
-      startAt={startAt}
-      onStartAt={setStartAt}
+      startAt={start.value}
+      onStartAt={start.set}
       reminderLabel={title}
       blockedReason={blocked}
       manualEntry={

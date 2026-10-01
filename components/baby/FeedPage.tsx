@@ -7,11 +7,13 @@ import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
+import { useStartTime } from "./useStartTime";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 import { logCompleted, updateEvent } from "@/lib/baby/write";
 import {
   SIDE_LABEL,
   displaySeconds,
+  finishSession,
   formatDuration,
   lastSideOf,
   segmentsOf,
@@ -47,7 +49,7 @@ function payloadOf(event: BabyEvent | undefined | null): FeedPayload {
 export function FeedPage({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
   const [mode, setMode] = useState<Mode>("nursing");
-  const [startAt, setStartAt] = useState(() => toLocalInputValue());
+  const start = useStartTime();
   const [pending, setPending] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -84,7 +86,7 @@ export function FeedPage({ familyId }: { familyId: string }) {
    * as its `p_at`, so a feed written up twenty minutes later is filed when it
    * happened rather than when it was typed.
    */
-  async function write(next: FeedPayload, opts?: { end?: boolean }) {
+  async function write(next: FeedPayload, opts?: { end?: string }) {
     if (blocked || !lane.kidId) return;
     setPending(true);
     const supabase = createClient();
@@ -95,7 +97,8 @@ export function FeedPage({ familyId }: { familyId: string }) {
         p_event_type: "feed",
         p_kid_id: lane.kidId,
         p_payload: next as never,
-        p_at: fromLocalInputValue(startAt) ?? new Date().toISOString(),
+        // Omitted unless edited: the server's now() is to the second.
+        ...(start.instant() ? { p_at: start.instant()! } : {}),
       });
       setPending(false);
       if (error) {
@@ -106,7 +109,7 @@ export function FeedPage({ familyId }: { familyId: string }) {
       const result = await updateEvent({
         id: open.id,
         payload: next,
-        ...(opts?.end ? { endedAt: new Date().toISOString() } : {}),
+        ...(opts?.end ? { endedAt: opts.end } : {}),
       });
       setPending(false);
       if (!result.ok) {
@@ -117,7 +120,7 @@ export function FeedPage({ familyId }: { familyId: string }) {
       }
     }
     await lane.refresh();
-    if (opts?.end) setStartAt(toLocalInputValue());
+    if (opts?.end) start.reset();
   }
 
   function tapSide(side: NursingSide) {
@@ -127,9 +130,9 @@ export function FeedPage({ familyId }: { familyId: string }) {
   }
 
   function finish() {
-    const nowIso = new Date().toISOString();
-    const ended = running ? stopRunning(payload, Date.parse(nowIso)) : payload;
-    void write({ ...ended, running: null }, { end: true });
+    // The feed ends when its last side stopped, not when Done was tapped.
+    const done = finishSession(payload, new Date().toISOString());
+    void write(done.payload, { end: done.endedAt });
   }
 
   const total = sessionSeconds(payload, nowMs);
@@ -142,8 +145,8 @@ export function FeedPage({ familyId }: { familyId: string }) {
       kids={lane.kids}
       kidId={lane.kidId}
       onChooseKid={lane.chooseKid}
-      startAt={startAt}
-      onStartAt={setStartAt}
+      startAt={start.value}
+      onStartAt={start.set}
       reminderLabel="Feed"
       blockedReason={blocked}
       segmented={
@@ -238,11 +241,11 @@ export function FeedPage({ familyId }: { familyId: string }) {
         <BottleForm
           familyId={familyId}
           kidId={lane.kidId}
-          startAt={startAt}
+          startIso={start.instant()}
           disabled={!!blocked || !lane.kidId}
           onSaved={async () => {
             await lane.refresh();
-            setStartAt(toLocalInputValue());
+            start.reset();
           }}
         />
       )}
@@ -262,13 +265,14 @@ export function FeedPage({ familyId }: { familyId: string }) {
 function BottleForm({
   familyId,
   kidId,
-  startAt,
+  startIso,
   disabled,
   onSaved,
 }: {
   familyId: string;
   kidId: string | null;
-  startAt: string;
+  /** Null means "now", stamped by the server. */
+  startIso: string | null;
   disabled: boolean;
   onSaved: () => Promise<void>;
 }) {
@@ -289,7 +293,7 @@ function BottleForm({
       p_event_type: "feed",
       p_kid_id: kidId ?? undefined,
       p_payload: { method: "bottle", volume_ml: volume, contents } as never,
-      p_at: fromLocalInputValue(startAt) ?? new Date().toISOString(),
+      ...(startIso ? { p_at: startIso } : {}),
     });
     setSaving(false);
     if (error) {
