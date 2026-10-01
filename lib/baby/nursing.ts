@@ -229,6 +229,12 @@ export type SideEdit =
  * now). Anything else — an earlier spell, or a legacy one with no stamp — leaves
  * ended_at exactly where it was.
  *
+ * An OPEN feed (ended_at null) can be corrected too — the case that matters
+ * most is a side left running by mistake. A running side is stopped at `nowMs`
+ * and banked first, so the number typed is the side's whole total. The row's
+ * ended_at is never set here: the feed stays open, and Done derives the end from
+ * the last spell's (already shifted) stamp.
+ *
  * Pure: the caller does the write, and only on kind "write".
  */
 export function planSideEdit(
@@ -240,9 +246,15 @@ export function planSideEdit(
   const target = parseSideDuration(input);
   if (target === null) return { kind: "none" };
 
-  const segments = segmentsOf(row.payload).map((s) => ({ ...s }));
+  const open = row.ended_at === null;
+  const wasRunning = open && !!row.payload.running;
+  // Bank the running side so the edit sees — and the field showed — its full total.
+  const base = wasRunning ? stopRunning(row.payload, nowMs) : row.payload;
+
+  const segments = segmentsOf(base).map((s) => ({ ...s }));
   const delta = target - sideTotals(segments)[side];
-  if (delta === 0) return { kind: "none" };
+  // Stopping a running side is itself a change worth writing.
+  if (delta === 0 && !wasRunning) return { kind: "none" };
 
   const other: NursingSide = side === "L" ? "R" : "L";
   if (target === 0 && sideTotals(segments)[other] === 0) {
@@ -277,13 +289,14 @@ export function planSideEdit(
       nowMs,
       Math.max(Date.parse(row.started_at), Date.parse(last.ended) + lastShift * 1000)
     );
-    endedAt = new Date(shifted).toISOString();
-    last.ended = endedAt;
+    last.ended = new Date(shifted).toISOString();
+    // An open feed keeps ended_at null; Done reads the shifted stamp later.
+    if (!open) endedAt = last.ended;
   }
 
   return {
     kind: "write",
-    payload: { ...row.payload, segments: segments.filter((s) => s.seconds > 0) },
+    payload: { ...base, segments: segments.filter((s) => s.seconds > 0) },
     ...(endedAt ? { endedAt } : {}),
   };
 }

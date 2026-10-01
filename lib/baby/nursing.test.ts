@@ -270,3 +270,40 @@ describe("editing a side", () => {
     expect(parseSideDuration("1:02:30")).toBe(3750);
   });
 });
+
+describe("editing a side on an open feed", () => {
+  // Left ran 5m 33s, paused; Right started 00:20:00 and was left running.
+  const openFeed = (running: boolean) => ({
+    started_at: "2026-10-01T04:16:00.000Z",
+    ended_at: null,
+    payload: {
+      method: "breast",
+      segments: [{ side: "L", seconds: 333, ended: "2026-10-01T04:21:33.000Z" }],
+      running: running ? { side: "R", since: "2026-10-01T04:22:00.000Z" } : null,
+    } as FeedPayload,
+  });
+  const LATER = Date.parse("2026-10-01T04:45:00.000Z"); // Right has run 23m
+
+  it("stops a side left running, then sets it to the number typed", () => {
+    const plan = planSideEdit(openFeed(true), "R", "5", LATER);
+    expect(plan.kind).toBe("write");
+    if (plan.kind !== "write") return;
+    expect(plan.payload.running).toBeNull();
+    expect(sideTotals(segmentsOf(plan.payload)).R).toBe(300);
+    // The spell's stop moves back with the cut, so Done ends the feed there.
+    expect(plan.payload.segments?.at(-1)).toEqual({ side: "R", seconds: 300, ended: "2026-10-01T04:27:00.000Z" });
+  });
+
+  it("never sets ended_at — the feed stays open until Done", () => {
+    for (const running of [true, false]) {
+      const plan = planSideEdit(openFeed(running), "L", "2", LATER);
+      expect(plan.kind === "write" && plan.endedAt).toBeFalsy();
+    }
+  });
+
+  it("Done after the edit ends at the corrected stop, not at Done", () => {
+    const plan = planSideEdit(openFeed(true), "R", "5", LATER);
+    if (plan.kind !== "write") throw new Error("expected a write");
+    expect(finishSession(plan.payload, "2026-10-01T05:00:00.000Z").endedAt).toBe("2026-10-01T04:27:00.000Z");
+  });
+});

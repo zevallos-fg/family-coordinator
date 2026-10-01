@@ -11,6 +11,7 @@ import {
   SIDE_LABEL,
   hasSpellStamps,
   planSideEdit,
+  runningSeconds,
   segmentsOf,
   sideTotals,
   type FeedPayload,
@@ -89,6 +90,16 @@ function RecentRow({
   const [startAt, setStartAt] = useState(() => toLocalInputValue(event.started_at));
   const [endAt, setEndAt] = useState(() => (event.ended_at ? toLocalInputValue(event.ended_at) : ""));
   const [saving, setSaving] = useState(false);
+  // The instant the row was opened: a side still running is shown with its total
+  // as of then, rather than ticking under someone's thumb while they type.
+  // Adjusted during render on the closed→open edge (React's documented pattern
+  // for state derived from a prop change), not in an effect.
+  const [openedAtMs, setOpenedAtMs] = useState(0);
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setOpenedAtMs(new Date().getTime());
+  }
 
   const summary = eventSummary(event.event_type, payload);
   // A breast feed's length is Left + Right, never end − start.
@@ -130,12 +141,19 @@ function RecentRow({
 
   const groups = visibleChipGroups(event.event_type, payload);
 
-  // A finished nursing session can have each side's time corrected. Bottles
-  // have no sides, and a running feed is still being timed on the feed page.
+  // Any nursing session — finished or still open — can have each side's time
+  // corrected. Bottles have no sides. On an open feed a side left running is
+  // shown with its live total at the moment the row was opened, and saving
+  // stops it (planSideEdit banks it first).
   const feed = payload as FeedPayload;
   const nursing =
-    event.event_type === "feed" && !running && feed.method !== "bottle" && typeof feed.volume_ml !== "number";
-  const totals = sideTotals(segmentsOf(feed));
+    event.event_type === "feed" && feed.method !== "bottle" && typeof feed.volume_ml !== "number";
+  const banked = sideTotals(segmentsOf(feed));
+  const live = running && feed.running ? feed.running : null;
+  const totals = {
+    L: banked.L + (live?.side === "L" ? runningSeconds(feed, openedAtMs) : 0),
+    R: banked.R + (live?.side === "R" ? runningSeconds(feed, openedAtMs) : 0),
+  };
   // Once spells carry their stop instant, the end is derived from them and
   // typing over it would only make the two disagree. Legacy rows keep the field.
   const endDerived = nursing && hasSpellStamps(feed);
@@ -215,7 +233,7 @@ function RecentRow({
             (["L", "R"] as const).map((side) => (
               <SideField
                 // Remounts with the saved value after every write.
-                key={`${side}:${totals[side]}`}
+                key={`${side}:${banked[side]}:${live?.since ?? ""}`}
                 label={SIDE_LABEL[side]}
                 seconds={totals[side]}
                 testId={`edit-side-${side}`}
