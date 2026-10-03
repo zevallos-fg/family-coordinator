@@ -1,5 +1,6 @@
 import { formatDuration } from "./format";
 import { bottleAmountLabel, isBottle } from "./bottle";
+import { growthSummary } from "./growth";
 import {
   SIDE_LABEL,
   eventDurationSeconds,
@@ -101,14 +102,8 @@ export function diaperSummary(payload: Payload): string | null {
   return parts.length ? `${label}, ${parts.join(" · ")}` : label;
 }
 
-export function growthSummary(payload: Payload): string | null {
-  const bits = [
-    num(payload, "weight_kg") !== null && `${num(payload, "weight_kg")} kg`,
-    num(payload, "height_cm") !== null && `${num(payload, "height_cm")} cm`,
-    num(payload, "head_cm") !== null && `head ${num(payload, "head_cm")} cm`,
-  ].filter(Boolean) as string[];
-  return bits.length ? bits.join(" · ") : null;
-}
+/** Growth reads in lb/oz and inches; see lib/baby/growth.ts. */
+export { growthSummary } from "./growth";
 
 /**
  * The salient detail for any event type, or null when there is nothing to say.

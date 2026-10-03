@@ -8,26 +8,26 @@ import { EventHistory, laneKey } from "./EventHistory";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
 import { logPoint } from "@/lib/baby/write";
+import { growthPayload } from "@/lib/baby/growth";
 import type { Json } from "@/lib/supabase/database.types";
 
 /**
- * /baby/growth — three numbers, all optional, at least one required.
+ * /baby/growth — weight (lb + oz), length and head (in). All optional, at least
+ * one required. Stored as entered, with metric alongside (lib/baby/growth.ts).
  *
  * Nine rows in three years of export, so this is a page that exists to be
  * correct rather than fast: it is opened after an appointment, with the numbers
  * already written on a card, and the start-time control matters more here than
  * anywhere else because the weigh-in was hours ago.
  */
-const FIELDS = [
-  { key: "weight_kg", label: "Weight", unit: "kg", step: "0.01" },
-  { key: "height_cm", label: "Height", unit: "cm", step: "0.1" },
-  { key: "head_cm", label: "Head", unit: "cm", step: "0.1" },
-] as const;
 
 export function GrowthPage({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
   const start = useStartTime();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [lb, setLb] = useState("");
+  const [oz, setOz] = useState("");
+  const [height, setHeight] = useState("");
+  const [head, setHead] = useState("");
   const [saving, setSaving] = useState(false);
 
   const blocked =
@@ -42,21 +42,12 @@ export function GrowthPage({ familyId }: { familyId: string }) {
     ) : null;
 
   async function save() {
-    const payload: Record<string, Json> = {};
-    for (const f of FIELDS) {
-      const raw = values[f.key];
-      if (!raw) continue;
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0) {
-        toast.error(`${f.label} doesn't look right.`);
-        return;
-      }
-      payload[f.key] = n;
-    }
-    if (Object.keys(payload).length === 0) {
-      toast.error("Enter at least one measurement.");
+    const built = growthPayload({ lb, oz, height, head });
+    if ("error" in built) {
+      toast.error(built.error);
       return;
     }
+    const payload = built.payload as Record<string, Json>;
 
     setSaving(true);
     const result = await logPoint({
@@ -71,7 +62,10 @@ export function GrowthPage({ familyId }: { familyId: string }) {
       toast.error(result.message);
       return;
     }
-    setValues({});
+    setLb("");
+    setOz("");
+    setHeight("");
+    setHead("");
     await lane.refresh();
     start.reset();
     toast.success("Measurement saved");
@@ -90,24 +84,30 @@ export function GrowthPage({ familyId }: { familyId: string }) {
       blockedReason={blocked}
     >
       <div className="space-y-3">
-        {FIELDS.map((f) => (
-          <div key={f.key} className="rounded-2xl border border-stone-200 bg-white p-4">
-            <label className="block text-[11px] font-medium uppercase tracking-wide text-stone-400">
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
+          <span className="block text-[11px] font-medium uppercase tracking-wide text-stone-400">
+            Weight
+          </span>
+          <div className="mt-1 flex items-baseline gap-2">
+            <MeasureInput value={lb} onChange={setLb} testId="growth-weight_lb" width="w-20" />
+            <span className="text-lg text-stone-400">lb</span>
+            <MeasureInput value={oz} onChange={setOz} testId="growth-weight_oz" width="w-20" />
+            <span className="text-lg text-stone-400">oz</span>
+          </div>
+        </div>
+        {(
+          [
+            { label: "Length", value: height, set: setHeight, testId: "growth-height_in" },
+            { label: "Head", value: head, set: setHead, testId: "growth-head_in" },
+          ] as const
+        ).map((f) => (
+          <div key={f.label} className="rounded-2xl border border-stone-200 bg-white p-4">
+            <span className="block text-[11px] font-medium uppercase tracking-wide text-stone-400">
               {f.label}
-            </label>
+            </span>
             <div className="mt-1 flex items-baseline gap-2">
-              <input
-                inputMode="decimal"
-                step={f.step}
-                value={values[f.key] ?? ""}
-                data-testid={`growth-${f.key}`}
-                onChange={(e) =>
-                  setValues((v) => ({ ...v, [f.key]: e.target.value.replace(/[^\d.]/g, "") }))
-                }
-                placeholder="—"
-                className="w-32 bg-transparent text-4xl tabular-nums text-stone-900 placeholder-stone-200 focus:outline-none"
-              />
-              <span className="text-lg text-stone-400">{f.unit}</span>
+              <MeasureInput value={f.value} onChange={f.set} testId={f.testId} width="w-28" />
+              <span className="text-lg text-stone-400">in</span>
             </div>
           </div>
         ))}
@@ -130,5 +130,28 @@ export function GrowthPage({ familyId }: { familyId: string }) {
         onChanged={lane.refresh}
       />
     </BabyPageShell>
+  );
+}
+
+function MeasureInput({
+  value,
+  onChange,
+  testId,
+  width,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  testId: string;
+  width: string;
+}) {
+  return (
+    <input
+      inputMode="decimal"
+      value={value}
+      data-testid={testId}
+      onChange={(e) => onChange(e.target.value.replace(/[^\d.,]/g, ""))}
+      placeholder="—"
+      className={`${width} bg-transparent text-4xl tabular-nums text-stone-900 placeholder-stone-200 focus:outline-none`}
+    />
   );
 }
