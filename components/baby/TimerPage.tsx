@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { BabyPageShell } from "./BabyPageShell";
-import { RecentList } from "./RecentList";
+import { EventHistory, laneKey } from "./EventHistory";
 import { ManualRow } from "./FeedPage";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
@@ -165,7 +165,13 @@ export function TimerPage({
           })}
         </section>
       )}
-      <RecentList events={lane.events} type={type} onChanged={lane.refresh} />
+      <EventHistory
+        familyId={familyId}
+        kidId={lane.kidId}
+        type={type}
+        refreshKey={laneKey(lane.events)}
+        onChanged={lane.refresh}
+      />
     </BabyPageShell>
   );
 }

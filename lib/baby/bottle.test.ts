@@ -24,7 +24,7 @@ describe("bottle amounts", () => {
   it("never invents a volume for grams", () => {
     const p = bottlePayload(90, "g", "Breast Milk");
     expect(p.volume_ml).toBeUndefined();
-    expect(feedSummary(p)).toBe("90 g · Breast Milk");
+    expect(feedSummary(p as Record<string, unknown>)).toBe("90 g · Breast Milk");
   });
 
   it("still reads legacy ml-only bottles", () => {

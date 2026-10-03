@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { BabyPageShell } from "./BabyPageShell";
-import { RecentList } from "./RecentList";
+import { EventHistory, laneKey } from "./EventHistory";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
 import { logPoint, updateEvent } from "@/lib/baby/write";
@@ -169,7 +169,13 @@ export function DiaperPage({ familyId }: { familyId: string }) {
           })}
         </section>
       )}
-      <RecentList events={lane.events} type="diaper" onChanged={lane.refresh} />
+      <EventHistory
+        familyId={familyId}
+        kidId={lane.kidId}
+        type="diaper"
+        refreshKey={laneKey(lane.events)}
+        onChanged={lane.refresh}
+      />
     </BabyPageShell>
   );
 }

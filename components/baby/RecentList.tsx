@@ -72,7 +72,7 @@ export function RecentList({ events, type, onChanged, limit = 10 }: Props) {
   );
 }
 
-function RecentRow({
+export function RecentRow({
   event,
   open,
   onToggle,

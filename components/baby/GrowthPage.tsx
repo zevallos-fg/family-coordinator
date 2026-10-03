@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { BabyPageShell } from "./BabyPageShell";
-import { RecentList } from "./RecentList";
+import { EventHistory, laneKey } from "./EventHistory";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
 import { logPoint } from "@/lib/baby/write";
@@ -122,7 +122,13 @@ export function GrowthPage({ familyId }: { familyId: string }) {
       >
         Save measurement
       </button>
-      <RecentList events={lane.events} type="growth" onChanged={lane.refresh} />
+      <EventHistory
+        familyId={familyId}
+        kidId={lane.kidId}
+        type="growth"
+        refreshKey={laneKey(lane.events)}
+        onChanged={lane.refresh}
+      />
     </BabyPageShell>
   );
 }

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
-import { RecentList } from "./RecentList";
+import { EventHistory, laneKey } from "./EventHistory";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
 import { BottleFields, useBottleUnit } from "./BottleFields";
@@ -254,7 +254,13 @@ export function FeedPage({ familyId }: { familyId: string }) {
         />
       )}
 
-      <RecentList events={lane.events} type="feed" onChanged={lane.refresh} />
+      <EventHistory
+        familyId={familyId}
+        kidId={lane.kidId}
+        type="feed"
+        refreshKey={laneKey(lane.events)}
+        onChanged={lane.refresh}
+      />
     </BabyPageShell>
   );
 }
