@@ -1,4 +1,5 @@
 import { formatDuration } from "./format";
+import { bottleAmountLabel, isBottle } from "./bottle";
 import {
   SIDE_LABEL,
   eventDurationSeconds,
@@ -39,11 +40,12 @@ function num(p: Payload, key: string): number | null {
 export function feedSummary(payload: Payload, opts?: { markNextSide?: boolean }): string | null {
   const p = payload as FeedPayload;
 
-  if (p.method === "bottle" || typeof p.volume_ml === "number") {
-    const ml = num(payload, "volume_ml");
+  if (isBottle(p)) {
+    // As entered: "4 oz" stays "4 oz", and a gram bottle is never shown as ml.
+    const amount = bottleAmountLabel(p);
     const contents = str(payload, "contents");
-    if (ml === null) return contents;
-    return contents ? `${ml} ml · ${contents}` : `${ml} ml`;
+    if (amount === null) return contents;
+    return contents ? `${amount} · ${contents}` : amount;
   }
 
   const segments = segmentsOf(p);
@@ -151,6 +153,8 @@ export function eventDuration(event: {
   ended_at: string | null;
   payload: unknown;
 }): string | null {
+  // A bottle is an amount, not a span: its row says "4 oz", never "0s".
+  if (event.event_type === "feed" && isBottle(event.payload as FeedPayload | null)) return null;
   const seconds = eventDurationSeconds(event);
   return seconds === null ? null : formatDuration(seconds);
 }

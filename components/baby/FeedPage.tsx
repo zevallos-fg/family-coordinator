@@ -8,6 +8,9 @@ import { BabyPageShell } from "./BabyPageShell";
 import { RecentList } from "./RecentList";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
+import { BottleFields, useBottleUnit } from "./BottleFields";
+import { bottlePayload, manualBreastFeed, parseAmount } from "@/lib/baby/bottle";
+import type { Json } from "@/lib/supabase/database.types";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 import { logCompleted, updateEvent } from "@/lib/baby/write";
 import {
@@ -15,6 +18,7 @@ import {
   displaySeconds,
   finishSession,
   formatDuration,
+  parseSideDuration,
   lastSideOf,
   segmentsOf,
   sessionSeconds,
@@ -256,11 +260,15 @@ export function FeedPage({ familyId }: { familyId: string }) {
 }
 
 /**
- * Bottles. Volume and contents, and nothing else.
+ * Bottles: amount in ml, oz or g, and contents.
+ *
+ * Written as a FINISHED row (ended_at = started_at). A bottle has no duration,
+ * and a feed row left with ended_at null is, to every other screen, a nursing
+ * session still in progress — it would have taken over the nursing circles and
+ * shown as running on /now.
  *
  * `contents` is free text with a suggestion rather than an enum: the export's
- * most common value is "Breast Milk", which is a bottle of the same thing
- * nursing produces, and a fixed list would have to guess at the rest.
+ * most common value is "Breast Milk", and a fixed list would have to guess.
  */
 function BottleForm({
   familyId,
@@ -271,71 +279,53 @@ function BottleForm({
 }: {
   familyId: string;
   kidId: string | null;
-  /** Null means "now", stamped by the server. */
+  /** Null means "now". */
   startIso: string | null;
   disabled: boolean;
   onSaved: () => Promise<void>;
 }) {
-  const [ml, setMl] = useState("");
+  const [amount, setAmount] = useState("");
+  const [unit, setUnit] = useBottleUnit(familyId);
   const [contents, setContents] = useState("Breast Milk");
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const volume = Number(ml);
-    if (!Number.isFinite(volume) || volume <= 0) {
-      toast.error("How many ml?");
+    const value = parseAmount(amount);
+    if (value === null) {
+      toast.error(`How many ${unit}?`);
       return;
     }
+    const at = startIso ?? new Date().toISOString();
     setSaving(true);
-    const supabase = createClient();
-    const { error } = await supabase.rpc("fn_baby_log", {
-      p_family_id: familyId,
-      p_event_type: "feed",
-      p_kid_id: kidId ?? undefined,
-      p_payload: { method: "bottle", volume_ml: volume, contents } as never,
-      ...(startIso ? { p_at: startIso } : {}),
+    const result = await logCompleted({
+      familyId,
+      type: "feed",
+      kidId,
+      startIso: at,
+      endIso: at,
+      payload: bottlePayload(value, unit, contents) as Record<string, Json>,
     });
     setSaving(false);
-    if (error) {
-      toast.error("That didn't save. Tap again?");
+    if (!result.ok) {
+      toast.error(result.message);
       return;
     }
-    setMl("");
+    setAmount("");
     await onSaved();
     toast.success("Bottle logged");
   }
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-stone-200 bg-white p-4">
-        <label className="block text-[11px] font-medium uppercase tracking-wide text-stone-400">
-          Volume
-        </label>
-        <div className="mt-1 flex items-baseline gap-2">
-          <input
-            inputMode="numeric"
-            value={ml}
-            data-testid="bottle-ml"
-            onChange={(e) => setMl(e.target.value.replace(/[^\d]/g, ""))}
-            placeholder="0"
-            className="w-28 bg-transparent text-4xl tabular-nums text-stone-900 placeholder-stone-200 focus:outline-none"
-          />
-          <span className="text-lg text-stone-400">ml</span>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-stone-200 bg-white p-4">
-        <label className="block text-[11px] font-medium uppercase tracking-wide text-stone-400">
-          Contents
-        </label>
-        <input
-          value={contents}
-          data-testid="bottle-contents"
-          onChange={(e) => setContents(e.target.value)}
-          className="mt-1 w-full bg-transparent text-base text-stone-800 focus:outline-none"
-        />
-      </div>
-
+      <BottleFields
+        amount={amount}
+        onAmount={setAmount}
+        unit={unit}
+        onUnit={setUnit}
+        contents={contents}
+        onContents={setContents}
+        testPrefix="bottle"
+      />
       <button
         type="button"
         onClick={save}
@@ -349,7 +339,18 @@ function BottleForm({
   );
 }
 
-/** A feed that is already over: both ends given, written as one finished row. */
+type ManualKind = "breast" | "bottle";
+
+/**
+ * A feed that already happened, of either kind.
+ *
+ * Breast: start time, Left and Right durations, and which side came first. The
+ * spells are laid end to end and stamped, so the row is indistinguishable from a
+ * timed one — total is Left + Right, Ended is when the last side stopped, and
+ * the sides stay editable in Recent.
+ *
+ * Bottle: a time, an amount in ml/oz/g, contents.
+ */
 function ManualFeed({
   familyId,
   kidId,
@@ -359,43 +360,151 @@ function ManualFeed({
   kidId: string | null;
   onSaved: () => Promise<void>;
 }) {
-  const [from, setFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 30 * 60_000)));
-  const [to, setTo] = useState(() => toLocalInputValue());
+  const [kind, setKind] = useState<ManualKind>("breast");
+  const [at, setAt] = useState(() => toLocalInputValue(new Date(Date.now() - 30 * 60_000)));
+  const [left, setLeft] = useState("");
+  const [right, setRight] = useState("");
+  const [first, setFirst] = useState<NursingSide>("L");
+  const [amount, setAmount] = useState("");
+  const [unit, setUnit] = useBottleUnit(familyId);
+  const [contents, setContents] = useState("Breast Milk");
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const startIso = fromLocalInputValue(from);
-    const endIso = fromLocalInputValue(to);
-    if (!startIso || !endIso) {
-      toast.error("Both times are needed.");
+    const startIso = fromLocalInputValue(at);
+    if (!startIso) {
+      toast.error("When was it?");
       return;
     }
-    if (new Date(endIso) <= new Date(startIso)) {
-      toast.error("The end has to be after the start.");
-      return;
+
+    let result;
+    if (kind === "breast") {
+      // Blank means that side wasn't used; anything typed must be readable.
+      const l = left.trim() === "" ? 0 : parseSideDuration(left);
+      const r = right.trim() === "" ? 0 : parseSideDuration(right);
+      if (l === null || r === null) {
+        toast.error("Use minutes, like 10 or 10:30.");
+        return;
+      }
+      const feed = manualBreastFeed(startIso, { L: l, R: r }, first);
+      if (!feed) {
+        toast.error("Enter at least one side.");
+        return;
+      }
+      setSaving(true);
+      result = await logCompleted({
+        familyId,
+        type: "feed",
+        kidId,
+        startIso,
+        endIso: feed.endIso,
+        payload: feed.payload as Record<string, Json>,
+      });
+    } else {
+      const value = parseAmount(amount);
+      if (value === null) {
+        toast.error(`How many ${unit}?`);
+        return;
+      }
+      setSaving(true);
+      result = await logCompleted({
+        familyId,
+        type: "feed",
+        kidId,
+        startIso,
+        endIso: startIso,
+        payload: bottlePayload(value, unit, contents) as Record<string, Json>,
+      });
     }
-    setSaving(true);
-    const result = await logCompleted({
-      familyId,
-      type: "feed",
-      kidId,
-      startIso,
-      endIso,
-      payload: { method: "breast" },
-    });
     setSaving(false);
     if (!result.ok) {
       toast.error(result.message);
       return;
     }
+    setLeft("");
+    setRight("");
+    setAmount("");
     await onSaved();
-    toast.success("Feed logged");
+    toast.success(kind === "breast" ? "Feed logged" : "Bottle logged");
   }
 
   return (
     <div className="space-y-3 rounded-2xl border border-stone-200 bg-white p-4">
-      <ManualRow label="From" value={from} onChange={setFrom} testId="manual-from" />
-      <ManualRow label="To" value={to} onChange={setTo} testId="manual-to" />
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1">
+        {(["breast", "bottle"] as ManualKind[]).map((k) => (
+          <button
+            key={k}
+            type="button"
+            data-testid={`manual-kind-${k}`}
+            aria-pressed={kind === k}
+            onClick={() => setKind(k)}
+            className={`rounded-lg py-2 text-sm capitalize ${
+              kind === k ? "bg-white text-stone-900 shadow-sm" : "text-stone-500"
+            }`}
+          >
+            {k === "breast" ? "Nursing" : "Bottle"}
+          </button>
+        ))}
+      </div>
+
+      <ManualRow
+        label={kind === "breast" ? "Started" : "When"}
+        value={at}
+        onChange={setAt}
+        testId="manual-from"
+      />
+
+      {kind === "breast" ? (
+        <>
+          {(["L", "R"] as NursingSide[]).map((side) => (
+            <label key={side} className="flex items-center justify-between gap-3">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
+                {SIDE_LABEL[side]} (min)
+              </span>
+              <input
+                inputMode="decimal"
+                value={side === "L" ? left : right}
+                data-testid={`manual-side-${side}`}
+                onChange={(e) => (side === "L" ? setLeft : setRight)(e.target.value)}
+                placeholder="0"
+                className="w-24 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-right text-sm tabular-nums text-stone-800 focus:outline-none"
+              />
+            </label>
+          ))}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
+              First side
+            </span>
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1">
+              {(["L", "R"] as NursingSide[]).map((side) => (
+                <button
+                  key={side}
+                  type="button"
+                  data-testid={`manual-first-${side}`}
+                  aria-pressed={first === side}
+                  onClick={() => setFirst(side)}
+                  className={`rounded-lg px-3 py-1.5 text-sm ${
+                    first === side ? "bg-white text-stone-900 shadow-sm" : "text-stone-500"
+                  }`}
+                >
+                  {SIDE_LABEL[side]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <BottleFields
+          amount={amount}
+          onAmount={setAmount}
+          unit={unit}
+          onUnit={setUnit}
+          contents={contents}
+          onContents={setContents}
+          testPrefix="manual-bottle"
+        />
+      )}
+
       <button
         type="button"
         onClick={save}

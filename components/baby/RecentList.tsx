@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { deleteWithUndo } from "@/lib/undo";
 import { updateEvent } from "@/lib/baby/write";
+import { isBottle } from "@/lib/baby/bottle";
 import { EVENT_LABEL, visibleChipGroups, type BabyEvent } from "@/lib/baby/events";
 import { eventDuration, eventSummary } from "@/lib/baby/summary";
 import { formatClock, formatTimeOfDay } from "@/lib/baby/format";
@@ -147,7 +148,7 @@ function RecentRow({
   // stops it (planSideEdit banks it first).
   const feed = payload as FeedPayload;
   const nursing =
-    event.event_type === "feed" && feed.method !== "bottle" && typeof feed.volume_ml !== "number";
+    event.event_type === "feed" && !isBottle(feed);
   const banked = sideTotals(segmentsOf(feed));
   const live = running && feed.running ? feed.running : null;
   const totals = {

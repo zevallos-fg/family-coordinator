@@ -36,8 +36,11 @@ export interface FeedPayload {
   segments?: NursingSegment[];
   running?: RunningSide | null;
   last_side?: NursingSide;
-  /** Bottles. The export stored volume in oz; we keep ml and convert on display. */
+  /** Bottles. Volume in ml, for ml and oz bottles only (see lib/baby/bottle.ts). */
   volume_ml?: number;
+  /** Bottles. The amount exactly as entered, in `unit`. */
+  amount?: number;
+  unit?: "ml" | "oz" | "g";
   /** Bottles. "Breast Milk" in the export, but it is free text by design. */
   contents?: string;
 }
@@ -143,7 +146,13 @@ export function formatDuration(totalSeconds: number): string {
  * nothing to sum and keep end − start.
  */
 export function isTimedNursing(payload: FeedPayload | null | undefined): boolean {
-  if (!payload || payload.method === "bottle" || typeof payload.volume_ml === "number") return false;
+  if (
+    !payload ||
+    payload.method === "bottle" ||
+    typeof payload.volume_ml === "number" ||
+    typeof payload.amount === "number"
+  )
+    return false;
   return segmentsOf(payload).length > 0;
 }
 
