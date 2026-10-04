@@ -33,6 +33,8 @@ export interface ChipGroup {
   key: string;
   label: string;
   options: string[];
+  /** What each stored value is called on screen, when that differs. */
+  optionLabels?: Record<string, string>;
   /**
    * Whether this group is worth showing at all, given what has been answered so
    * far. Poo consistency is meaningless on a wet-only change, and offering it
@@ -40,6 +42,9 @@ export interface ChipGroup {
    */
   showIf?: (payload: Record<string, unknown>) => boolean;
 }
+
+/** Stored as small/medium/large (the export's values); shown the way people say it. */
+export const SIZE_LABELS: Record<string, string> = { small: "Little", medium: "Medium", large: "Big" };
 
 const contentsIncludes = (...wanted: string[]) => (payload: Record<string, unknown>) =>
   wanted.includes(String(payload.contents ?? ""));
@@ -63,17 +68,24 @@ const contentsIncludes = (...wanted: string[]) => (payload: Record<string, unkno
 export const DETAIL_CHIPS: Record<BabyEventType, ChipGroup[]> = {
   feed: [{ key: "method", label: "Method", options: ["breast", "bottle", "solid"] }],
   diaper: [
-    { key: "contents", label: "Contents", options: ["pee", "poo", "both", "dry"] },
+    {
+      key: "contents",
+      label: "Contents",
+      options: ["pee", "poo", "both", "dry"],
+      optionLabels: { both: "Mixed" },
+    },
     {
       key: "pee_amount",
-      label: "Pee",
+      label: "Pee size",
       options: ["small", "medium", "large"],
+      optionLabels: SIZE_LABELS,
       showIf: contentsIncludes("pee", "both"),
     },
     {
       key: "poo_amount",
-      label: "Poo",
+      label: "Poo size",
       options: ["small", "medium", "large"],
+      optionLabels: SIZE_LABELS,
       showIf: contentsIncludes("poo", "both"),
     },
     {
@@ -81,6 +93,14 @@ export const DETAIL_CHIPS: Record<BabyEventType, ChipGroup[]> = {
       label: "Consistency",
       options: ["loose", "solid", "runny"],
       showIf: contentsIncludes("poo", "both"),
+    },
+    {
+      key: "rash",
+      label: "Diaper rash",
+      options: ["yes"],
+      optionLabels: { yes: "Rash" },
+      // Any change can come with a rash, dry included — but only once it is a change.
+      showIf: (payload) => typeof payload.contents === "string" && payload.contents !== "",
     },
   ],
   pump: [{ key: "side", label: "Side", options: ["left", "right", "both"] }],

@@ -1,6 +1,7 @@
 import { formatDuration } from "./format";
 import { bottleAmountLabel, isBottle } from "./bottle";
 import { growthSummary } from "./growth";
+import { SIZE_LABELS } from "./events";
 import {
   SIDE_LABEL,
   eventDurationSeconds,
@@ -83,9 +84,10 @@ export function diaperSummary(payload: Payload): string | null {
   const contents = str(payload, "contents");
   if (!contents) return null;
 
-  const label = contents === "both" ? "Both" : contents[0].toUpperCase() + contents.slice(1);
-  const pee = str(payload, "pee_amount");
-  const poo = str(payload, "poo_amount");
+  const label = contents === "both" ? "Mixed" : contents[0].toUpperCase() + contents.slice(1);
+  const size = (v: string | null) => (v ? (SIZE_LABELS[v] ?? v).toLowerCase() : null);
+  const pee = size(str(payload, "pee_amount"));
+  const poo = size(str(payload, "poo_amount"));
   const consistency = str(payload, "consistency");
 
   const parts: string[] = [];
@@ -98,6 +100,7 @@ export function diaperSummary(payload: Payload): string | null {
     if (amount) parts.push(amount);
   }
   if (consistency) parts.push(consistency);
+  if (str(payload, "rash") === "yes") parts.push("rash");
 
   return parts.length ? `${label}, ${parts.join(" · ")}` : label;
 }

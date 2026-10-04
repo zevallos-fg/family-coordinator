@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { deleteWithUndo } from "@/lib/undo";
 import { updateEvent } from "@/lib/baby/write";
 import { isBottle } from "@/lib/baby/bottle";
+import { Segmented } from "./Segmented";
 import { EVENT_LABEL, visibleChipGroups, type BabyEvent } from "@/lib/baby/events";
 import { eventDuration, eventSummary } from "@/lib/baby/summary";
 import { formatClock, formatTimeOfDay } from "@/lib/baby/format";
@@ -243,40 +244,21 @@ export function RecentRow({
               />
             ))}
 
-          {groups.map((group) => {
-            const current = payload[group.key] as string | undefined;
-            return (
-              <div key={group.key} className="space-y-1.5">
-                <p className="text-[11px] uppercase tracking-wide text-stone-400">{group.label}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {group.options.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      disabled={saving}
-                      data-testid={`edit-chip-${group.key}-${option}`}
-                      onClick={() =>
-                        // Tapping the answer again clears it. Nothing is
-                        // required, and a wrong chip must be as cheap to undo as
-                        // it was to set — which is why the payload is replaced
-                        // wholesale rather than merged.
-                        void patch({
-                          payload: { ...payload, [group.key]: current === option ? null : option },
-                        })
-                      }
-                      className={`rounded-full px-3 py-1.5 text-xs disabled:opacity-50 ${
-                        current === option
-                          ? "bg-stone-800 text-white"
-                          : "bg-white text-stone-600 ring-1 ring-stone-200"
-                      }`}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {groups.map((group) => (
+            <div key={group.key} className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wide text-stone-400">{group.label}</p>
+              <Segmented
+                options={group.options}
+                labels={group.optionLabels}
+                value={payload[group.key] as string | undefined}
+                disabled={saving}
+                testIdPrefix={`edit-chip-${group.key}`}
+                // The payload is replaced wholesale rather than merged, so a
+                // cleared answer really is cleared.
+                onChange={(next) => void patch({ payload: { ...payload, [group.key]: next } })}
+              />
+            </div>
+          ))}
 
           <button
             type="button"

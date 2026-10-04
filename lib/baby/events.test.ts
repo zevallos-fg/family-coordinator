@@ -18,7 +18,7 @@ describe("visibleChipGroups — diaper", () => {
   });
 
   it("asks about poo, and only about poo, on a soiled change", () => {
-    expect(keys({ contents: "poo" })).toEqual(["contents", "poo_amount", "consistency"]);
+    expect(keys({ contents: "poo" })).toEqual(["contents", "poo_amount", "consistency", "rash"]);
   });
 
   it("asks both amounts when there was both", () => {
@@ -27,16 +27,16 @@ describe("visibleChipGroups — diaper", () => {
       "pee_amount",
       "poo_amount",
       "consistency",
+      "rash",
     ]);
   });
 
-  it("asks nothing beyond the type on a dry change", () => {
-    expect(keys({ contents: "dry" })).toEqual(["contents"]);
+  it("asks only about a rash on a dry change", () => {
+    expect(keys({ contents: "dry" })).toEqual(["contents", "rash"]);
   });
 
   it("asks nothing beyond the type before the type is known", () => {
-    // The tile logs first and refines after, so the payload really is empty for
-    // the moment between the tap and the answer.
+    // Nothing is offered until pee, poo, mixed or dry has been picked.
     expect(keys({})).toEqual(["contents"]);
   });
 });

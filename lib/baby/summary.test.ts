@@ -39,21 +39,26 @@ describe("feedSummary", () => {
 
 describe("diaperSummary", () => {
   it("reads back the export's own shape", () => {
-    expect(diaperSummary({ contents: "pee", pee_amount: "large" })).toBe("Pee, large");
+    // Stored as the export's small/medium/large, shown as Little/Medium/Big.
+    expect(diaperSummary({ contents: "pee", pee_amount: "large" })).toBe("Pee, big");
   });
 
   it("names which amount is which when there was both", () => {
     expect(
       diaperSummary({ contents: "both", pee_amount: "large", poo_amount: "medium" })
-    ).toBe("Both, pee large, poo medium");
+    ).toBe("Mixed, pee big, poo medium");
   });
 
   it("carries consistency when it was filled, and says nothing when it was not", () => {
     expect(diaperSummary({ contents: "poo", poo_amount: "small", consistency: "loose" })).toBe(
-      "Poo, small · loose"
+      "Poo, little · loose"
     );
     // Filled 20.9% of the time in three years. Absent is the normal case.
-    expect(diaperSummary({ contents: "poo", poo_amount: "small" })).toBe("Poo, small");
+    expect(diaperSummary({ contents: "poo", poo_amount: "small" })).toBe("Poo, little");
+  });
+
+  it("says rash when there was one", () => {
+    expect(diaperSummary({ contents: "pee", rash: "yes" })).toBe("Pee, rash");
   });
 
   it("is just the type when nothing else was answered", () => {

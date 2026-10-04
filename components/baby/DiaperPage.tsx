@@ -7,13 +7,15 @@ import { BabyPageShell } from "./BabyPageShell";
 import { EventHistory, laneKey } from "./EventHistory";
 import { useBabyLane } from "./useBabyLane";
 import { useStartTime } from "./useStartTime";
-import { logPoint, updateEvent } from "@/lib/baby/write";
+import { Segmented } from "./Segmented";
+import { logPoint } from "@/lib/baby/write";
 import { visibleChipGroups } from "@/lib/baby/events";
+import { diaperPayload } from "@/lib/baby/diaper";
 import type { Json } from "@/lib/supabase/database.types";
 
 type Mode = "diaper" | "potty";
 
-/** Contents, as four circles. The whole body of the page, and one tap logs. */
+/** Contents, as four large circles. Tapping one selects it; Save logs it. */
 const CONTENTS = [
   { key: "pee", label: "Pee", emoji: "💧" },
   { key: "poo", label: "Poo", emoji: "💩" },
@@ -22,23 +24,27 @@ const CONTENTS = [
 ] as const;
 
 /**
- * /baby/diaper — one tap logs, and nothing is asked before that tap.
+ * /baby/diaper — pick what was in it, add detail if you want, Save.
  *
- * Amount and consistency appear only afterwards, on the row that was just
- * written, and poo amount only when the contents say there was poo. Asking first
- * turns a one-tap log back into a form, which is the thing this screen exists
- * not to be. Consistency was filled 20.9% of the time in the export — used when
- * notable, which is exactly right, so it is offered and never required.
+ * This used to log on the first tap and offer detail as small chips on the row
+ * afterwards. In use that read as "the buttons are tiny and I can't tell what
+ * got saved". It now works the way Huckleberry does, which is the flow this
+ * family already knows: the contents circle selects, the details sit right
+ * under it as full-width controls (size, consistency, rash, note), and one big
+ * Save writes the whole thing. Two taps for a plain change, nothing hidden.
+ *
+ * The details stay optional and appear only when they apply — poo size and
+ * consistency only when there was poo — and every one can be corrected later
+ * from History.
  */
 export function DiaperPage({ familyId }: { familyId: string }) {
   const lane = useBabyLane(familyId);
   const [mode, setMode] = useState<Mode>("diaper");
   const start = useStartTime();
-  const [pending, setPending] = useState<string | null>(null);
-  /** The row just written, which is the only thing the chips below can edit. */
-  const [justLogged, setJustLogged] = useState<{ id: string; payload: Record<string, Json> } | null>(
-    null
-  );
+  const [saving, setSaving] = useState(false);
+  const [contents, setContents] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, string | null>>({});
+  const [note, setNote] = useState("");
 
   const blocked =
     !lane.loading && lane.kids.length === 0 ? (
@@ -51,41 +57,38 @@ export function DiaperPage({ familyId }: { familyId: string }) {
       </>
     ) : null;
 
-  async function log(contents: string) {
-    if (blocked || !lane.kidId) return;
-    setPending(contents);
-    const payload: Record<string, Json> = { contents, ...(mode === "potty" ? { potty: true } : {}) };
+  function choose(next: string) {
+    setContents((c) => (c === next ? null : next));
+  }
+
+  async function save() {
+    if (blocked || !lane.kidId || !contents) return;
+    const payload = diaperPayload(contents, details, mode === "potty") as Record<string, Json>;
+    setSaving(true);
     const result = await logPoint({
       familyId,
       type: "diaper",
       kidId: lane.kidId,
       payload,
       at: start.instant(),
+      note: note.trim() || null,
     });
-    setPending(null);
+    setSaving(false);
     if (!result.ok) {
       toast.error(result.message);
       return;
     }
-    if (result.id) setJustLogged({ id: result.id, payload });
-    await lane.refresh();
+    toast.success("Diaper logged");
+    setContents(null);
+    setDetails({});
+    setNote("");
     start.reset();
+    await lane.refresh();
   }
 
-  async function setDetail(key: string, value: string | null) {
-    if (!justLogged) return;
-    const next = { ...justLogged.payload, [key]: value };
-    setJustLogged({ ...justLogged, payload: next });
-    const result = await updateEvent({ id: justLogged.id, payload: next });
-    if (!result.ok) toast.error(result.message);
-    else await lane.refresh();
-  }
-
-  // Contents is the log itself, not a refinement, so it is dropped here — it was
-  // already answered by the tap that created the entry.
-  const groups = visibleChipGroups("diaper", justLogged?.payload ?? {}).filter(
-    (g) => g.key !== "contents"
-  );
+  const groups = contents
+    ? visibleChipGroups("diaper", { contents }).filter((g) => g.key !== "contents")
+    : [];
 
   return (
     <BabyPageShell
@@ -122,11 +125,12 @@ export function DiaperPage({ familyId }: { familyId: string }) {
             key={c.key}
             type="button"
             data-testid={`diaper-${c.key}`}
-            disabled={pending !== null || !!blocked || !lane.kidId}
-            onClick={() => log(c.key)}
-            className={`flex aspect-square flex-col items-center justify-center rounded-full border-4 disabled:opacity-50 ${
-              justLogged?.payload.contents === c.key
-                ? "border-stone-800 bg-stone-50"
+            aria-pressed={contents === c.key}
+            disabled={saving || !!blocked || !lane.kidId}
+            onClick={() => choose(c.key)}
+            className={`flex aspect-square flex-col items-center justify-center rounded-full border-4 transition-colors disabled:opacity-50 ${
+              contents === c.key
+                ? "border-amber-500 bg-amber-100"
                 : "border-stone-200 bg-white active:bg-stone-50"
             }`}
           >
@@ -138,37 +142,45 @@ export function DiaperPage({ familyId }: { familyId: string }) {
         ))}
       </div>
 
-      {/* Only after. Never before. */}
-      {justLogged && groups.length > 0 && (
-        <section className="space-y-3 rounded-2xl border border-stone-200 bg-white p-4">
-          <p className="text-xs text-stone-500">Logged. Add detail, or don&apos;t — it&apos;s done either way.</p>
-          {groups.map((group) => {
-            const current = justLogged.payload[group.key] as string | undefined;
-            return (
-              <div key={group.key} className="space-y-1.5">
-                <p className="text-[11px] uppercase tracking-wide text-stone-400">{group.label}</p>
-                <div className="flex flex-wrap gap-2">
-                  {group.options.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      data-testid={`chip-${group.key}-${option}`}
-                      onClick={() => setDetail(group.key, current === option ? null : option)}
-                      className={`rounded-full px-4 py-2 text-sm ${
-                        current === option
-                          ? "bg-stone-800 text-white"
-                          : "bg-white text-stone-600 ring-1 ring-stone-200"
-                      }`}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+      {contents && (
+        <section
+          className="space-y-4 rounded-2xl border border-stone-200 bg-white p-4"
+          data-testid="diaper-details"
+        >
+          <p className="text-sm font-medium text-stone-700">Optional details</p>
+          {groups.map((group) => (
+            <div key={group.key} className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wide text-stone-400">{group.label}</p>
+              <Segmented
+                options={group.options}
+                labels={group.optionLabels}
+                value={details[group.key]}
+                disabled={saving}
+                testIdPrefix={`chip-${group.key}`}
+                onChange={(next) => setDetails((d) => ({ ...d, [group.key]: next }))}
+              />
+            </div>
+          ))}
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add a note"
+            data-testid="diaper-note"
+            className="w-full rounded-xl border border-stone-200 bg-white px-3 py-3 text-base text-stone-800 placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
         </section>
       )}
+
+      <button
+        type="button"
+        onClick={save}
+        disabled={!contents || saving || !!blocked || !lane.kidId}
+        data-testid="diaper-save"
+        className="w-full rounded-2xl bg-stone-800 px-4 py-4 text-base font-medium text-white disabled:opacity-40"
+      >
+        {contents ? "Save" : "Pick pee, poo, mixed or dry"}
+      </button>
+
       <EventHistory
         familyId={familyId}
         kidId={lane.kidId}
