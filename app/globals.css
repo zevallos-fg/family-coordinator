@@ -1,26 +1,308 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Always dark. Night feeds are the main use of this app, and a white screen at
+ * 3am wakes everyone up.
+ *
+ * The palette is done here, once, by redefining Tailwind's color scales rather
+ * than editing several hundred class names. Every screen was written light-on-
+ * dark-text ("bg-white", "text-stone-800"); flipping the scales flips all of
+ * them together and keeps their contrast relationships:
+ *
+ *   white      → card            stone-50  → page
+ *   stone-100  → raised          stone-200 → hairline
+ *   stone-400/500 → muted text   stone-800 → primary text
+ *
+ * The neutral scales (stone, gray, slate, neutral, zinc) share one navy ramp.
+ * Accents follow sections, never good/bad:
+ *   baby blue  — kids        (sky, blue, cyan)
+ *   rose gold  — actions     (amber, orange, yellow, rose)
+ *   lavender   — planning    (violet, purple, indigo, green, emerald, teal, lime)
+ *   red stays a softened red, for destructive actions only.
+ * In each accent ramp 600 is the accent itself and 50 a tinted surface, so
+ * "bg-amber-50 text-amber-900" still reads as a tinted panel with light text.
+ */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --color-background: #141b2d;
+  --color-foreground: #eef1fa;
+
+  /* Section accents, by name, for new code. */
+  --color-kids: #9cc8f0;
+  --color-action: #e4b7a0;
+  --color-plan: #b4a3f0;
+  --color-page: #141b2d;
+  --color-card: #1c2540;
+  --color-raised: #243052;
+  --color-hairline: #2e3a5e;
+
+  --color-white: #1c2540;
+
+  --color-stone-50: #141b2d;
+  --color-stone-100: #243052;
+  --color-stone-200: #2e3a5e;
+  --color-stone-300: #56638a;
+  --color-stone-400: #8794b6;
+  --color-stone-500: #9aa6c4;
+  --color-stone-600: #b3bdd6;
+  --color-stone-700: #cdd4e6;
+  --color-stone-800: #eef1fa;
+  --color-stone-900: #f5f7fc;
+  --color-stone-950: #ffffff;
+
+  --color-gray-50: #141b2d;
+  --color-gray-100: #243052;
+  --color-gray-200: #2e3a5e;
+  --color-gray-300: #56638a;
+  --color-gray-400: #8794b6;
+  --color-gray-500: #9aa6c4;
+  --color-gray-600: #b3bdd6;
+  --color-gray-700: #cdd4e6;
+  --color-gray-800: #eef1fa;
+  --color-gray-900: #f5f7fc;
+  --color-gray-950: #ffffff;
+
+  --color-slate-50: #141b2d;
+  --color-slate-100: #243052;
+  --color-slate-200: #2e3a5e;
+  --color-slate-300: #56638a;
+  --color-slate-400: #8794b6;
+  --color-slate-500: #9aa6c4;
+  --color-slate-600: #b3bdd6;
+  --color-slate-700: #cdd4e6;
+  --color-slate-800: #eef1fa;
+  --color-slate-900: #f5f7fc;
+  --color-slate-950: #ffffff;
+
+  --color-neutral-50: #141b2d;
+  --color-neutral-100: #243052;
+  --color-neutral-200: #2e3a5e;
+  --color-neutral-300: #56638a;
+  --color-neutral-400: #8794b6;
+  --color-neutral-500: #9aa6c4;
+  --color-neutral-600: #b3bdd6;
+  --color-neutral-700: #cdd4e6;
+  --color-neutral-800: #eef1fa;
+  --color-neutral-900: #f5f7fc;
+  --color-neutral-950: #ffffff;
+
+  --color-zinc-50: #141b2d;
+  --color-zinc-100: #243052;
+  --color-zinc-200: #2e3a5e;
+  --color-zinc-300: #56638a;
+  --color-zinc-400: #8794b6;
+  --color-zinc-500: #9aa6c4;
+  --color-zinc-600: #b3bdd6;
+  --color-zinc-700: #cdd4e6;
+  --color-zinc-800: #eef1fa;
+  --color-zinc-900: #f5f7fc;
+  --color-zinc-950: #ffffff;
+
+  /* Rose gold — actions and alerts. */
+  --color-amber-50: #2a2233;
+  --color-amber-100: #372a3c;
+  --color-amber-200: #4e3a47;
+  --color-amber-300: #7a5a5e;
+  --color-amber-400: #b88672;
+  --color-amber-500: #d4a28a;
+  --color-amber-600: #e4b7a0;
+  --color-amber-700: #ecc6b4;
+  --color-amber-800: #f2d5c7;
+  --color-amber-900: #f7e5dc;
+  --color-amber-950: #fbf2ee;
+
+  --color-orange-50: #2a2233;
+  --color-orange-100: #372a3c;
+  --color-orange-200: #4e3a47;
+  --color-orange-300: #7a5a5e;
+  --color-orange-400: #b88672;
+  --color-orange-500: #d4a28a;
+  --color-orange-600: #e4b7a0;
+  --color-orange-700: #ecc6b4;
+  --color-orange-800: #f2d5c7;
+  --color-orange-900: #f7e5dc;
+  --color-orange-950: #fbf2ee;
+
+  --color-yellow-50: #2a2233;
+  --color-yellow-100: #372a3c;
+  --color-yellow-200: #4e3a47;
+  --color-yellow-300: #7a5a5e;
+  --color-yellow-400: #b88672;
+  --color-yellow-500: #d4a28a;
+  --color-yellow-600: #e4b7a0;
+  --color-yellow-700: #ecc6b4;
+  --color-yellow-800: #f2d5c7;
+  --color-yellow-900: #f7e5dc;
+  --color-yellow-950: #fbf2ee;
+
+  --color-rose-50: #2a2233;
+  --color-rose-100: #372a3c;
+  --color-rose-200: #4e3a47;
+  --color-rose-300: #7a5a5e;
+  --color-rose-400: #b88672;
+  --color-rose-500: #d4a28a;
+  --color-rose-600: #e4b7a0;
+  --color-rose-700: #ecc6b4;
+  --color-rose-800: #f2d5c7;
+  --color-rose-900: #f7e5dc;
+  --color-rose-950: #fbf2ee;
+
+  /* Red — destructive only. Softened so it reads on navy without shouting. */
+  --color-red-50: #3a1f2b;
+  --color-red-100: #4a2533;
+  --color-red-200: #6b3343;
+  --color-red-300: #a04a5c;
+  --color-red-400: #e07a88;
+  --color-red-500: #ee8f9b;
+  --color-red-600: #f2a2ac;
+  --color-red-700: #f5b3bb;
+  --color-red-800: #f8c6cc;
+  --color-red-900: #fbdde0;
+  --color-red-950: #fdeff1;
+
+  /* Baby blue — kids. */
+  --color-sky-50: #1a2a42;
+  --color-sky-100: #203452;
+  --color-sky-200: #2c4a6e;
+  --color-sky-300: #4f7aa6;
+  --color-sky-400: #79a8d8;
+  --color-sky-500: #8cbce8;
+  --color-sky-600: #9cc8f0;
+  --color-sky-700: #b2d5f4;
+  --color-sky-800: #c9e2f7;
+  --color-sky-900: #dfeefb;
+  --color-sky-950: #f0f7fd;
+
+  --color-blue-50: #1a2a42;
+  --color-blue-100: #203452;
+  --color-blue-200: #2c4a6e;
+  --color-blue-300: #4f7aa6;
+  --color-blue-400: #79a8d8;
+  --color-blue-500: #8cbce8;
+  --color-blue-600: #9cc8f0;
+  --color-blue-700: #b2d5f4;
+  --color-blue-800: #c9e2f7;
+  --color-blue-900: #dfeefb;
+  --color-blue-950: #f0f7fd;
+
+  --color-cyan-50: #1a2a42;
+  --color-cyan-100: #203452;
+  --color-cyan-200: #2c4a6e;
+  --color-cyan-300: #4f7aa6;
+  --color-cyan-400: #79a8d8;
+  --color-cyan-500: #8cbce8;
+  --color-cyan-600: #9cc8f0;
+  --color-cyan-700: #b2d5f4;
+  --color-cyan-800: #c9e2f7;
+  --color-cyan-900: #dfeefb;
+  --color-cyan-950: #f0f7fd;
+
+  /* Lavender — planning, and the old "done" greens. */
+  --color-violet-50: #231f3d;
+  --color-violet-100: #2d2850;
+  --color-violet-200: #3f3770;
+  --color-violet-300: #6656a8;
+  --color-violet-400: #9584dc;
+  --color-violet-500: #a898ea;
+  --color-violet-600: #b4a3f0;
+  --color-violet-700: #c5b8f4;
+  --color-violet-800: #d6cdf7;
+  --color-violet-900: #e7e1fb;
+  --color-violet-950: #f4f1fd;
+
+  --color-purple-50: #231f3d;
+  --color-purple-100: #2d2850;
+  --color-purple-200: #3f3770;
+  --color-purple-300: #6656a8;
+  --color-purple-400: #9584dc;
+  --color-purple-500: #a898ea;
+  --color-purple-600: #b4a3f0;
+  --color-purple-700: #c5b8f4;
+  --color-purple-800: #d6cdf7;
+  --color-purple-900: #e7e1fb;
+  --color-purple-950: #f4f1fd;
+
+  --color-indigo-50: #231f3d;
+  --color-indigo-100: #2d2850;
+  --color-indigo-200: #3f3770;
+  --color-indigo-300: #6656a8;
+  --color-indigo-400: #9584dc;
+  --color-indigo-500: #a898ea;
+  --color-indigo-600: #b4a3f0;
+  --color-indigo-700: #c5b8f4;
+  --color-indigo-800: #d6cdf7;
+  --color-indigo-900: #e7e1fb;
+  --color-indigo-950: #f4f1fd;
+
+  --color-green-50: #231f3d;
+  --color-green-100: #2d2850;
+  --color-green-200: #3f3770;
+  --color-green-300: #6656a8;
+  --color-green-400: #9584dc;
+  --color-green-500: #a898ea;
+  --color-green-600: #b4a3f0;
+  --color-green-700: #c5b8f4;
+  --color-green-800: #d6cdf7;
+  --color-green-900: #e7e1fb;
+  --color-green-950: #f4f1fd;
+
+  --color-emerald-50: #231f3d;
+  --color-emerald-100: #2d2850;
+  --color-emerald-200: #3f3770;
+  --color-emerald-300: #6656a8;
+  --color-emerald-400: #9584dc;
+  --color-emerald-500: #a898ea;
+  --color-emerald-600: #b4a3f0;
+  --color-emerald-700: #c5b8f4;
+  --color-emerald-800: #d6cdf7;
+  --color-emerald-900: #e7e1fb;
+  --color-emerald-950: #f4f1fd;
+
+  --color-teal-50: #231f3d;
+  --color-teal-100: #2d2850;
+  --color-teal-200: #3f3770;
+  --color-teal-300: #6656a8;
+  --color-teal-400: #9584dc;
+  --color-teal-500: #a898ea;
+  --color-teal-600: #b4a3f0;
+  --color-teal-700: #c5b8f4;
+  --color-teal-800: #d6cdf7;
+  --color-teal-900: #e7e1fb;
+  --color-teal-950: #f4f1fd;
+
+  --color-lime-50: #231f3d;
+  --color-lime-100: #2d2850;
+  --color-lime-200: #3f3770;
+  --color-lime-300: #6656a8;
+  --color-lime-400: #9584dc;
+  --color-lime-500: #a898ea;
+  --color-lime-600: #b4a3f0;
+  --color-lime-700: #c5b8f4;
+  --color-lime-800: #d6cdf7;
+  --color-lime-900: #e7e1fb;
+  --color-lime-950: #f4f1fd;
+}
+
+:root {
+  /* Native controls (date and time pickers, selects, scrollbars) follow. */
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+::placeholder {
+  color: #6f7c9e;
 }

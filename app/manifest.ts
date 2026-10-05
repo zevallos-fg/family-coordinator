@@ -13,8 +13,8 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     display_override: ["standalone", "minimal-ui"],
     orientation: "portrait",
-    background_color: "#fafaf9",
-    theme_color: "#b45309",
+    background_color: "#141b2d",
+    theme_color: "#141b2d",
     icons: [
       // "any" keeps its own rounded tile — this is what iOS and desktop use.
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },

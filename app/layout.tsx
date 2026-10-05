@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Family",
-    statusBarStyle: "default",
+    statusBarStyle: "black",
   },
   icons: {
     icon: "/icon-192.png",
@@ -36,7 +36,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#b45309",
+  themeColor: "#141b2d",
 };
 
 export default function RootLayout({
@@ -53,7 +53,7 @@ export default function RootLayout({
         <PostHogProvider>
           {children}
         </PostHogProvider>
-        <Toaster position="top-right" theme="system" richColors />
+        <Toaster position="top-right" theme="dark" richColors />
       </body>
     </html>
   );
