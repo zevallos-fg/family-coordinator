@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Sheet } from "@/components/ui/Sheet";
 import { createClient } from "@/lib/supabase/client";
-import { formatClock, formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/baby/format";
+import { formatDuration, formatElapsed, formatTimeOfDay, secondsBetween } from "@/lib/baby/format";
 import {
   AAP_SAFE_SLEEP,
   SAFE_SLEEP_POINTS,
@@ -14,6 +14,7 @@ import {
   type Guide,
 } from "@/lib/baby/glance";
 import type { BabyEvent } from "@/lib/baby/events";
+import { WakeCountdown } from "./WakeCountdown";
 
 type Kid = { id: string; name: string; birth_date: string | null };
 
@@ -146,14 +147,16 @@ export function KidGlance({
             <span className="flex items-baseline justify-between gap-3">
               <span className="text-sm text-sky-700">{awake.state === "awake" ? "Awake" : "Asleep"}</span>
               <span className="font-mono text-3xl tabular-nums text-sky-800" data-testid="awake-elapsed">
-                {formatClock(elapsed)}
+                {formatElapsed(elapsed)}
               </span>
             </span>
-            <span className="mt-1 flex items-center justify-between gap-3 text-[11px] text-sky-700/80">
-              <span>
-                since {formatTimeOfDay(awake.since)}
-                {awake.state === "awake" && guides.wake ? ` · typical window ${guides.wake.range}` : ""}
+            {awake.state === "awake" && guides.wake?.windowMinutes && (
+              <span className="mt-2 block">
+                <WakeCountdown awakeSince={awake.since} windowMinutes={guides.wake.windowMinutes} nowMs={nowMs} />
               </span>
+            )}
+            <span className="mt-1 flex items-center justify-between gap-3 text-[11px] text-sky-700/80">
+              <span>{awake.state === "awake" ? "Woke" : "Fell asleep"} at {formatTimeOfDay(awake.since)}</span>
               <span aria-hidden>ⓘ</span>
             </span>
           </>

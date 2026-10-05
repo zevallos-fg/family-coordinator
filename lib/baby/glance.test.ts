@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageInDays, ageInMonths, awakeState, guidesFor, rolling24h } from "./glance";
+import { ageInDays, ageInMonths, awakeState, guidesFor, rolling24h, wakeWindow } from "./glance";
 
 const now = new Date(2026, 9, 5, 15, 0, 0); // Oct 5 2026, 3pm local
 const nowMs = now.getTime();
@@ -90,5 +90,31 @@ describe("awakeState", () => {
   });
   it("null with no sleep for this kid", () => {
     expect(awakeState([ev("sleep", 120, 20, {}, "k2")], "k1", nowMs)).toBeNull();
+  });
+});
+
+describe("sleep overlap", () => {
+  it("counts overlapping sleeps once", () => {
+    // 3h and 1h sleeps that share an hour → 3h, not 4h.
+    const r = rolling24h([ev("sleep", 240, 60), ev("sleep", 120, 60)], "k1", nowMs);
+    expect(r.sleepSeconds).toBe(3 * 3600);
+  });
+});
+
+describe("wakeWindow", () => {
+  // Woke at 4:27; window 30–90 min → opens 4:57, closes 5:57.
+  const woke = new Date(2026, 9, 5, 16, 27).toISOString();
+  const at = (h: number, m: number) => new Date(2026, 9, 5, h, m).getTime();
+  it("counts down to the window opening", () => {
+    expect(wakeWindow(woke, [30, 90], at(16, 45))).toMatchObject({ phase: "before", secondsLeft: 12 * 60 });
+  });
+  it("counts down to the window closing once open", () => {
+    expect(wakeWindow(woke, [30, 90], at(17, 15))).toMatchObject({ phase: "open", secondsLeft: 42 * 60 });
+  });
+  it("says past, with nothing left, after the far end", () => {
+    expect(wakeWindow(woke, [30, 90], at(18, 0))).toMatchObject({ phase: "past", secondsLeft: 0 });
+  });
+  it("the guide carries the minutes the countdown uses", () => {
+    expect(guidesFor("2026-09-30", now).wake?.windowMinutes).toEqual([30, 90]);
   });
 });

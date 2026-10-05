@@ -6,8 +6,8 @@ import { useState, useRef, useEffect } from "react";
 import { SpendIndicator } from "./SpendIndicator";
 
 const PRIMARY_NAV = [
-  { href: "/now", label: "Now" },
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/home", label: "Home" },
+  { href: "/now", label: "Today" },
   { href: "/schedule", label: "Schedule" },
   { href: "/capture", label: "Capture" },
   { href: "/organized", label: "Organized" },
@@ -53,7 +53,7 @@ export function TopNav() {
       <div className="max-w-6xl mx-auto flex items-center justify-between h-14">
         <div className="flex items-center gap-1 overflow-x-auto hide-scrollbar">
           <Link
-            href="/now"
+            href="/home"
             className="text-amber-700 font-bold text-base whitespace-nowrap mr-3 shrink-0"
           >
             Family

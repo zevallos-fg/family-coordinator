@@ -19,14 +19,14 @@ test.describe("PWA manifest", () => {
     expect(res.headers()["content-type"]).toContain("application/manifest+json");
   });
 
-  test("manifest parses and declares standalone display from /now", async ({
+  test("manifest parses and declares standalone display from /home", async ({
     request,
   }) => {
     const res = await request.get("/manifest.webmanifest");
     const manifest = (await res.json()) as Manifest;
 
     expect(manifest.display).toBe("standalone");
-    expect(manifest.start_url).toBe("/now");
+    expect(manifest.start_url).toBe("/home");
   });
 
   test("every icon the manifest advertises actually resolves", async ({ request }) => {

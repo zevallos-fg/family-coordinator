@@ -27,6 +27,8 @@ export interface Guide {
   source: GuideSource;
   /** Wake windows: a convention, not research. Said on the screen. */
   ruleOfThumb?: boolean;
+  /** Wake windows only: the range in minutes, for the countdown. */
+  windowMinutes?: [number, number];
 }
 
 export type GuideKey = "feeds" | "wet" | "stools" | "sleep" | "wake";
@@ -177,6 +179,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
         "A typical wake window at 0–1 month is 30 to 90 minutes. Every baby is different, it changes day to day, and unpredictable newborn sleep is normal.",
       source: SF_WAKE,
       ruleOfThumb: true,
+      windowMinutes: [30, 90],
     };
   } else if (months < 4) {
     out.wake = {
@@ -186,6 +189,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
         "A typical wake window at 1–4 months is 1 to 3 hours. Every baby is different and it changes day to day.",
       source: SF_WAKE,
       ruleOfThumb: true,
+      windowMinutes: [60, 180],
     };
   }
 
@@ -209,6 +213,29 @@ function contentsOf(e: LaneEvent): string | null {
   return p && typeof p.contents === "string" ? p.contents : null;
 }
 
+/**
+ * Total time covered by possibly-overlapping spans. Two sleeps logged over the
+ * same hour (one by each parent, or a start typed in late) are one hour of
+ * sleep, not two.
+ */
+function unionMs(spans: Array<[number, number]>): number {
+  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let curStart = -Infinity;
+  let curEnd = -Infinity;
+  for (const [a, b] of sorted) {
+    if (a > curEnd) {
+      if (curEnd > curStart) total += curEnd - curStart;
+      curStart = a;
+      curEnd = b;
+    } else if (b > curEnd) {
+      curEnd = b;
+    }
+  }
+  if (curEnd > curStart) total += curEnd - curStart;
+  return total;
+}
+
 /** Counts over the 24 hours ending now. Sleep is clipped to the window. */
 export function rolling24h(
   events: LaneEvent[],
@@ -219,14 +246,15 @@ export function rolling24h(
   let feeds = 0;
   let wet = 0;
   let stools = 0;
-  let sleepMs = 0;
+  const sleeps: Array<[number, number]> = [];
   for (const e of events) {
     if (!forKid(e, kidId)) continue;
     const start = Date.parse(e.started_at);
     if (!Number.isFinite(start)) continue;
     if (e.event_type === "sleep") {
-      const end = e.ended_at ? Date.parse(e.ended_at) : nowMs;
-      sleepMs += Math.max(0, Math.min(end, nowMs) - Math.max(start, from));
+      const end = Math.min(e.ended_at ? Date.parse(e.ended_at) : nowMs, nowMs);
+      const clipped = Math.max(start, from);
+      if (end > clipped) sleeps.push([clipped, end]);
       continue;
     }
     if (start < from || start > nowMs) continue;
@@ -237,7 +265,7 @@ export function rolling24h(
       if (c === "poo" || c === "both") stools++;
     }
   }
-  return { feeds, wet, stools, sleepSeconds: Math.round(sleepMs / 1000) };
+  return { feeds, wet, stools, sleepSeconds: Math.round(unionMs(sleeps) / 1000) };
 }
 
 /**
@@ -262,4 +290,32 @@ export function awakeState(
     }
   }
   return lastEnd ? { state: "awake", since: lastEnd } : null;
+}
+
+export type WakeWindow = {
+  /** before: window not open yet · open: inside it · past: beyond its far end. */
+  phase: "before" | "open" | "past";
+  opensAt: number;
+  closesAt: number;
+  /** Seconds until the next boundary (open, then close); 0 once past. */
+  secondsLeft: number;
+};
+
+/**
+ * Where "now" sits against the typical wake window, counted from when the last
+ * sleep ended. A clock, not a verdict: "past" says the typical range has gone
+ * by, which is common and means nothing on its own.
+ */
+export function wakeWindow(
+  awakeSince: string,
+  windowMinutes: [number, number],
+  nowMs: number
+): WakeWindow | null {
+  const since = Date.parse(awakeSince);
+  if (!Number.isFinite(since)) return null;
+  const opensAt = since + windowMinutes[0] * 60_000;
+  const closesAt = since + windowMinutes[1] * 60_000;
+  if (nowMs < opensAt) return { phase: "before", opensAt, closesAt, secondsLeft: Math.ceil((opensAt - nowMs) / 1000) };
+  if (nowMs < closesAt) return { phase: "open", opensAt, closesAt, secondsLeft: Math.ceil((closesAt - nowMs) / 1000) };
+  return { phase: "past", opensAt, closesAt, secondsLeft: 0 };
 }

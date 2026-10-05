@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Family Coordinator",
     short_name: "Family",
     description: "What needs attention, and what you'd otherwise forget.",
-    start_url: "/now",
+    start_url: "/home",
     scope: "/",
     display: "standalone",
     display_override: ["standalone", "minimal-ui"],

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatAgo,
   formatClock,
+  formatElapsed,
   formatDuration,
   secondsBetween,
 } from "./format";
@@ -131,5 +132,12 @@ describe("defaultKidId", () => {
       { id: "baby", birth_date: "2026-09-01" },
     ];
     expect(defaultKidId(kids)).toBe("baby");
+  });
+});
+
+describe("formatElapsed", () => {
+  it("always shows hours, so 18 minutes never reads as 6pm", () => {
+    expect(formatElapsed(18 * 60)).toBe("0:18:00");
+    expect(formatElapsed(3600 + 5 * 60 + 7)).toBe("1:05:07");
   });
 });

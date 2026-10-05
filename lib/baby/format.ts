@@ -18,6 +18,16 @@ export function formatClock(totalSeconds: number): string {
     : `${minutes}:${pad(seconds)}`;
 }
 
+/**
+ * Always H:MM:SS. For an elapsed clock that sits next to times of day, where
+ * "18:00" would read as six o'clock.
+ */
+export function formatElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+}
+
 /** Prose-ish duration for lists: "45s", "4m 12s", "1h 03m". */
 export function formatDuration(totalSeconds: number | null | undefined): string {
   if (totalSeconds == null || !Number.isFinite(totalSeconds)) return "—";

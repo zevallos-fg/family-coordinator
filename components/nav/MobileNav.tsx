@@ -11,12 +11,15 @@ import { QuickCaptureSheet } from "@/components/capture/QuickCaptureSheet";
 // does not open daily lives behind "More" — the previous 16-item flat grid meant
 // most taps landed on an empty screen.
 const PRIMARY = [
-  { href: "/now", label: "Now", icon: "M4 6h16M4 12h10M4 18h7" },
+  { href: "/home", label: "Home", icon: "M3 11l9-7 9 7M5 10v10h14V10" },
+  { href: "/now", label: "Today", icon: "M4 6h16M4 12h10M4 18h7" },
   { href: "/grocery", label: "Buy", icon: "M3 3h2l2 12h10l2-8H7" },
-  { href: "/meal-plans", label: "Meals", icon: "M5 3v18M5 8h4V3M15 3c-1 2-1 5 0 7v11" },
 ];
 
 const MORE = [
+  { href: "/meal-plans", label: "Meals" },
+  { href: "/baby", label: "Baby log" },
+  { href: "/capture", label: "Inbox" },
   { href: "/organized", label: "Organized" },
   { href: "/schedule", label: "Schedule" },
   { href: "/caregiver", label: "Caregiver" },
@@ -43,7 +46,7 @@ export function MobileNav() {
   return (
     <>
       <header className="flex h-12 items-center justify-between border-b border-stone-200 bg-white px-4">
-        <Link href="/now" className="text-base font-bold text-amber-700">
+        <Link href="/home" className="text-base font-bold text-amber-700">
           Family
         </Link>
         <div className="flex items-center gap-2">

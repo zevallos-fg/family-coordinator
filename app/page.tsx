@@ -6,5 +6,5 @@ export default async function RootPage() {
   // that is the answer, and throws when it does not have one.
   await requireFamily();
 
-  redirect("/dashboard");
+  redirect("/home");
 }

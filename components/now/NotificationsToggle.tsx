@@ -5,19 +5,11 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { VAPID_PUBLIC_KEY, pushSupported, subscriptionRow, urlBase64ToUint8Array } from "@/lib/push";
 
-type State = "checking" | "unsupported" | "off" | "on" | "blocked";
+export type PushState = "checking" | "unsupported" | "off" | "on" | "blocked";
 
-/**
- * "Turn on notifications" — one tap, per phone.
- *
- * What it turns on: reminders set with "Remind me", medicine when a dose comes
- * due, and a 7 am summary. Hidden once it is on, so it does not sit on Now
- * forever; shown again if this phone's subscription goes away.
- */
-export function NotificationsToggle({ familyId }: { familyId: string }) {
-  const [state, setState] = useState<State>("checking");
-  const [busy, setBusy] = useState(false);
-
+/** Whether this phone is subscribed. Shared by the Now banner and the home bell. */
+export function usePushState(): [PushState, (s: PushState) => void] {
+  const [state, setState] = useState<PushState>("checking");
   useEffect(() => {
     void (async () => {
       if (!pushSupported()) return setState("unsupported");
@@ -27,38 +19,52 @@ export function NotificationsToggle({ familyId }: { familyId: string }) {
       setState(sub ? "on" : "off");
     })();
   }, []);
+  return [state, setState];
+}
+
+/** Ask, subscribe, and register this phone. Returns the resulting state. */
+export async function enablePush(familyId: string): Promise<PushState> {
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return permission === "denied" ? "blocked" : "off";
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const sub =
+      (await reg.pushManager.getSubscription()) ??
+      (await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      }));
+    const row = subscriptionRow(sub.toJSON());
+    const { error } = await createClient().from("push_subscriptions").insert({ family_id: familyId, ...row });
+    // 23505: this phone is already registered — that is success, not a failure.
+    if (error && error.code !== "23505") {
+      toast.error("Couldn't turn on notifications. Try again?");
+      return "off";
+    }
+    toast.success("Notifications on for this phone");
+    return "on";
+  } catch {
+    toast.error("This phone wouldn't allow notifications.");
+    return "off";
+  }
+}
+
+/**
+ * "Turn on notifications" — one tap, per phone.
+ *
+ * What it turns on: reminders set with "Remind me", medicine when a dose comes
+ * due, and a 7 am summary. Hidden once it is on, so it does not sit on Now
+ * forever; shown again if this phone's subscription goes away.
+ */
+export function NotificationsToggle({ familyId }: { familyId: string }) {
+  const [state, setState] = usePushState();
+  const [busy, setBusy] = useState(false);
 
   async function turnOn() {
     setBusy(true);
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setState(permission === "denied" ? "blocked" : "off");
-        return;
-      }
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-      const sub =
-        (await reg.pushManager.getSubscription()) ??
-        (await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-        }));
-      const row = subscriptionRow(sub.toJSON());
-      const supabase = createClient();
-      const { error } = await supabase.from("push_subscriptions").insert({ family_id: familyId, ...row });
-      // 23505: this phone is already registered — that is success, not a failure.
-      if (error && error.code !== "23505") {
-        toast.error("Couldn't turn on notifications. Try again?");
-        return;
-      }
-      setState("on");
-      toast.success("Notifications on for this phone");
-    } catch {
-      toast.error("This phone wouldn't allow notifications.");
-    } finally {
-      setBusy(false);
-    }
+    setState(await enablePush(familyId));
+    setBusy(false);
   }
 
   if (state === "checking" || state === "on" || state === "unsupported") return null;
