@@ -43,10 +43,13 @@ export function TrendChart({
   mode,
   format,
   tickStep,
+  band,
   selected,
   onSelect,
   label,
 }: {
+  /** The typical range for this age, drawn as a quiet band behind the bars. */
+  band?: { min?: number; max?: number; label: string };
   data: BarDatum[];
   series: Series[];
   mode: "stack" | "group";
@@ -59,7 +62,7 @@ export function TrendChart({
   const plotW = W - LEFT - 4;
   const plotH = H - TOP - BOTTOM;
   const totals = data.map((d) => (mode === "stack" ? d.values.reduce((a, b) => a + b, 0) : Math.max(0, ...d.values)));
-  const ticks = niceTicks(Math.max(0, ...totals), tickStep);
+  const ticks = niceTicks(Math.max(0, ...totals, band?.max ?? 0), tickStep);
   const top = ticks[ticks.length - 1] || 1;
   const yOf = (v: number) => TOP + plotH - (v / top) * plotH;
   const slot = plotW / Math.max(1, data.length);
@@ -67,6 +70,21 @@ export function TrendChart({
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={label} data-testid="trend-chart">
+      {band && (band.min !== undefined || band.max !== undefined) && (
+        <g pointerEvents="none" data-testid="range-band">
+          <rect
+            x={LEFT}
+            width={W - 4 - LEFT}
+            y={yOf(band.max ?? top)}
+            height={yOf(band.min ?? 0) - yOf(band.max ?? top)}
+            fill={INK}
+            fillOpacity={0.06}
+          />
+          <text x={W - 6} y={yOf(band.max ?? top) - 3} fontSize={9} fill={MUTED} textAnchor="end">
+            {band.label}
+          </text>
+        </g>
+      )}
       {ticks.map((t) => (
         <g key={t}>
           <line x1={LEFT} x2={W - 4} y1={yOf(t)} y2={yOf(t)} stroke={GRID} strokeWidth={1} />

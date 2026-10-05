@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageInDays, ageInMonths, awakeState, guidesFor, rolling24h, wakeWindow } from "./glance";
+import { ageInDays, ageInMonths, awakeState, compareToRange, guidesFor, rolling24h, wakeWindow } from "./glance";
 
 const now = new Date(2026, 9, 5, 15, 0, 0); // Oct 5 2026, 3pm local
 const nowMs = now.getTime();
@@ -116,5 +116,26 @@ describe("wakeWindow", () => {
   });
   it("the guide carries the minutes the countdown uses", () => {
     expect(guidesFor("2026-09-30", now).wake?.windowMinutes).toEqual([30, 90]);
+  });
+});
+
+describe("compareToRange", () => {
+  it("below, within, above against the stated bounds", () => {
+    expect(compareToRange(5, { min: 6 })).toBe("below");
+    expect(compareToRange(6, { min: 6 })).toBe("within");
+    expect(compareToRange(13, { min: 8, max: 12 })).toBe("above");
+    expect(compareToRange(14.5, { min: 14, max: 17 })).toBe("within");
+  });
+  it("a day still in progress is never 'below'; a guide without numbers compares nothing", () => {
+    expect(compareToRange(2, { min: 6 }, true)).toBeNull();
+    expect(compareToRange(13, { min: 8, max: 12 }, true)).toBe("above");
+    expect(compareToRange(3, undefined)).toBeNull();
+  });
+  it("every count guide for a 5-day-old carries numbers", () => {
+    const g = guidesFor("2026-09-30", now);
+    expect(g.feeds?.bounds).toEqual({ min: 8, max: 12 });
+    expect(g.wet?.bounds).toEqual({ min: 6 });
+    expect(g.stools?.bounds).toEqual({ min: 3 });
+    expect(g.sleep?.bounds).toEqual({ min: 14, max: 17 });
   });
 });

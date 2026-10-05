@@ -29,6 +29,12 @@ export interface Guide {
   ruleOfThumb?: boolean;
   /** Wake windows only: the range in minutes, for the countdown. */
   windowMinutes?: [number, number];
+  /**
+   * The range as numbers, for comparing a day's count against it. Only the
+   * bounds the source actually states: "6 or more" has a min and no max.
+   * Sleep is in hours.
+   */
+  bounds?: { min?: number; max?: number };
 }
 
 export type GuideKey = "feeds" | "wet" | "stools" | "sleep" | "wake";
@@ -100,6 +106,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   if (days < 61) {
     out.feeds = {
       range: "8–12",
+      bounds: { min: 8, max: 12 },
       title: "Feeds in 24 hours",
       body:
         "Breastfed newborns usually nurse about every 2 hours, start to start — 10 to 12 times in 24 hours is the norm. Bottle-fed newborns usually eat every 2 to 3 hours, and 8 times in 24 hours is generally the minimum.",
@@ -111,6 +118,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   if (days < 5) {
     out.wet = {
       range: "2–3",
+      bounds: { min: 2 },
       title: "Wet diapers in 24 hours",
       body:
         "In the first days after birth, 2 to 3 wet diapers a day. After the first 4 to 5 days, that rises to at least 5 to 6.",
@@ -119,6 +127,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   } else if (days < 61) {
     out.wet = {
       range: "6+",
+      bounds: { min: 6 },
       title: "Wet diapers in 24 hours",
       body: "By 5 to 7 days old, 6 or more wet diapers a day, with pale or nearly colourless urine.",
       source: AAP_ENOUGH_MILK,
@@ -130,6 +139,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   if (days <= 1) {
     out.stools = {
       range: "1–2",
+      bounds: { min: 1 },
       title: "Dirty diapers in 24 hours",
       body: "Days 1 and 2: 1 or 2 bowel movements a day, blackish and tarry.",
       source: AAP_ENOUGH_MILK,
@@ -137,6 +147,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   } else if (days <= 4) {
     out.stools = {
       range: "2+",
+      bounds: { min: 2 },
       title: "Dirty diapers in 24 hours",
       body: "Days 3 and 4: at least two stools a day, starting to turn greenish to yellow.",
       source: AAP_ENOUGH_MILK,
@@ -144,6 +155,7 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   } else if (days < 30) {
     out.stools = {
       range: "3–4+",
+      bounds: { min: 3 },
       title: "Dirty diapers in 24 hours",
       body:
         "By 5 to 7 days old: yellow, loose stools with small curds, at least 3 to 4 a day. This describes the first weeks; patterns change after that.",
@@ -154,17 +166,18 @@ export function guidesFor(birthDate: string | null | undefined, now: Date = new 
   // NSF bands, total sleep in 24 hours including naps.
   const band =
     months < 4
-      ? { range: "14–17h", who: "newborns (0–3 months)" }
+      ? { range: "14–17h", who: "newborns (0–3 months)", min: 14, max: 17 }
       : months < 12
-        ? { range: "12–15h", who: "infants (4–11 months)" }
+        ? { range: "12–15h", who: "infants (4–11 months)", min: 12, max: 15 }
         : months < 36
-          ? { range: "11–14h", who: "toddlers (1–2 years)" }
+          ? { range: "11–14h", who: "toddlers (1–2 years)", min: 11, max: 14 }
           : months < 72
-            ? { range: "10–13h", who: "preschoolers (3–5 years)" }
+            ? { range: "10–13h", who: "preschoolers (3–5 years)", min: 10, max: 13 }
             : null;
   if (band) {
     out.sleep = {
       range: band.range,
+      bounds: { min: band.min, max: band.max },
       title: "Sleep in 24 hours",
       body: `The National Sleep Foundation's recommended range for ${band.who} is ${band.range.replace("h", " hours")} in 24 hours, naps included. Individual needs vary.`,
       source: NSF_SLEEP,
@@ -318,4 +331,22 @@ export function wakeWindow(
   if (nowMs < opensAt) return { phase: "before", opensAt, closesAt, secondsLeft: Math.ceil((opensAt - nowMs) / 1000) };
   if (nowMs < closesAt) return { phase: "open", opensAt, closesAt, secondsLeft: Math.ceil((closesAt - nowMs) / 1000) };
   return { phase: "past", opensAt, closesAt, secondsLeft: 0 };
+}
+
+export type RangeStatus = "below" | "within" | "above";
+
+/**
+ * Where a count sits against a guide's stated bounds; null when the guide gives
+ * none. A partial day (today, still going) is never called "below": the day
+ * isn't over.
+ */
+export function compareToRange(
+  value: number,
+  bounds: { min?: number; max?: number } | undefined,
+  partial = false
+): RangeStatus | null {
+  if (!bounds || (bounds.min === undefined && bounds.max === undefined)) return null;
+  if (bounds.max !== undefined && value > bounds.max) return "above";
+  if (bounds.min !== undefined && value < bounds.min) return partial ? null : "below";
+  return "within";
 }

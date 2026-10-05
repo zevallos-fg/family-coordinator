@@ -8,6 +8,10 @@ import { useKidEvents } from "./useKidEvents";
 import { DayTimeline } from "./DayTimeline";
 import { WeekGrid } from "./WeekGrid";
 import { Legend, TrendChart, type BarDatum, type Series } from "./TrendChart";
+import { RangeTiles } from "./RangeTiles";
+import { GuideSheet } from "../GuideSheet";
+import { rangeTiles, type Tile } from "@/lib/baby/rangeTiles";
+import { guidesFor } from "@/lib/baby/glance";
 import { eventDuration, eventSummary } from "@/lib/baby/summary";
 import { formatTimeOfDay } from "@/lib/baby/format";
 import {
@@ -92,6 +96,7 @@ export function ReportsPage({ familyId }: { familyId: string }) {
   const [topic, setTopic] = useState<Topic>("sleep");
   const [markId, setMarkId] = useState<string | null>(null);
   const [bar, setBar] = useState<number | null>(null);
+  const [info, setInfo] = useState<Tile | null>(null);
 
   // Dates come from the phone after mount, so the server (UTC) never draws the
   // wrong day.
@@ -133,13 +138,28 @@ export function ReportsPage({ familyId }: { familyId: string }) {
   const selectedMark = marks.find((m) => m.id === markId) ?? null;
   const dayStat = events ? dailyStats(events, selectedDay, 1, nowMs)[0] : null;
 
+  // Ranges are by age on the day in question (noon, so the date is unambiguous).
+  const guideAt = (dayStart: number) => guidesFor(kid?.birth_date, new Date(dayStart + 12 * 3_600_000));
+  const dayTiles = dayStat
+    ? rangeTiles(dayStat.logged ? [dayStat] : [], guideAt(selectedDay), guideAt, { partial: selectedDay === today, average: false })
+    : [];
+  // Week and range averages use complete days only: today isn't over.
+  const weekComplete = events
+    ? dailyStats(events, weekDays[0], 7, nowMs).filter((d) => d.logged && d.dayStart < today)
+    : [];
+  const weekLast = weekComplete.length ? weekComplete[weekComplete.length - 1].dayStart : addDays(today, -1);
+  const weekTiles = rangeTiles(weekComplete, guideAt(weekLast), guideAt, { partial: false, average: true });
+
   // Summary series
   const from = addDays(today, -(range.days - 1));
   const grain: Grain = range.grain;
   const dense = range.days > 14;
   const bks = events ? buckets(dailyStats(events, from, range.days, nowMs), grain) : [];
   const logged = bks.filter((b) => b.loggedDays > 0);
-  const avgDays = events ? dailyStats(events, from, range.days, nowMs).filter((d) => d.logged) : [];
+  const avgDays = events ? dailyStats(events, from, range.days, nowMs).filter((d) => d.logged && d.dayStart < today) : [];
+  const rangeLast = avgDays.length ? avgDays[avgDays.length - 1].dayStart : addDays(today, -1);
+  const summaryTiles = rangeTiles(avgDays, guideAt(rangeLast), guideAt, { partial: false, average: true });
+  const currentGuides = guideAt(today);
   const avg = (f: (d: (typeof avgDays)[number]) => number) => (avgDays.length ? avgDays.reduce((n, d) => n + f(d), 0) / avgDays.length : 0);
 
   let series: Series[] = [];
@@ -148,6 +168,7 @@ export function ReportsPage({ familyId }: { familyId: string }) {
   const mode = "stack" as const;
   let headline = "";
   let tickStep: number | undefined;
+  let band: { min?: number; max?: number; label: string } | undefined;
   const H_MS = 3_600_000;
   if (topic === "sleep") {
     series = [
@@ -157,11 +178,13 @@ export function ReportsPage({ familyId }: { familyId: string }) {
     data = bks.map((b) => ({ key: String(b.start), tick: bucketLabel(b.start, grain, true, dense), values: [b.nightMs / H_MS, b.napMs / H_MS] }));
     format = (v) => `${v}h`;
     tickStep = 4;
+    if (currentGuides.sleep?.bounds) band = { ...currentGuides.sleep.bounds, label: `typ. ${currentGuides.sleep.range}` };
     headline = `Avg ${hm(avg((d) => d.nightMs + d.napMs))} a day · night ${hm(avg((d) => d.nightMs))} · naps ${hm(avg((d) => d.napMs))}`;
   } else if (topic === "feed") {
     series = [{ name: "Feeds", color: REPORT_COLORS.feed }];
     data = bks.map((b) => ({ key: String(b.start), tick: bucketLabel(b.start, grain, true, dense), values: [b.feeds] }));
     format = (v) => String(v);
+    if (currentGuides.feeds?.bounds) band = { ...currentGuides.feeds.bounds, label: `typ. ${currentGuides.feeds.range}` };
     headline = `Avg ${avg((d) => d.feeds).toFixed(1)} feeds a day · nursing ${hm(avg((d) => d.nursingMs))} a day`;
   } else {
     // Exclusive kinds stack to the day's total; wet and dirty (the counts the
@@ -286,9 +309,12 @@ export function ReportsPage({ familyId }: { familyId: string }) {
             {new Date(selectedDay).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
           </p>
           {dayStat && (
-            <p className="text-xs text-stone-500" data-testid="day-totals">
-              Sleep {hm(dayStat.nightMs + dayStat.napMs)} · {dayStat.feeds} feeds · {dayStat.wet} wet · {dayStat.dirty} dirty
-            </p>
+            <RangeTiles
+              title={dayStat.logged ? "Totals vs typical" : "Nothing logged this day"}
+              tiles={dayTiles}
+              partial={selectedDay === today}
+              onInfo={setInfo}
+            />
           )}
           <p className="min-h-[2.5rem] rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-700" data-testid="mark-readout">
             {selectedMark ? readout(selectedMark.event) : "Tap a block or dot to see it."}
@@ -320,6 +346,12 @@ export function ReportsPage({ familyId }: { familyId: string }) {
 
       {view === "week" && (
         <section className="space-y-2">
+          <RangeTiles
+            title={weekComplete.length ? `Average day · ${weekComplete.length} full day${weekComplete.length === 1 ? "" : "s"}` : "No full days logged this week"}
+            tiles={weekTiles}
+            partial={false}
+            onInfo={setInfo}
+          />
           <div className="rounded-2xl border border-stone-200 bg-white p-2">
             {events === null ? (
               <p className="py-10 text-center text-sm text-stone-500">Loading…</p>
@@ -380,6 +412,12 @@ export function ReportsPage({ familyId }: { familyId: string }) {
             </p>
           ) : (
             <>
+              <RangeTiles
+                title={avgDays.length ? `Average day · ${avgDays.length} full day${avgDays.length === 1 ? "" : "s"}` : "No full days logged yet"}
+                tiles={summaryTiles}
+                partial={false}
+                onInfo={setInfo}
+              />
               <p className="text-sm text-stone-800" data-testid="summary-headline">
                 {headline}
               </p>
@@ -393,6 +431,7 @@ export function ReportsPage({ familyId }: { familyId: string }) {
                   mode={mode}
                   format={format}
                   tickStep={tickStep}
+                  band={band}
                   selected={selBar}
                   onSelect={setBar}
                   label={`${topic} by ${grain}`}
@@ -434,6 +473,14 @@ export function ReportsPage({ familyId }: { familyId: string }) {
           )}
         </section>
       )}
+
+      <GuideSheet
+        open={!!info}
+        onClose={() => setInfo(null)}
+        title={info?.label ?? ""}
+        guides={info?.guide ? [info.guide] : []}
+        kidName={kid?.name ?? "your child"}
+      />
     </div>
   );
 }
