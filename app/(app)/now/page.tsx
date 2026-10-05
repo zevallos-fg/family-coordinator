@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ChoreRow } from "@/components/now/ChoreRow";
 import { BabyButton } from "@/components/baby/BabyButton";
+import { AddItem } from "@/components/now/AddItem";
 import { requireFamily } from "@/lib/auth/current-family";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export default async function NowPage() {
   const { familyId } = await requireFamily();
 
 
-  const [dueRes, groceryRes, peopleRes] = await Promise.all([
+  const [dueRes, groceryRes, peopleRes, anytimeRes] = await Promise.all([
     supabase
       .from("v_whats_due")
       .select("*")
@@ -49,7 +50,22 @@ export default async function NowPage() {
       .eq("family_id", familyId)
       .is("completed_at", null),
     supabase.from("users").select("id, full_name"),
+    // Open items with no date: v_whats_due only carries dated ones, so these
+    // would otherwise never appear anywhere.
+    supabase
+      .from("tasks")
+      .select("id, title, description, owner_user_id")
+      .eq("family_id", familyId)
+      .in("status", ["open", "in_progress"])
+      .is("due_at", null)
+      .order("created_at", { ascending: false }),
   ]);
+  const anytime = (anytimeRes.data ?? []) as Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    owner_user_id: string | null;
+  }>;
 
   const due = (dueRes.data ?? []) as unknown as DueRow[];
   const names = new Map(
@@ -72,7 +88,11 @@ export default async function NowPage() {
     rows: due.filter((d) => d.bucket === b),
   })).filter((b) => b.rows.length > 0);
 
-  const nothingAtAll = buckets.length === 0 && stores.length === 0;
+  const nothingAtAll = buckets.length === 0 && stores.length === 0 && anytime.length === 0;
+  const people = (peopleRes.data ?? []).map((u) => ({
+    id: u.id as string,
+    name: ((u.full_name as string | null) ?? "").split(" ")[0] || "Someone",
+  }));
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -90,6 +110,8 @@ export default async function NowPage() {
       {/* Above the fold, before anything that can be scrolled past: during labour
           the contraction timer is the only thing on this screen that matters. */}
       <BabyButton familyId={familyId} />
+
+      <AddItem familyId={familyId} people={people} />
 
       {nothingAtAll && (
         <div className="rounded-xl border border-stone-200 bg-white px-4 py-8 text-center">
@@ -122,6 +144,26 @@ export default async function NowPage() {
           </div>
         </section>
       ))}
+
+      {anytime.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-xs text-stone-400 mb-2">Anytime</h2>
+          <div className="rounded-xl border border-stone-200 bg-white divide-y divide-stone-100">
+            {anytime.map((t) => (
+              <ChoreRow
+                key={`tasks-${t.id}`}
+                id={t.id}
+                sourceTable="tasks"
+                item={t.title}
+                detail={t.description}
+                recurring={false}
+                daysUntil={null}
+                owner={initials(names.get(t.owner_user_id ?? ""))}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {stores.length > 0 && (
         <section className="mb-6">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { completionUndoToast } from "@/lib/undo";
+import { closeDecision, reopenDecision } from "@/lib/decisions";
 
 type Props = {
   id: string;
@@ -12,7 +13,8 @@ type Props = {
   item: string;
   detail: string | null;
   recurring: boolean;
-  daysUntil: number;
+  /** Null for an item with no date: no label, never "overdue". */
+  daysUntil: number | null;
   owner: string | null;
 };
 
@@ -37,12 +39,42 @@ export function ChoreRow({
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState(false);
 
-  // Decisions are closed by inserting a superseding row, not by an RPC — the
-  // memory layer is append-only. Until that flow exists, they aren't tickable.
-  const completable = sourceTable === "maintenance" || sourceTable === "tasks";
+  // Decisions ("we said we'd install the car seat") are closed by inserting a
+  // superseding 'done' row — the memory layer is append-only — see
+  // lib/decisions.ts. They were untickable until that existed.
+  const completable =
+    sourceTable === "maintenance" || sourceTable === "tasks" || sourceTable === "memory_decisions";
+
+  async function completeDecision() {
+    setDone(true);
+    const closed = await closeDecision(id);
+    if (!closed.ok) {
+      setDone(false);
+      toast.error("Couldn't mark that done. Try again.");
+      return;
+    }
+    const refresh = () => startTransition(() => router.refresh());
+    toast.success(`${item} done`, {
+      duration: 6000,
+      action: {
+        label: "Undo",
+        onClick: async () => {
+          setDone(false);
+          if (!(await reopenDecision(id, closed.closedBy))) {
+            setDone(true);
+            toast.error("Couldn't undo that.");
+            return;
+          }
+          refresh();
+        },
+      },
+    });
+    refresh();
+  }
 
   async function complete() {
     if (!completable || done || pending) return;
+    if (sourceTable === "memory_decisions") return completeDecision();
     setDone(true);
 
     const supabase = createClient();
@@ -71,7 +103,7 @@ export function ChoreRow({
     refresh();
   }
 
-  const overdue = daysUntil < 0;
+  const overdue = daysUntil !== null && daysUntil < 0;
 
   return (
     <div className="flex items-center gap-3 px-3 py-3">
@@ -111,7 +143,7 @@ export function ChoreRow({
       )}
 
       <div className={`shrink-0 text-xs ${overdue ? "text-red-600" : "text-stone-400"}`}>
-        {whenLabel(daysUntil)}
+        {daysUntil === null ? "" : whenLabel(daysUntil)}
       </div>
     </div>
   );
