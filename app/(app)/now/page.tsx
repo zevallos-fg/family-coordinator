@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ChoreRow } from "@/components/now/ChoreRow";
 import { BabyButton } from "@/components/baby/BabyButton";
 import { AddItem } from "@/components/now/AddItem";
+import { NotificationsToggle } from "@/components/now/NotificationsToggle";
 import { requireFamily } from "@/lib/auth/current-family";
 
 export const dynamic = "force-dynamic";
@@ -110,6 +111,8 @@ export default async function NowPage() {
       {/* Above the fold, before anything that can be scrolled past: during labour
           the contraction timer is the only thing on this screen that matters. */}
       <BabyButton familyId={familyId} />
+
+      <NotificationsToggle familyId={familyId} />
 
       <AddItem familyId={familyId} people={people} />
 

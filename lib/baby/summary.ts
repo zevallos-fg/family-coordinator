@@ -136,6 +136,11 @@ export function eventSummary(
         .filter(Boolean)
         .join(" · ") || null;
     }
+    case "medicine": {
+      const name = str(p, "name");
+      const dose = str(p, "dose");
+      return [name, dose].filter(Boolean).join(" · ") || null;
+    }
     default:
       return null;
   }

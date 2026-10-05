@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      age_checkpoints: {
+        Row: {
+          age: string
+          id: string
+          kind: string
+          label: string
+          source_url: string
+        }
+        Insert: {
+          age: string
+          id: string
+          kind: string
+          label: string
+          source_url: string
+        }
+        Update: {
+          age?: string
+          id?: string
+          kind?: string
+          label?: string
+          source_url?: string
+        }
+        Relationships: []
+      }
       api_usage: {
         Row: {
           cost_cents: number | null
@@ -805,6 +829,67 @@ export type Database = {
           },
         ]
       }
+      evidence_cards: {
+        Row: {
+          answer: string
+          child_age_days: number | null
+          citations: Json
+          created_at: string
+          created_by_user_id: string | null
+          family_id: string
+          id: string
+          kid_id: string | null
+          question: string
+          written_by: string
+        }
+        Insert: {
+          answer: string
+          child_age_days?: number | null
+          citations?: Json
+          created_at?: string
+          created_by_user_id?: string | null
+          family_id: string
+          id?: string
+          kid_id?: string | null
+          question: string
+          written_by?: string
+        }
+        Update: {
+          answer?: string
+          child_age_days?: number | null
+          citations?: Json
+          created_at?: string
+          created_by_user_id?: string | null
+          family_id?: string
+          id?: string
+          kid_id?: string | null
+          question?: string
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "evidence_cards_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_cards_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_cards_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expenses: {
         Row: {
           amount_cents: number
@@ -1375,6 +1460,49 @@ export type Database = {
           },
         ]
       }
+      kid_checkpoint_tasks: {
+        Row: {
+          checkpoint_id: string
+          created_at: string
+          kid_id: string
+          task_id: string | null
+        }
+        Insert: {
+          checkpoint_id: string
+          created_at?: string
+          kid_id: string
+          task_id?: string | null
+        }
+        Update: {
+          checkpoint_id?: string
+          created_at?: string
+          kid_id?: string
+          task_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kid_checkpoint_tasks_checkpoint_id_fkey"
+            columns: ["checkpoint_id"]
+            isOneToOne: false
+            referencedRelation: "age_checkpoints"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kid_checkpoint_tasks_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kid_checkpoint_tasks_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       kid_milestones: {
         Row: {
           created_at: string
@@ -1733,6 +1861,70 @@ export type Database = {
           },
           {
             foreignKeyName: "medical_events_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      medications: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by_user_id: string | null
+          dose: string | null
+          family_id: string
+          id: string
+          interval_hours: number | null
+          kid_id: string
+          name: string
+          notes: string | null
+          written_by: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by_user_id?: string | null
+          dose?: string | null
+          family_id: string
+          id?: string
+          interval_hours?: number | null
+          kid_id: string
+          name: string
+          notes?: string | null
+          written_by?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by_user_id?: string | null
+          dose?: string | null
+          family_id?: string
+          id?: string
+          interval_hours?: number | null
+          kid_id?: string
+          name?: string
+          notes?: string | null
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "medications_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "medications_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "medications_kid_id_fkey"
             columns: ["kid_id"]
             isOneToOne: false
             referencedRelation: "kids"
@@ -2189,6 +2381,111 @@ export type Database = {
           },
           {
             foreignKeyName: "person_nutrition_targets_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      push_log: {
+        Row: {
+          body: string | null
+          created_at: string
+          error: string | null
+          family_id: string
+          id: string
+          kind: string
+          ref: string
+          sent_at: string | null
+          status: string
+          subscription_id: string
+          title: string
+          url: string | null
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          error?: string | null
+          family_id: string
+          id?: string
+          kind: string
+          ref: string
+          sent_at?: string | null
+          status?: string
+          subscription_id: string
+          title: string
+          url?: string | null
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          error?: string | null
+          family_id?: string
+          id?: string
+          kind?: string
+          ref?: string
+          sent_at?: string | null
+          status?: string
+          subscription_id?: string
+          title?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_log_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_log_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "push_subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          family_id: string
+          id: string
+          p256dh: string
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          family_id: string
+          id?: string
+          p256dh: string
+          user_id?: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          family_id?: string
+          id?: string
+          p256dh?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_subscriptions_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
@@ -2704,6 +3001,7 @@ export type Database = {
           family_id: string
           id: string
           owner_user_id: string | null
+          remind_at: string | null
           source_capture_id: string | null
           status: Database["public"]["Enums"]["task_status"]
           title: string
@@ -2718,6 +3016,7 @@ export type Database = {
           family_id: string
           id?: string
           owner_user_id?: string | null
+          remind_at?: string | null
           source_capture_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title: string
@@ -2732,6 +3031,7 @@ export type Database = {
           family_id?: string
           id?: string
           owner_user_id?: string | null
+          remind_at?: string | null
           source_capture_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
@@ -2739,17 +3039,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "tasks_family_id_fkey"
-            columns: ["family_id"]
-            isOneToOne: false
-            referencedRelation: "families"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "tasks_created_by_user_id_fkey"
             columns: ["created_by_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
             referencedColumns: ["id"]
           },
           {
@@ -3038,6 +3338,38 @@ export type Database = {
           subject: string | null
         }
         Relationships: []
+      }
+      v_medication_status: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          dose: string | null
+          family_id: string | null
+          id: string | null
+          interval_hours: number | null
+          kid_id: string | null
+          kid_name: string | null
+          last_dose_at: string | null
+          name: string | null
+          next_due_at: string | null
+          notes: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "medications_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "medications_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       v_memory_decisions_open: {
         Row: {
@@ -3368,6 +3700,7 @@ export type Database = {
     }
     Functions: {
       fn_accept_invite: { Args: { p_token: string }; Returns: string }
+      fn_age_engine_sync: { Args: never; Returns: number }
       fn_baby_log: {
         Args: {
           p_at?: string
@@ -3403,8 +3736,28 @@ export type Database = {
           p_payload?: Json
           p_started_at?: string
         }
-        Returns: Database["public"]["Tables"]["baby_events"]["Row"]
+        Returns: {
+          created_at: string
+          ended_at: string | null
+          event_type: string
+          family_id: string
+          id: string
+          kid_id: string | null
+          logged_by_user_id: string | null
+          note: string | null
+          payload: Json
+          source: string
+          started_at: string
+          written_by: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "baby_events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
+      fn_brief_line: { Args: { p_family_id: string }; Returns: string }
       fn_chore_done: {
         Args: { p_chore_id: string; p_done_on?: string }
         Returns: {
@@ -3425,6 +3778,7 @@ export type Database = {
         Args: { p_city?: string; p_name: string; p_timezone?: string }
         Returns: string
       }
+      fn_family_brief: { Args: { p_family_id: string }; Returns: Json }
       fn_grocery_upsert: {
         Args: {
           p_family_id: string
@@ -3462,6 +3816,11 @@ export type Database = {
           subject: string
         }[]
       }
+      fn_push_ack: {
+        Args: { p_results: Json; p_secret: string }
+        Returns: undefined
+      }
+      fn_push_outbox: { Args: { p_secret: string }; Returns: Json }
       fn_restore: { Args: { p_trash_id: string }; Returns: string }
       fn_share_create: {
         Args: {

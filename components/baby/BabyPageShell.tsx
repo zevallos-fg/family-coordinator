@@ -60,7 +60,8 @@ export function BabyPageShell({
   const [reminding, setReminding] = useState(false);
 
   /**
-   * "Remind me" writes a task due at the chosen offset.
+   * "Remind me" writes a task due at the chosen offset, with remind_at set so
+   * the phone is notified at that time (when notifications are turned on).
    *
    * Deliberately a row rather than a notification: this app has no push
    * infrastructure, and a reminder that exists only in a service worker is one
@@ -80,6 +81,9 @@ export function BabyPageShell({
       family_id: familyId,
       title: `${reminderLabel}`,
       due_at: dueAt,
+      // remind_at is what sends the phone notification; due_at alone only
+      // puts the item on Now.
+      remind_at: dueAt,
       status: "open",
     });
     setReminding(false);

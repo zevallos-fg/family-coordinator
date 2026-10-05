@@ -1,4 +1,5 @@
 import { UserClient } from "./supabase";
+import { BuildError, bottleFeed, breastFeed, citations, diaper, growth } from "./baby";
 
 export class ToolError extends Error {}
 
@@ -75,6 +76,41 @@ async function resolveFamilyUser(db: UserClient, name: string): Promise<string> 
   }
   throw new ToolError(`"${name}" matches more than one family member`);
 }
+
+/** Resolve a child's name inside the caller's family, or fail loudly with the names that exist. */
+async function resolveKid(
+  db: UserClient,
+  familyId: string,
+  name: string
+): Promise<{ id: string; name: string; birth_date: string | null }> {
+  const kids = await db.select<{ id: string; name: string; birth_date: string | null }>(
+    "kids",
+    `select=id,name,birth_date&family_id=eq.${familyId}`
+  );
+  const wanted = name.trim().toLowerCase();
+  const hits = kids.filter((k) => k.name.trim().toLowerCase() === wanted);
+  if (hits.length === 1) return hits[0];
+  const known = kids.map((k) => k.name).join(", ") || "(no children recorded)";
+  throw new ToolError(
+    hits.length === 0 ? `no child named "${name}". Children: ${known}` : `"${name}" matches more than one child`
+  );
+}
+
+/** Builders throw BuildError for bad input; the model should see it as a tool error it can fix. */
+function build<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof BuildError) throw new ToolError(e.message);
+    throw e;
+  }
+}
+
+const KID = { type: "string", description: "The child's first name, e.g. 'Evaluna'." };
+const WHEN = (what: string) => ({
+  type: "string",
+  description: `ISO-8601 with offset. ${what} Required; ask if the user did not say. "Just now" means the current time.`,
+});
 
 export const TOOL_DEFINITIONS = [
   {
@@ -178,6 +214,11 @@ export const TOOL_DEFINITIONS = [
             "ISO-8601. When it is due. Required — a task without a date is a decision.",
         },
         owner: { type: "string", description: "Full name of the family member who owns it." },
+        remind_at: {
+          type: "string",
+          description:
+            "ISO-8601, optional. When to send a phone notification. Only when the user asked to be reminded at a time.",
+        },
       },
       required: ["title", "due_at"],
     },
@@ -210,6 +251,154 @@ export const TOOL_DEFINITIONS = [
         cadence_days: { type: "integer", minimum: 1, description: "Repeat interval in days." },
       },
       required: ["item", "cadence_days"],
+    },
+  },
+  {
+    name: "family_brief",
+    description:
+      "The family's current state in one read: each child's age, last-24h feeds/diapers/sleep, " +
+      "last feed and diaper times, growth history, medicines with next dose due, the next " +
+      "checkups and milestone checklists by age, everything due this week, and recently saved " +
+      "evidence. Call this before answering any question about how a child is doing or what is " +
+      "coming up. All numbers are computed by the database; report them, do not recompute them.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "log_feed",
+    description:
+      "Record a feed in the baby log (not in memory). Breast: give left_minutes and/or " +
+      "right_minutes and which side came first; total is Left + Right. Bottle: give " +
+      "bottle_amount and bottle_unit (ml, oz or g).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        started_at: WHEN("When the feed started."),
+        method: { type: "string", enum: ["breast", "bottle"] },
+        left_minutes: { type: "number" },
+        right_minutes: { type: "number" },
+        first_side: { type: "string", enum: ["L", "R"] },
+        bottle_amount: { type: "number" },
+        bottle_unit: { type: "string", enum: ["ml", "oz", "g"] },
+        contents: { type: "string", description: "Bottle contents, e.g. 'Breast Milk', 'Formula'." },
+        note: { type: "string" },
+      },
+      required: ["kid", "started_at", "method"],
+    },
+  },
+  {
+    name: "log_diaper",
+    description: "Record a diaper change in the baby log.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        at: WHEN("When it was changed."),
+        contents: { type: "string", enum: ["pee", "poo", "mixed", "dry"] },
+        pee_size: { type: "string", enum: ["little", "medium", "big"] },
+        poo_size: { type: "string", enum: ["little", "medium", "big"] },
+        consistency: { type: "string", description: "Only if the user said, e.g. 'loose', 'solid'." },
+        rash: { type: "boolean" },
+        note: { type: "string" },
+      },
+      required: ["kid", "at", "contents"],
+    },
+  },
+  {
+    name: "log_sleep",
+    description: "Record a sleep in the baby log. Omit ended_at only if the child is asleep right now.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        started_at: WHEN("When the sleep started."),
+        ended_at: { type: "string", description: "ISO-8601. When they woke. Omit if still asleep." },
+        note: { type: "string" },
+      },
+      required: ["kid", "started_at"],
+    },
+  },
+  {
+    name: "log_growth",
+    description:
+      "Record a weight/length/head measurement in the baby log's Growth (US units). Use this — " +
+      "not remember_fact — for any weight or measurement of a child.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        measured_at: WHEN("When it was measured."),
+        weight_lb: { type: "number" },
+        weight_oz: { type: "number", description: "0 to 15.9" },
+        length_in: { type: "number" },
+        head_in: { type: "number" },
+        note: { type: "string", description: "e.g. 'at the pediatrician'." },
+      },
+      required: ["kid", "measured_at"],
+    },
+  },
+  {
+    name: "add_medication",
+    description:
+      "Start tracking a medicine or supplement for a child. dose is exactly as on the label or as " +
+      "the pediatrician said — never calculate or suggest a dose. every_hours only if a fixed interval was given.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        name: { type: "string" },
+        dose: { type: "string", description: "As written on the label or by the pediatrician." },
+        every_hours: { type: "number" },
+        notes: { type: "string" },
+      },
+      required: ["kid", "name"],
+    },
+  },
+  {
+    name: "log_medicine_dose",
+    description: "Record that a tracked medicine was given. The medicine must exist (add_medication).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        medicine: { type: "string", description: "Name as tracked." },
+        given_at: WHEN("When it was given."),
+        note: { type: "string" },
+      },
+      required: ["kid", "medicine", "given_at"],
+    },
+  },
+  {
+    name: "save_evidence",
+    description:
+      "Save a researched answer with its sources so it is not asked again. Citations are " +
+      "required (title + https url, pmid when from PubMed). General information only — never a " +
+      "diagnosis or a reading of this child's numbers; say what to ask the pediatrician instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: { type: "string", description: "Optional: the child it is about." },
+        question: { type: "string" },
+        answer: { type: "string", description: "A short plain-language summary of what the sources say." },
+        citations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { title: { type: "string" }, url: { type: "string" }, pmid: { type: "string" } },
+            required: ["title", "url"],
+          },
+        },
+      },
+      required: ["question", "answer", "citations"],
+    },
+  },
+  {
+    name: "find_evidence",
+    description: "Search answers saved earlier with save_evidence. Check here before researching again.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
     },
   },
 ];
@@ -307,6 +496,9 @@ export const HANDLERS: Record<string, Handler> = {
       // would be both wrong and invisible.
       due_at: requiredTimestamp(args, "due_at"),
       owner_user_id: ownerName ? await resolveFamilyUser(db, ownerName) : null,
+      // Only sent when given, so the tool keeps working against a database
+      // that predates the column.
+      ...(optionalTimestamp(args, "remind_at") ? { remind_at: optionalTimestamp(args, "remind_at") } : {}),
       status: "open",
       created_by_user_id: userId,
       written_by: WRITTEN_BY,
@@ -356,5 +548,174 @@ export const HANDLERS: Record<string, Handler> = {
       cadence_days: cadence,
     });
     return { recorded: "chore", id: row.id, next_due_at: row.next_due_at };
+  },
+  async family_brief(db, _userId, familyId) {
+    return db.rpc("fn_family_brief", { p_family_id: familyId });
+  },
+
+  async log_feed(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const startedAt = requiredTimestamp(args, "started_at");
+    const method = oneOf(args, "method", ["breast", "bottle"]);
+    let payload: Record<string, unknown>;
+    let endedAt: string;
+    if (method === "breast") {
+      const first = str(args, "first_side", false) === "R" ? "R" : "L";
+      const feed = build(() => breastFeed(startedAt, args.left_minutes, args.right_minutes, first));
+      payload = feed.payload;
+      endedAt = feed.endedAt;
+    } else {
+      payload = build(() => bottleFeed(args.bottle_amount, args.bottle_unit, args.contents));
+      // A bottle is an amount, not a span: finished the moment it is logged, so
+      // no screen mistakes it for a nursing session still in progress.
+      endedAt = startedAt;
+    }
+    const row = await db.insert<{ id: string }>("baby_events", {
+      family_id: familyId,
+      kid_id: kid.id,
+      event_type: "feed",
+      started_at: startedAt,
+      ended_at: endedAt,
+      payload,
+      note: str(args, "note", false) || null,
+      logged_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "feed", id: row.id, kid: kid.name, payload, ended_at: endedAt };
+  },
+
+  async log_diaper(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const payload = build(() => diaper(args as Parameters<typeof diaper>[0]));
+    const row = await db.insert<{ id: string }>("baby_events", {
+      family_id: familyId,
+      kid_id: kid.id,
+      event_type: "diaper",
+      started_at: requiredTimestamp(args, "at"),
+      payload,
+      note: str(args, "note", false) || null,
+      logged_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "diaper", id: row.id, kid: kid.name, payload };
+  },
+
+  async log_sleep(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const startedAt = requiredTimestamp(args, "started_at");
+    const endedAt = optionalTimestamp(args, "ended_at");
+    if (endedAt && Date.parse(endedAt) < Date.parse(startedAt)) {
+      throw new ToolError("ended_at is before started_at");
+    }
+    if (!endedAt) {
+      // An open sleep is a running timer; a second one would stack on the first.
+      const open = await db.select<{ id: string }>(
+        "baby_events",
+        `select=id&kid_id=eq.${kid.id}&event_type=eq.sleep&ended_at=is.null&limit=1`
+      );
+      if (open.length) throw new ToolError(`${kid.name} already has a sleep running; give ended_at for it first`);
+    }
+    const row = await db.insert<{ id: string }>("baby_events", {
+      family_id: familyId,
+      kid_id: kid.id,
+      event_type: "sleep",
+      started_at: startedAt,
+      ended_at: endedAt,
+      payload: {},
+      note: str(args, "note", false) || null,
+      logged_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "sleep", id: row.id, kid: kid.name, running: !endedAt };
+  },
+
+  async log_growth(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const payload = build(() => growth(args));
+    const row = await db.insert<{ id: string }>("baby_events", {
+      family_id: familyId,
+      kid_id: kid.id,
+      event_type: "growth",
+      started_at: requiredTimestamp(args, "measured_at"),
+      payload,
+      note: str(args, "note", false) || null,
+      logged_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "growth", id: row.id, kid: kid.name, payload };
+  },
+
+  async add_medication(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const every = args.every_hours;
+    if (every !== undefined && every !== null && (typeof every !== "number" || !(every > 0))) {
+      throw new ToolError("every_hours must be a positive number of hours");
+    }
+    const row = await db.insert<{ id: string }>("medications", {
+      family_id: familyId,
+      kid_id: kid.id,
+      name: str(args, "name"),
+      dose: str(args, "dose", false) || null,
+      interval_hours: typeof every === "number" ? every : null,
+      notes: str(args, "notes", false) || null,
+      created_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "medication", id: row.id, kid: kid.name };
+  },
+
+  async log_medicine_dose(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const wanted = str(args, "medicine").toLowerCase();
+    const meds = await db.select<{ id: string; name: string; dose: string | null }>(
+      "medications",
+      `select=id,name,dose&kid_id=eq.${kid.id}&active=is.true`
+    );
+    const hits = meds.filter((m) => m.name.trim().toLowerCase() === wanted);
+    if (hits.length !== 1) {
+      const known = meds.map((m) => m.name).join(", ") || "(none tracked)";
+      throw new ToolError(`no single active medicine "${args.medicine}" for ${kid.name}. Tracked: ${known}`);
+    }
+    const med = hits[0];
+    const row = await db.insert<{ id: string }>("baby_events", {
+      family_id: familyId,
+      kid_id: kid.id,
+      event_type: "medicine",
+      started_at: requiredTimestamp(args, "given_at"),
+      payload: { medication_id: med.id, name: med.name, ...(med.dose ? { dose: med.dose } : {}) },
+      note: str(args, "note", false) || null,
+      logged_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "medicine_dose", id: row.id, kid: kid.name, medicine: med.name };
+  },
+
+  async save_evidence(db, userId, familyId, args) {
+    const kidName = str(args, "kid", false);
+    const kid = kidName ? await resolveKid(db, familyId, kidName) : null;
+    const cites = build(() => citations(args.citations));
+    const ageDays =
+      kid?.birth_date ? Math.floor((Date.now() - Date.parse(kid.birth_date)) / 86_400_000) : null;
+    const row = await db.insert<{ id: string }>("evidence_cards", {
+      family_id: familyId,
+      kid_id: kid?.id ?? null,
+      question: str(args, "question"),
+      answer: str(args, "answer"),
+      citations: cites,
+      child_age_days: ageDays,
+      created_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "evidence", id: row.id };
+  },
+
+  async find_evidence(db, _userId, familyId, args) {
+    const q = str(args, "query").replace(/[%,()*]/g, " ").trim();
+    const pattern = encodeURIComponent(`*${q}*`);
+    return db.select(
+      "evidence_cards",
+      `select=question,answer,citations,child_age_days,created_at&family_id=eq.${familyId}` +
+        `&or=(question.ilike.${pattern},answer.ilike.${pattern})&order=created_at.desc&limit=10`
+    );
   },
 };

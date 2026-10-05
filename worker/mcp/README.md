@@ -56,19 +56,35 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 ## Tools
 
-Nine, all append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
+All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 
-| Tool | Writes to |
+| Tool | Writes to / reads |
 |---|---|
 | `remember_fact` | `memory_facts` |
 | `remember_decision` | `memory_decisions` |
-| `remember_task` | `tasks` |
+| `remember_task` | `tasks` (optional `remind_at` sends a phone notification) |
 | `define_term` | `memory_lexicon` |
 | `record_correction` | `memory_corrections` |
 | `recall` | reads `fn_memory_recall` |
 | `whats_due` | reads `v_whats_due` |
 | `add_grocery` | `grocery_items` |
 | `add_chore` | `maintenance` |
+| `family_brief` | reads `fn_family_brief` — the whole family's current state, computed by the database |
+| `log_feed` | `baby_events` (feed; breast sides or bottle in ml/oz/g) |
+| `log_diaper` | `baby_events` (diaper) |
+| `log_sleep` | `baby_events` (sleep) |
+| `log_growth` | `baby_events` (growth, lb/oz and inches) |
+| `add_medication` | `medications` |
+| `log_medicine_dose` | `baby_events` (medicine) |
+| `save_evidence` | `evidence_cards` (citations required) |
+| `find_evidence` | reads `evidence_cards` |
+
+The baby-log tools build their rows with `src/baby.ts`, which is tested against
+the app's own builders (`src/baby.test.ts`, run by the app's vitest): a feed
+told to Claude and a feed tapped in the app are byte-for-byte the same row.
+
+**A child's weight is a `log_growth`, never a `remember_fact`.** Before these
+tools existed, the first two weights went to memory and never reached Growth.
 
 ### Task or decision?
 

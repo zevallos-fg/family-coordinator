@@ -77,7 +77,8 @@ function EventRow({
   const [saving, setSaving] = useState(false);
 
   const payload = (event.payload ?? {}) as Record<string, Json>;
-  const running = event.ended_at === null && event.event_type !== "diaper";
+  const running =
+    event.ended_at === null && !["diaper", "growth", "medicine"].includes(event.event_type);
 
   // A breast feed is Left + Right, not end − start; everything else is unchanged.
   const durationSeconds = eventDurationSeconds(event);

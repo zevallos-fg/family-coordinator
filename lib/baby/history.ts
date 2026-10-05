@@ -76,6 +76,7 @@ export function daySummary(type: string, events: HistoryEvent[]): string {
     sleep: ["sleep", "sleeps"],
     pump: ["pump", "pumps"],
     growth: ["measurement", "measurements"],
+    medicine: ["dose", "doses"],
   };
   const [one, many] = noun[type] ?? ["entry", "entries"];
   const parts = [`${n} ${n === 1 ? one : many}`];

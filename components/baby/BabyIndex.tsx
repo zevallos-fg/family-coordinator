@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BabyToday } from "./BabyToday";
 import { ShareLinks } from "./ShareLinks";
+import { EvidenceCards } from "./EvidenceCards";
 import { lastEventOf, useBabyLane } from "./useBabyLane";
 import { createClient } from "@/lib/supabase/client";
 import { formatAgo, formatClock, formatDuration, secondsBetween } from "@/lib/baby/format";
@@ -16,6 +17,7 @@ const CARDS = [
   { type: "sleep", label: "Sleep", emoji: "😴", href: "/baby/sleep" },
   { type: "pump", label: "Pump", emoji: "🫙", href: "/baby/pump" },
   { type: "growth", label: "Growth", emoji: "📏", href: "/baby/growth" },
+  { type: "medicine", label: "Medicine", emoji: "💊", href: "/baby/medicine" },
   { type: "contraction", label: "Contractions", emoji: "⏱️", href: "/baby/contractions" },
 ] as const;
 
@@ -228,6 +230,12 @@ export function BabyIndex({ familyId }: { familyId: string }) {
           );
         })}
       </ul>
+
+      <EvidenceCards
+        familyId={familyId}
+        kidId={lane.kidId}
+        kidName={lane.kids.find((k) => k.id === lane.kidId)?.name}
+      />
 
       <BabyToday events={visibleToday} onChanged={lane.refresh} />
 

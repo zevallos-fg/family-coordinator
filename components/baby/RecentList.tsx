@@ -87,7 +87,8 @@ export function RecentRow({
   const payload = (event.payload ?? {}) as Record<string, Json>;
   // Diapers and growth are instants: they have a start and never an end, so
   // they get no "Ended" field rather than one that is always empty.
-  const isPoint = event.event_type === "diaper" || event.event_type === "growth";
+  // Instants: a start and never an end. A medicine dose is given, not timed.
+  const isPoint = ["diaper", "growth", "medicine"].includes(event.event_type);
   const running = event.ended_at === null && !isPoint;
   const [startAt, setStartAt] = useState(() => toLocalInputValue(event.started_at));
   const [endAt, setEndAt] = useState(() => (event.ended_at ? toLocalInputValue(event.ended_at) : ""));
