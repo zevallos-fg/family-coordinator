@@ -16,12 +16,13 @@ import { eventDuration, eventSummary } from "@/lib/baby/summary";
 import { ageInDays, ageInMonths, awakeState, guidesFor, rolling24h, type Guide } from "@/lib/baby/glance";
 import type { ShareLink } from "@/lib/baby/events";
 
-type CardType = "feed" | "diaper" | "sleep" | "pump" | "growth" | "medicine";
+type CardType = "feed" | "diaper" | "sleep" | "reports" | "pump" | "growth" | "medicine";
 
 const CARDS: Array<{ type: CardType; label: string; emoji: string; href: string; babyOnly: boolean }> = [
   { type: "feed", label: "Feed", emoji: "🍼", href: "/baby/feed", babyOnly: true },
   { type: "diaper", label: "Diaper", emoji: "🧷", href: "/baby/diaper", babyOnly: true },
   { type: "sleep", label: "Sleep", emoji: "😴", href: "/baby/sleep", babyOnly: true },
+  { type: "reports", label: "Reports", emoji: "📊", href: "/baby/reports", babyOnly: true },
   { type: "pump", label: "Pump", emoji: "🫙", href: "/baby/pump", babyOnly: true },
   { type: "growth", label: "Growth", emoji: "📏", href: "/baby/growth", babyOnly: false },
   { type: "medicine", label: "Medicine", emoji: "💊", href: "/baby/medicine", babyOnly: false },
@@ -248,7 +249,7 @@ export function BabyIndex({ familyId }: { familyId: string }) {
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-stone-800">{card.label}</span>
                     <span className="block truncate text-[11px] text-stone-500" data-testid={`baby-detail-${card.type}`}>
-                      {detailLine(last, running, nowMs)}
+                      {card.type === "reports" ? "Day and week timelines · trends over weeks and months" : detailLine(last, running, nowMs)}
                     </span>
                   </span>
                 </span>
