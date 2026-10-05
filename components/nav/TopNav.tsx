@@ -7,6 +7,8 @@ import { SpendIndicator } from "./SpendIndicator";
 
 const PRIMARY_NAV = [
   { href: "/home", label: "Home" },
+  { href: "/baby", label: "Kids" },
+  { href: "/plan", label: "Plan" },
   { href: "/now", label: "Today" },
   { href: "/schedule", label: "Schedule" },
   { href: "/capture", label: "Capture" },

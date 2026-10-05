@@ -64,7 +64,8 @@ test("the baby button is on /now before any scrolling, and goes to the lane", as
   // long-press land straight on a timer.
   await expect(page).toHaveURL(/\/baby$/);
   await expect(page.getByTestId("baby-card-feed")).toBeVisible();
-  await expect(page.getByTestId("baby-card-contraction")).toBeVisible();
+  // Contractions were retired from the Kids page once the baby arrived.
+  await expect(page.getByTestId("baby-card-contraction")).toHaveCount(0);
 });
 
 test("the contraction timer starts and stops with no child record at all", async ({
@@ -121,15 +122,8 @@ test("a running contraction survives a full page reload", async ({ page }) => {
     "true"
   );
 
-  // And it is still visibly running from the index and from /now, because
-  // ended_at IS NULL is the source of truth rather than anything in this tab.
-  await page.goto("/baby");
-  await expect(page.getByTestId("baby-card-contraction")).toHaveAttribute(
-    "data-running",
-    "true"
-  );
-  await page.goto("/now");
-  await expect(page.getByTestId("baby-open")).toContainText("Contraction running");
+  // The route still works for anyone with the link; the Kids page and /now no
+  // longer surface contractions, since that card was retired after the birth.
 });
 
 test("each page explains itself and writes nothing while there is no child record", async ({
@@ -236,10 +230,7 @@ test("a share link reads anonymously, shows its URL once, and dies on revoke", a
   page: import("@playwright/test").Page;
   browser: Browser;
 }) => {
-  // One contraction to read back through the link.
-  await page.goto("/baby/contractions");
-  await page.getByTestId("contraction-toggle").click();
-  await page.getByTestId("contraction-toggle").click();
+  // Share links now offer the day's log only (contractions were retired).
 
   // Share links live on the lane's index.
   await page.goto("/baby");
@@ -255,7 +246,7 @@ test("a share link reads anonymously, shows its URL once, and dies on revoke", a
   const anon = await browser.newContext({ storageState: undefined });
   const anonPage = await anon.newPage();
   await anonPage.goto(shareUrl);
-  await expect(anonPage.getByRole("heading", { name: "Contractions" })).toBeVisible();
+  await expect(anonPage.getByRole("heading", { name: "Feeds, diapers and sleep" })).toBeVisible();
   await expect(anonPage.getByText("E2E Midwife")).toBeVisible();
   // A public page must carry no app shell and no way into the family's data.
   await expect(anonPage.getByRole("navigation")).toHaveCount(0);

@@ -31,11 +31,11 @@ export function WakeCountdown({
   const headline =
     w.phase === "before" ? (
       <>
-        Nap window in <span className="font-mono tabular-nums">{formatDuration(w.secondsLeft)}</span>
+        Nap window in <span className="tabular-nums">{formatDuration(w.secondsLeft)}</span>
       </>
     ) : w.phase === "open" ? (
       <>
-        Nap window open · <span className="font-mono tabular-nums">{formatDuration(w.secondsLeft)}</span> left
+        Nap window open · <span className="tabular-nums">{formatDuration(w.secondsLeft)}</span> left
       </>
     ) : (
       <>Past the typical window</>

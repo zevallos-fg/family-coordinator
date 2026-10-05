@@ -40,7 +40,8 @@ export default async function HomePage() {
   const tz = fam?.timezone ?? "America/New_York";
   const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
 
-  const [dueRes, anytimeRes, groceryRes, mealRes, inboxRes] = await Promise.all([
+  const weekAhead = new Date(new Date().getTime() + 7 * 86_400_000).toISOString();
+  const [dueRes, anytimeRes, groceryRes, mealRes, inboxRes, eventsRes] = await Promise.all([
     supabase
       .from("v_whats_due")
       .select("source_id, source_table, item, due_on, bucket")
@@ -64,15 +65,40 @@ export default async function HomePage() {
       .select("id", { count: "exact", head: true })
       .eq("family_id", familyId)
       .is("completed_at", null),
+    supabase
+      .from("family_events")
+      .select("id, title, starts_at, kids(name)")
+      .eq("family_id", familyId)
+      .eq("status", "planned")
+      .gte("starts_at", new Date(new Date().getTime() - 2 * 3600_000).toISOString())
+      .lt("starts_at", weekAhead)
+      .order("starts_at"),
   ]);
 
-  const failed = [dueRes, anytimeRes, groceryRes, mealRes].some((r) => r.error);
+  const failed = [dueRes, anytimeRes, groceryRes, mealRes, eventsRes].some((r) => r.error);
   const due = (dueRes.data ?? []) as unknown as DueRow[];
   const todayRows = due.filter((d) => d.bucket === "today");
   const overdue = due.filter((d) => d.bucket === "overdue");
   const anytime = anytimeRes.data ?? [];
   const todayList = [...todayRows.map((d) => d.item), ...overdue.map((d) => d.item), ...anytime.map((t) => t.title)];
-  const planRows = [...due.filter((d) => d.bucket === "this_week"), ...due.filter((d) => d.bucket === "ahead")].slice(0, 3);
+  // Booked events first (they have a time), then dated to-dos this week and beyond.
+  const booked = ((eventsRes.data ?? []) as unknown as Array<{ id: string; title: string; starts_at: string; kids: { name: string } | null }>).map(
+    (e) => ({
+      key: `event-${e.id}`,
+      href: `/plan/${e.id}`,
+      label: `${new Date(e.starts_at).toLocaleDateString("en-US", { weekday: "short", timeZone: tz })} ${new Date(e.starts_at)
+        .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })
+        .toLowerCase()} · ${e.kids?.name ? `${e.kids.name} ` : ""}${e.title}`,
+    })
+  );
+  const planRows = [
+    ...booked,
+    ...[...due.filter((d) => d.bucket === "this_week"), ...due.filter((d) => d.bucket === "ahead")].map((r) => ({
+      key: `${r.source_table}-${r.source_id}`,
+      href: "/now",
+      label: `${dayLabel(r.due_on, r.bucket)} · ${r.item}`,
+    })),
+  ].slice(0, 3);
 
   const byStore = new Map<string, number>();
   for (const g of groceryRes.data ?? []) {
@@ -145,20 +171,22 @@ export default async function HomePage() {
           </div>
         </div>
 
-        <Link href="/now" className="block rounded-2xl border border-stone-200 bg-white p-3" data-testid="home-plan">
-          <span className="mb-1.5 flex items-center gap-1.5 font-medium text-violet-600">
+        <div className="rounded-2xl border border-stone-200 bg-white p-3" data-testid="home-plan">
+          <Link href="/plan" className="mb-1.5 flex items-center gap-1.5 font-medium text-violet-600">
             <CalendarDays className="h-4 w-4" aria-hidden /> Plan · this week
-          </span>
+          </Link>
           {planRows.length === 0 ? (
-            <span className="block text-xs text-stone-500">Nothing scheduled ahead</span>
+            <Link href="/plan" className="block text-xs text-stone-500">
+              Nothing scheduled ahead — add an event
+            </Link>
           ) : (
             planRows.map((r) => (
-              <span key={`${r.source_table}-${r.source_id}`} className="block truncate text-xs text-stone-800">
-                {dayLabel(r.due_on, r.bucket)} · {r.item}
-              </span>
+              <Link key={r.key} href={r.href} className="block truncate text-xs text-stone-800">
+                {r.label}
+              </Link>
             ))
           )}
-        </Link>
+        </div>
 
         <CaptureBar inboxCount={inboxRes.count ?? 0} />
       </div>

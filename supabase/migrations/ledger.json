@@ -24,6 +24,10 @@
     {
       "version": "20261005120000",
       "name": "family_brain"
+    },
+    {
+      "version": "20261005200000",
+      "name": "plan_events"
     }
   ]
 }

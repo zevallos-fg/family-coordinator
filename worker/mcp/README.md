@@ -76,8 +76,11 @@ All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 | `log_growth` | `baby_events` (growth, lb/oz and inches) |
 | `add_medication` | `medications` |
 | `log_medicine_dose` | `baby_events` (medicine) |
-| `save_evidence` | `evidence_cards` (citations required) |
+| `save_evidence` | `evidence_cards` (citations required; optional `event_id` shows it on that event) |
 | `find_evidence` | reads `evidence_cards` |
+| `add_event` | `family_events` + its starter checklist in `event_items` (same templates as the app: `lib/plan/templates.ts`) |
+| `add_event_item` | `event_items` (question, bring, prep or decision; https sources only) |
+| `list_events` | reads `family_events` with their checklists |
 
 The baby-log tools build their rows with `src/baby.ts`, which is tested against
 the app's own builders (`src/baby.test.ts`, run by the app's vitest): a feed

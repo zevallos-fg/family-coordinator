@@ -11,10 +11,8 @@ interface Props {
   onChanged: () => void;
 }
 
-const SCOPES = [
-  { value: "contractions", label: "Contractions" },
-  { value: "baby_today", label: "Feeds, diapers, sleep" },
-] as const;
+// Contractions were retired once the baby arrived; only the day's log is shared now.
+const SCOPES = [{ value: "baby_today", label: "Feeds, diapers, sleep" }] as const;
 
 /**
  * A read-only window for someone outside the family — a midwife, a triage nurse.
@@ -26,7 +24,7 @@ const SCOPES = [
  */
 export function ShareLinks({ familyId, links, onChanged }: Props) {
   const [label, setLabel] = useState("");
-  const [scope, setScope] = useState<string>("contractions");
+  const [scope, setScope] = useState<string>("baby_today");
   const [hours, setHours] = useState(24);
   const [creating, setCreating] = useState(false);
   const [freshUrl, setFreshUrl] = useState<string | null>(null);

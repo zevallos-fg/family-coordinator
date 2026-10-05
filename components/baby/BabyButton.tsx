@@ -18,7 +18,7 @@ async function loadRunning(familyId: string): Promise<Running> {
     .from("baby_events")
     .select("event_type, started_at")
     .eq("family_id", familyId)
-    .in("event_type", ["feed", "sleep", "pump", "contraction"])
+    .in("event_type", ["feed", "sleep", "pump"])
     .is("ended_at", null)
     .order("started_at", { ascending: false })
     .limit(1);

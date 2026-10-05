@@ -829,6 +829,72 @@ export type Database = {
           },
         ]
       }
+      event_items: {
+        Row: {
+          answer: string | null
+          body: string
+          created_at: string
+          detail: string | null
+          done: boolean
+          event_id: string
+          family_id: string
+          id: string
+          kind: string
+          position: number
+          source_title: string | null
+          source_url: string | null
+          template_key: string | null
+          written_by: string
+        }
+        Insert: {
+          answer?: string | null
+          body: string
+          created_at?: string
+          detail?: string | null
+          done?: boolean
+          event_id: string
+          family_id: string
+          id?: string
+          kind: string
+          position?: number
+          source_title?: string | null
+          source_url?: string | null
+          template_key?: string | null
+          written_by?: string
+        }
+        Update: {
+          answer?: string | null
+          body?: string
+          created_at?: string
+          detail?: string | null
+          done?: boolean
+          event_id?: string
+          family_id?: string
+          id?: string
+          kind?: string
+          position?: number
+          source_title?: string | null
+          source_url?: string | null
+          template_key?: string | null
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_items_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "family_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_items_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       evidence_cards: {
         Row: {
           answer: string
@@ -836,6 +902,7 @@ export type Database = {
           citations: Json
           created_at: string
           created_by_user_id: string | null
+          event_id: string | null
           family_id: string
           id: string
           kid_id: string | null
@@ -848,6 +915,7 @@ export type Database = {
           citations?: Json
           created_at?: string
           created_by_user_id?: string | null
+          event_id?: string | null
           family_id: string
           id?: string
           kid_id?: string | null
@@ -860,6 +928,7 @@ export type Database = {
           citations?: Json
           created_at?: string
           created_by_user_id?: string | null
+          event_id?: string | null
           family_id?: string
           id?: string
           kid_id?: string | null
@@ -872,6 +941,13 @@ export type Database = {
             columns: ["created_by_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_cards_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "family_events"
             referencedColumns: ["id"]
           },
           {
@@ -980,6 +1056,95 @@ export type Database = {
           timezone?: string
         }
         Relationships: []
+      }
+      family_events: {
+        Row: {
+          checkpoint_id: string | null
+          created_at: string
+          created_by: string | null
+          ends_at: string | null
+          family_id: string
+          id: string
+          kid_id: string | null
+          kind: string
+          location: string | null
+          notes: string | null
+          outcome: string | null
+          starts_at: string
+          status: string
+          title: string
+          updated_at: string
+          with_whom: string | null
+          written_by: string
+        }
+        Insert: {
+          checkpoint_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          family_id: string
+          id?: string
+          kid_id?: string | null
+          kind?: string
+          location?: string | null
+          notes?: string | null
+          outcome?: string | null
+          starts_at: string
+          status?: string
+          title: string
+          updated_at?: string
+          with_whom?: string | null
+          written_by?: string
+        }
+        Update: {
+          checkpoint_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          family_id?: string
+          id?: string
+          kid_id?: string | null
+          kind?: string
+          location?: string | null
+          notes?: string | null
+          outcome?: string | null
+          starts_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          with_whom?: string | null
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "family_events_checkpoint_id_fkey"
+            columns: ["checkpoint_id"]
+            isOneToOne: false
+            referencedRelation: "age_checkpoints"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "family_events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "family_events_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "family_events_kid_id_fkey"
+            columns: ["kid_id"]
+            isOneToOne: false
+            referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       family_invites: {
         Row: {

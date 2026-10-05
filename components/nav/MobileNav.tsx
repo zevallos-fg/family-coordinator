@@ -7,32 +7,65 @@ import { SpendIndicator } from "./SpendIndicator";
 import { InstallPrompt } from "./InstallPrompt";
 import { QuickCaptureSheet } from "@/components/capture/QuickCaptureSheet";
 
-// Four destinations plus capture. Everything the schema supports but the family
-// does not open daily lives behind "More" — the previous 16-item flat grid meant
-// most taps landed on an empty screen.
+// Home, Kids, Plan — the three rooms used daily — plus capture in the middle
+// and More. More is grouped the way Home is, so everything has the same address
+// in both places.
 const PRIMARY = [
   { href: "/home", label: "Home", icon: "M3 11l9-7 9 7M5 10v10h14V10" },
-  { href: "/now", label: "Today", icon: "M4 6h16M4 12h10M4 18h7" },
-  { href: "/grocery", label: "Buy", icon: "M3 3h2l2 12h10l2-8H7" },
+  { href: "/baby", label: "Kids", icon: "M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 005 0M12 3a9 9 0 100 18 9 9 0 000-18z" },
+  { href: "/plan", label: "Plan", icon: "M7 3v4M17 3v4M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" },
 ];
 
-const MORE = [
-  { href: "/meal-plans", label: "Meals" },
-  { href: "/baby", label: "Baby log" },
-  { href: "/capture", label: "Inbox" },
-  { href: "/organized", label: "Organized" },
-  { href: "/schedule", label: "Schedule" },
-  { href: "/caregiver", label: "Caregiver" },
-  { href: "/kids", label: "Kids" },
-  { href: "/documents", label: "Documents" },
-  { href: "/expenses", label: "Expenses" },
-  { href: "/receipts", label: "Receipts" },
-  { href: "/barcode", label: "Scan barcode" },
-  { href: "/vendors", label: "Vendors" },
-  { href: "/trips", label: "Trips" },
-  { href: "/hurricane", label: "Hurricane" },
-  { href: "/digest", label: "Digest" },
-  { href: "/settings", label: "Settings" },
+export const MORE_GROUPS: Array<{ title: string; tone: string; items: Array<{ href: string; label: string }> }> = [
+  {
+    title: "Kids",
+    tone: "text-sky-600",
+    items: [
+      { href: "/baby", label: "Baby log" },
+      { href: "/kids", label: "Profiles & milestones" },
+      { href: "/caregiver", label: "Caregiver" },
+    ],
+  },
+  {
+    title: "Today",
+    tone: "text-amber-600",
+    items: [
+      { href: "/now", label: "To-dos" },
+      { href: "/capture", label: "Notes inbox" },
+      { href: "/organized", label: "Organized" },
+      { href: "/digest", label: "Digest" },
+    ],
+  },
+  {
+    title: "Food",
+    tone: "text-amber-600",
+    items: [
+      { href: "/grocery", label: "Shopping list" },
+      { href: "/meal-plans", label: "Meals" },
+      { href: "/barcode", label: "Scan barcode" },
+      { href: "/receipts", label: "Receipts" },
+    ],
+  },
+  {
+    title: "Plan",
+    tone: "text-violet-600",
+    items: [
+      { href: "/plan", label: "Events & prep" },
+      { href: "/schedule", label: "Schedule" },
+      { href: "/trips", label: "Trips" },
+      { href: "/documents", label: "Documents" },
+    ],
+  },
+  {
+    title: "Household",
+    tone: "text-stone-500",
+    items: [
+      { href: "/expenses", label: "Expenses" },
+      { href: "/vendors", label: "Vendors" },
+      { href: "/hurricane", label: "Hurricane" },
+      { href: "/settings", label: "Settings" },
+    ],
+  },
 ];
 
 export function MobileNav() {
@@ -58,23 +91,29 @@ export function MobileNav() {
       {moreOpen && (
         <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setMoreOpen(false)}>
           <div
-            className="absolute bottom-[68px] left-0 right-0 border-t border-stone-200 bg-white px-4 pb-3 pt-3"
+            className="absolute bottom-[68px] left-0 right-0 max-h-[75vh] overflow-y-auto border-t border-stone-200 bg-white px-4 pb-3 pt-3"
             onClick={(e) => e.stopPropagation()}
+            data-testid="more-menu"
           >
-            <div className="grid grid-cols-2 gap-1">
-              {MORE.map((m) => (
-                <Link
-                  key={m.href}
-                  href={m.href}
-                  onClick={() => setMoreOpen(false)}
-                  className={`rounded-lg px-3 py-2.5 text-sm ${
-                    isActive(m.href)
-                      ? "bg-amber-100 text-amber-800"
-                      : "text-stone-600 active:bg-stone-100"
-                  }`}
-                >
-                  {m.label}
-                </Link>
+            <div className="space-y-3">
+              {MORE_GROUPS.map((g) => (
+                <div key={g.title}>
+                  <p className={`mb-1 px-1 text-[11px] font-medium uppercase tracking-wide ${g.tone}`}>{g.title}</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {g.items.map((m) => (
+                      <Link
+                        key={m.href}
+                        href={m.href}
+                        onClick={() => setMoreOpen(false)}
+                        className={`rounded-lg px-3 py-2 text-sm ${
+                          isActive(m.href) ? "bg-stone-100 text-stone-800" : "text-stone-600 active:bg-stone-100"
+                        }`}
+                      >
+                        {m.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
             <form action="/api/auth/signout" method="POST" className="mt-3 border-t border-stone-100 pt-3">

@@ -1,5 +1,9 @@
 import { UserClient } from "./supabase";
 import { BuildError, bottleFeed, breastFeed, citations, diaper, growth } from "./baby";
+// Shared with the app so an event booked in chat starts with exactly the same
+// sourced checklist as one added on the Plan screen.
+import { starterItems } from "../../../lib/plan/events";
+import type { EventKind } from "../../../lib/plan/templates";
 
 export class ToolError extends Error {}
 
@@ -378,6 +382,7 @@ export const TOOL_DEFINITIONS = [
       type: "object",
       properties: {
         kid: { type: "string", description: "Optional: the child it is about." },
+        event_id: { type: "string", description: "Optional: the event (from list_events) this was researched for; it then shows on that event." },
         question: { type: "string" },
         answer: { type: "string", description: "A short plain-language summary of what the sources say." },
         citations: {
@@ -399,6 +404,59 @@ export const TOOL_DEFINITIONS = [
       type: "object",
       properties: { query: { type: "string" } },
       required: ["query"],
+    },
+  },
+  {
+    name: "add_event",
+    description:
+      "Book something with a date on the family's Plan: a checkup, a school meeting, an activity. " +
+      "A doctor visit or school meeting starts with a sourced prep checklist (questions to ask, " +
+      "things to bring) chosen by the child's age on the day. starts_at must include the time and " +
+      "the family's UTC offset, e.g. 2026-10-07T14:40:00-04:00. Ask for the date and time rather than guessing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: { type: "string", description: "Optional: the child it is for." },
+        title: { type: "string", description: "e.g. '1-month checkup', 'Parent-teacher meeting'" },
+        kind: { type: "string", enum: ["medical", "school", "activity", "family", "other"] },
+        starts_at: { type: "string", description: "ISO-8601 with offset." },
+        location: { type: "string" },
+        with: { type: "string", description: "Doctor, clinic or teacher." },
+        notes: { type: "string" },
+      },
+      required: ["title", "kind", "starts_at"],
+    },
+  },
+  {
+    name: "add_event_item",
+    description:
+      "Add to an event's prep or follow-up: a question to ask, something to bring or do, or (after) a " +
+      "decision or follow-up. When it comes from research, include source_title and an https source_url. " +
+      "Questions only — never a diagnosis or a reading of the child's numbers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        event_id: { type: "string" },
+        kind: { type: "string", enum: ["question", "bring", "prep", "decision"] },
+        text: { type: "string" },
+        detail: { type: "string", description: "Why it's on the list, in a sentence." },
+        source_title: { type: "string" },
+        source_url: { type: "string" },
+      },
+      required: ["event_id", "kind", "text"],
+    },
+  },
+  {
+    name: "list_events",
+    description:
+      "The family's booked events with their checklists — questions (and answers written at the visit), " +
+      "things to bring, decisions. Use it to prep for a visit or to follow up after one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: { type: "string", description: "Optional: only this child's events." },
+        include_past: { type: "boolean", description: "Also include the last 60 days." },
+      },
     },
   },
 ];
@@ -696,9 +754,11 @@ export const HANDLERS: Record<string, Handler> = {
     const cites = build(() => citations(args.citations));
     const ageDays =
       kid?.birth_date ? Math.floor((Date.now() - Date.parse(kid.birth_date)) / 86_400_000) : null;
+    const eventId = str(args, "event_id", false) || null;
     const row = await db.insert<{ id: string }>("evidence_cards", {
       family_id: familyId,
       kid_id: kid?.id ?? null,
+      event_id: eventId,
       question: str(args, "question"),
       answer: str(args, "answer"),
       citations: cites,
@@ -716,6 +776,64 @@ export const HANDLERS: Record<string, Handler> = {
       "evidence_cards",
       `select=question,answer,citations,child_age_days,created_at&family_id=eq.${familyId}` +
         `&or=(question.ilike.${pattern},answer.ilike.${pattern})&order=created_at.desc&limit=10`
+    );
+  },
+  async add_event(db, _userId, familyId, args) {
+    const kidName = str(args, "kid", false);
+    const kid = kidName ? await resolveKid(db, familyId, kidName) : null;
+    const kind = oneOf(args, "kind", ["medical", "school", "activity", "family", "other"]) as EventKind;
+    const startsAt = requiredTimestamp(args, "starts_at");
+    const event = await db.insert<{ id: string }>("family_events", {
+      family_id: familyId,
+      kid_id: kid?.id ?? null,
+      kind,
+      title: str(args, "title"),
+      starts_at: startsAt,
+      location: str(args, "location", false) || null,
+      with_whom: str(args, "with", false) || null,
+      notes: str(args, "notes", false) || null,
+      written_by: WRITTEN_BY,
+    });
+    const { name, rows } = starterItems(kind, kid?.birth_date, startsAt, { eventId: event.id, familyId });
+    for (const r of rows) await db.insert("event_items", { ...r, written_by: WRITTEN_BY });
+    return {
+      recorded: "event",
+      id: event.id,
+      checklist: name,
+      items: rows.length,
+      link: `https://family-coordinator.vercel.app/plan/${event.id}`,
+    };
+  },
+  async add_event_item(db, _userId, familyId, args) {
+    const eventId = str(args, "event_id");
+    const events = await db.select<{ id: string }>("family_events", `select=id&id=eq.${encodeURIComponent(eventId)}&family_id=eq.${familyId}`);
+    if (events.length !== 1) throw new ToolError(`no event ${eventId} in this family; call list_events for ids`);
+    const url = str(args, "source_url", false);
+    if (url && !url.startsWith("https://")) throw new ToolError("source_url must be an https URL");
+    const row = await db.insert<{ id: string }>("event_items", {
+      event_id: eventId,
+      family_id: familyId,
+      kind: oneOf(args, "kind", ["question", "bring", "prep", "decision"]),
+      body: str(args, "text"),
+      detail: str(args, "detail", false) || null,
+      source_title: str(args, "source_title", false) || null,
+      source_url: url || null,
+      position: 1000,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "event_item", id: row.id };
+  },
+  async list_events(db, _userId, familyId, args) {
+    const kidName = str(args, "kid", false);
+    const kid = kidName ? await resolveKid(db, familyId, kidName) : null;
+    const since = new Date(Date.now() - (args.include_past === true ? 60 * 86_400_000 : 6 * 3600_000)).toISOString();
+    return db.select(
+      "family_events",
+      `select=id,title,kind,starts_at,location,with_whom,status,outcome,kids(name),` +
+        `event_items(kind,body,detail,done,answer,source_url)` +
+        `&family_id=eq.${familyId}&starts_at=gte.${encodeURIComponent(since)}` +
+        (kid ? `&kid_id=eq.${kid.id}` : "") +
+        `&order=starts_at.asc&limit=20`
     );
   },
 };
