@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import { BabyToday } from "./BabyToday";
 import { ShareLinks } from "./ShareLinks";
 import { EvidenceCards } from "./EvidenceCards";
+import { KidGlance } from "./KidGlance";
 import { lastEventOf, useBabyLane } from "./useBabyLane";
 import { createClient } from "@/lib/supabase/client";
-import { formatAgo, formatClock, formatDuration, secondsBetween } from "@/lib/baby/format";
-import { eventDuration, eventSummary, todayTotals } from "@/lib/baby/summary";
-import { startOfToday, type ShareLink } from "@/lib/baby/events";
+import { formatAgo, formatClock, secondsBetween } from "@/lib/baby/format";
+import { eventDuration, eventSummary } from "@/lib/baby/summary";
+import type { ShareLink } from "@/lib/baby/events";
 
 const CARDS = [
   { type: "feed", label: "Feed", emoji: "🍼", href: "/baby/feed" },
@@ -81,15 +82,12 @@ export function BabyIndex({ familyId }: { familyId: string }) {
     (e) => e.event_type === "contraction" || lane.kidId === null || e.kid_id === lane.kidId
   );
 
-  const anyRunning = lane.events.some(
-    (e) => e.ended_at === null && TIMER_TYPES.has(e.event_type)
-  );
-
+  // Always ticking: the awake timer counts from the last sleep's end, so there is
+  // a live clock on this screen even when nothing is running.
   useEffect(() => {
-    if (!anyRunning) return;
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [anyRunning]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,21 +110,6 @@ export function BabyIndex({ familyId }: { familyId: string }) {
       cancelled = true;
     };
   }, [familyId, linksVersion]);
-
-  // The lane loads a rolling 24 hours; the strip is labelled today, so it counts
-  // only what started today.
-  // Compared as instants, not strings: the database writes "+00:00" where
-  // toISOString writes "Z". A still-running timer counts even if it began
-  // yesterday; a diaper's ended_at is null forever, so it only counts by start.
-  const todayStartMs = Date.parse(startOfToday());
-  const totals = todayTotals(
-    visibleForKid.filter(
-      (e) =>
-        Date.parse(e.started_at) >= todayStartMs ||
-        (e.ended_at === null && TIMER_TYPES.has(e.event_type))
-    ),
-    nowMs
-  );
 
   const visibleToday = visibleForKid;
 
@@ -161,26 +144,12 @@ export function BabyIndex({ familyId }: { familyId: string }) {
         </p>
       )}
 
-      {/* The today strip: what a parent is asked for at a handover or an
-          appointment, and the reason this page is not a menu. */}
-      <dl className="grid grid-cols-3 gap-2" data-testid="baby-today-strip">
-        {[
-          { label: "Feeds", value: String(totals.feeds), testId: "today-feeds" },
-          { label: "Diapers", value: String(totals.diapers), testId: "today-diapers" },
-          {
-            label: "Sleep",
-            value: totals.sleepSeconds > 0 ? formatDuration(totals.sleepSeconds) : "—",
-            testId: "today-sleep",
-          },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-stone-200 bg-white px-3 py-2.5">
-            <dt className="text-[11px] uppercase tracking-wide text-stone-400">{s.label}</dt>
-            <dd className="mt-0.5 text-lg tabular-nums text-stone-800" data-testid={s.testId}>
-              {s.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <KidGlance
+        familyId={familyId}
+        kid={lane.kids.find((k) => k.id === lane.kidId) ?? null}
+        events={lane.events}
+        nowMs={nowMs}
+      />
 
       <ul className="space-y-2.5">
         {CARDS.map((card) => {
