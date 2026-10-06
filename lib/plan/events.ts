@@ -1,4 +1,4 @@
-import { templateFor, type EventKind, type TemplateItem } from "./templates";
+import { personTemplateFor, templateFor, type EventKind, type TemplateItem } from "./templates";
 
 export const EVENT_KINDS: Array<{ value: EventKind; label: string }> = [
   { value: "medical", label: "Doctor" },
@@ -74,9 +74,12 @@ export function starterItems(
   kind: EventKind,
   kidBirthDate: string | null | undefined,
   startsAt: string,
-  ids: { eventId: string; familyId: string }
+  ids: { eventId: string; familyId: string },
+  person?: { deliveredOn: string | null; cesarean: boolean }
 ): { name: string | null; rows: ItemInsert[] } {
-  const t = templateFor(kind, ageDaysOn(kidBirthDate, new Date(startsAt)));
+  const t = person
+    ? personTemplateFor(kind, ageDaysOn(person.deliveredOn, new Date(startsAt)), person.cesarean)
+    : templateFor(kind, ageDaysOn(kidBirthDate, new Date(startsAt)));
   if (!t) return { name: null, rows: [] };
   return {
     name: t.name,

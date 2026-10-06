@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MEDICAL_VISIT, NEWBORN_VISIT, PRESCHOOL_VISIT, SCHOOL_MEETING, templateFor } from "./templates";
+import { MEDICAL_VISIT, NEWBORN_VISIT, POSTPARTUM_VISIT, PRESCHOOL_VISIT, SCHOOL_MEETING, templateFor } from "./templates";
 import { ageDaysOn, formatWhen, relativeDay, starterItems, startsAtFrom } from "./events";
 
 const ALL = { NEWBORN_VISIT, PRESCHOOL_VISIT, MEDICAL_VISIT, SCHOOL_MEETING };
@@ -67,5 +67,23 @@ describe("time zone", () => {
     // 9pm Monday in Miami is already Tuesday in UTC.
     const now = new Date("2026-10-06T01:00:00Z");
     expect(relativeDay("2026-10-07T18:40:00Z", now, "America/New_York")).toBe("in 2 days");
+  });
+});
+
+describe("postpartum visit", () => {
+  it("within 12 weeks of a C-section: the postpartum list with the incision question, all sourced", async () => {
+    const { starterItems } = await import("./events");
+    const { rows, name } = starterItems("medical", null, new Date(2026, 9, 20, 10).toISOString(), { eventId: "e", familyId: "f" }, { deliveredOn: "2026-09-30", cesarean: true });
+    expect(name).toBe("Postpartum visit");
+    expect(rows.map((r) => r.template_key)).toContain("pp-incision");
+    expect(rows.every((r) => r.source_url.startsWith("https://"))).toBe(true);
+  });
+  it("no incision question after a vaginal birth; past 12 weeks it's the general list", async () => {
+    const { starterItems } = await import("./events");
+    expect(starterItems("medical", null, new Date(2026, 9, 20).toISOString(), { eventId: "e", familyId: "f" }, { deliveredOn: "2026-09-30", cesarean: false }).rows.map((r) => r.template_key)).not.toContain("pp-incision");
+    expect(starterItems("medical", null, new Date(2027, 1, 1).toISOString(), { eventId: "e", familyId: "f" }, { deliveredOn: "2026-09-30", cesarean: true }).name).toBe("Doctor visit");
+  });
+  it("no doses in the postpartum list either", () => {
+    for (const it of POSTPARTUM_VISIT) expect(`${it.body} ${it.detail ?? ""}`).not.toMatch(/\b(IU|mg|ml|mcg)\b/i);
   });
 });

@@ -9,6 +9,7 @@ import { EVENT_KINDS, starterItems, startsAtFrom } from "@/lib/plan/events";
 import type { EventKind } from "@/lib/plan/templates";
 
 type Kid = { id: string; name: string; birth_date: string | null };
+type Adult = { id: string; name: string; delivered_on: string | null; cesarean: boolean };
 
 const input =
   "w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-violet-600";
@@ -31,12 +32,13 @@ function Chip({ on, onClick, children, testId }: { on: boolean; onClick: () => v
  * Add an event. A checkup or a school meeting starts with its prep checklist
  * already filled in, chosen by the child's age on the day (lib/plan/templates).
  */
-export function AddEvent({ familyId, kids }: { familyId: string; kids: Kid[] }) {
+export function AddEvent({ familyId, kids, adults = [] }: { familyId: string; kids: Kid[]; adults?: Adult[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState("");
   const [kidId, setKidId] = useState<string | null>(kids[0]?.id ?? null);
+  const [personId, setPersonId] = useState<string | null>(null);
   const [kind, setKind] = useState<EventKind>("medical");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -55,7 +57,8 @@ export function AddEvent({ familyId, kids }: { familyId: string; kids: Kid[] }) 
       .from("family_events")
       .insert({
         family_id: familyId,
-        kid_id: kidId,
+        kid_id: personId ? null : kidId,
+        person_user_id: personId,
         kind,
         title: title.trim(),
         starts_at: startsAt,
@@ -70,7 +73,10 @@ export function AddEvent({ familyId, kids }: { familyId: string; kids: Kid[] }) 
       return;
     }
     const kid = kids.find((k) => k.id === kidId);
-    const { rows } = starterItems(kind, kid?.birth_date, startsAt, { eventId: data.id, familyId });
+    const adult = adults.find((a) => a.id === personId);
+    const { rows } = adult
+      ? starterItems(kind, null, startsAt, { eventId: data.id, familyId }, { deliveredOn: adult.delivered_on, cesarean: adult.cesarean })
+      : starterItems(kind, personId ? null : kid?.birth_date, startsAt, { eventId: data.id, familyId });
     if (rows.length) {
       const { error: itemsError } = await supabase.from("event_items").insert(rows);
       // The event saved; only its starter checklist didn't. Say so and carry on.
@@ -112,11 +118,30 @@ export function AddEvent({ familyId, kids }: { familyId: string; kids: Kid[] }) 
 
       <div className="flex flex-wrap gap-1.5">
         {kids.map((k) => (
-          <Chip key={k.id} on={kidId === k.id} onClick={() => setKidId(k.id)} testId={`event-kid-${k.id}`}>
+          <Chip
+            key={k.id}
+            on={!personId && kidId === k.id}
+            onClick={() => {
+              setKidId(k.id);
+              setPersonId(null);
+            }}
+            testId={`event-kid-${k.id}`}
+          >
             {k.name}
           </Chip>
         ))}
-        <Chip on={kidId === null} onClick={() => setKidId(null)}>
+        {adults.map((a) => (
+          <Chip key={a.id} on={personId === a.id} onClick={() => setPersonId(a.id)} testId={`event-person-${a.id}`}>
+            {a.name}
+          </Chip>
+        ))}
+        <Chip
+          on={!personId && kidId === null}
+          onClick={() => {
+            setKidId(null);
+            setPersonId(null);
+          }}
+        >
           Family
         </Chip>
       </div>

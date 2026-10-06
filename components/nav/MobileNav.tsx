@@ -18,10 +18,11 @@ const PRIMARY = [
 
 export const MORE_GROUPS: Array<{ title: string; tone: string; items: Array<{ href: string; label: string }> }> = [
   {
-    title: "Kids",
+    title: "Kids & care",
     tone: "text-sky-600",
     items: [
       { href: "/baby", label: "Baby log" },
+      { href: "/care", label: "Recovery & meds" },
       { href: "/kids", label: "Profiles & milestones" },
       { href: "/caregiver", label: "Caregiver" },
     ],

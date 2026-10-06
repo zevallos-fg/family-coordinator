@@ -448,6 +448,166 @@ export type Database = {
           },
         ]
       }
+      care_logs: {
+        Row: {
+          at: string
+          created_at: string
+          created_by: string | null
+          family_id: string
+          id: string
+          kind: string
+          payload: Json
+          person_user_id: string
+          written_by: string
+        }
+        Insert: {
+          at?: string
+          created_at?: string
+          created_by?: string | null
+          family_id: string
+          id?: string
+          kind: string
+          payload?: Json
+          person_user_id: string
+          written_by?: string
+        }
+        Update: {
+          at?: string
+          created_at?: string
+          created_by?: string | null
+          family_id?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          person_user_id?: string
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "care_logs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "care_logs_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "care_logs_person_user_id_fkey"
+            columns: ["person_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      care_medications: {
+        Row: {
+          active: boolean
+          created_at: string
+          dose: string | null
+          family_id: string
+          id: string
+          interval_hours: number | null
+          name: string
+          notes: string | null
+          person_user_id: string
+          purpose: string | null
+          written_by: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          dose?: string | null
+          family_id: string
+          id?: string
+          interval_hours?: number | null
+          name: string
+          notes?: string | null
+          person_user_id: string
+          purpose?: string | null
+          written_by?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          dose?: string | null
+          family_id?: string
+          id?: string
+          interval_hours?: number | null
+          name?: string
+          notes?: string | null
+          person_user_id?: string
+          purpose?: string | null
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "care_medications_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "care_medications_person_user_id_fkey"
+            columns: ["person_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      care_profiles: {
+        Row: {
+          bp_reminders: boolean
+          delivered_on: string | null
+          delivery_type: string | null
+          family_id: string
+          notes: string | null
+          person_user_id: string
+          updated_at: string
+        }
+        Insert: {
+          bp_reminders?: boolean
+          delivered_on?: string | null
+          delivery_type?: string | null
+          family_id: string
+          notes?: string | null
+          person_user_id: string
+          updated_at?: string
+        }
+        Update: {
+          bp_reminders?: boolean
+          delivered_on?: string | null
+          delivery_type?: string | null
+          family_id?: string
+          notes?: string | null
+          person_user_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "care_profiles_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "care_profiles_person_user_id_fkey"
+            columns: ["person_user_id"]
+            isOneToOne: true
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       caregiver_mileage: {
         Row: {
           caregiver_id: string
@@ -1070,6 +1230,7 @@ export type Database = {
           location: string | null
           notes: string | null
           outcome: string | null
+          person_user_id: string | null
           starts_at: string
           status: string
           title: string
@@ -1089,6 +1250,7 @@ export type Database = {
           location?: string | null
           notes?: string | null
           outcome?: string | null
+          person_user_id?: string | null
           starts_at: string
           status?: string
           title: string
@@ -1108,6 +1270,7 @@ export type Database = {
           location?: string | null
           notes?: string | null
           outcome?: string | null
+          person_user_id?: string | null
           starts_at?: string
           status?: string
           title?: string
@@ -1142,6 +1305,13 @@ export type Database = {
             columns: ["kid_id"]
             isOneToOne: false
             referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "family_events_person_user_id_fkey"
+            columns: ["person_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -3466,6 +3636,39 @@ export type Database = {
             columns: ["kid_id"]
             isOneToOne: false
             referencedRelation: "kids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_care_medication_status: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          dose: string | null
+          family_id: string | null
+          id: string | null
+          interval_hours: number | null
+          last_dose_at: string | null
+          name: string | null
+          next_due_at: string | null
+          notes: string | null
+          person_name: string | null
+          person_user_id: string | null
+          purpose: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "care_medications_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "care_medications_person_user_id_fkey"
+            columns: ["person_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]

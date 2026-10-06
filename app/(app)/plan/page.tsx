@@ -22,17 +22,17 @@ export default async function PlanPage() {
   // supabase-error-ignored: without a stored zone, the family's usual one.
   const tz = fam?.timezone ?? "America/New_York";
 
-  const [upRes, pastRes, kidsRes, itemsRes, openRes, inboxRes] = await Promise.all([
+  const [upRes, pastRes, kidsRes, itemsRes, openRes, inboxRes, membersRes, profilesRes] = await Promise.all([
     supabase
       .from("family_events")
-      .select("id, title, kind, starts_at, location, with_whom, status, kid_id")
+      .select("id, title, kind, starts_at, location, with_whom, status, kid_id, person_user_id")
       .eq("family_id", familyId)
       .eq("status", "planned")
       .gte("starts_at", since)
       .order("starts_at", { ascending: true }),
     supabase
       .from("family_events")
-      .select("id, title, kind, starts_at, location, with_whom, status, kid_id")
+      .select("id, title, kind, starts_at, location, with_whom, status, kid_id, person_user_id")
       .eq("family_id", familyId)
       .or(`status.neq.planned,starts_at.lt.${since}`)
       .order("starts_at", { ascending: false })
@@ -49,11 +49,20 @@ export default async function PlanPage() {
       .select("id", { count: "exact", head: true })
       .eq("family_id", familyId)
       .is("completed_at", null),
+    supabase.from("family_members").select("user_id, users(full_name)").eq("family_id", familyId),
+    supabase.from("care_profiles").select("person_user_id, delivered_on, delivery_type").eq("family_id", familyId),
   ]);
 
   const failed = [upRes, pastRes, kidsRes, itemsRes].some((r) => r.error);
   const kids = kidsRes.data ?? [];
   const kidName = new Map(kids.map((k) => [k.id, k.name]));
+  const profiles = new Map((profilesRes.data ?? []).map((p) => [p.person_user_id, p]));
+  const adults = (membersRes.data ?? []).map((m) => {
+    const name = (m as unknown as { users: { full_name: string | null } | null }).users?.full_name ?? "Someone";
+    const p = profiles.get(m.user_id as string);
+    return { id: m.user_id as string, name: name.split(" ")[0], delivered_on: p?.delivered_on ?? null, cesarean: p?.delivery_type === "cesarean" };
+  });
+  const adultName = new Map(adults.map((a) => [a.id, a.name]));
   const progress = new Map<string, { done: number; total: number }>();
   for (const i of itemsRes.data ?? []) {
     if (i.kind === "decision") continue;
@@ -64,7 +73,7 @@ export default async function PlanPage() {
   }
   const summarize = (e: NonNullable<typeof upRes.data>[number]): EventSummary => ({
     ...e,
-    kid: e.kid_id ? (kidName.get(e.kid_id) ?? null) : null,
+    kid: e.kid_id ? (kidName.get(e.kid_id) ?? null) : e.person_user_id ? (adultName.get(e.person_user_id) ?? null) : null,
     progress: progress.get(e.id) ?? null,
   });
   const upcoming = (upRes.data ?? []).map(summarize);
@@ -82,7 +91,7 @@ export default async function PlanPage() {
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Some of this didn&apos;t load. Reload to try again.</p>
       )}
 
-      <AddEvent familyId={familyId} kids={kids} />
+      <AddEvent familyId={familyId} kids={kids} adults={adults} />
 
       <section className="space-y-2">
         <h2 className="text-xs uppercase tracking-wide text-stone-400">Coming up</h2>

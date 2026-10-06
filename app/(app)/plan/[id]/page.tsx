@@ -19,7 +19,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   if (error) throw new Error(`Could not load this event: ${error.message}`);
   if (!event) notFound();
 
-  const [itemsRes, kidRes, cardsRes, famRes] = await Promise.all([
+  const [itemsRes, kidRes, cardsRes, famRes, personRes] = await Promise.all([
     supabase.from("event_items").select("*").eq("event_id", id).order("position").order("created_at"),
     event.kid_id
       ? supabase.from("kids").select("id, name, birth_date").eq("id", event.kid_id).maybeSingle()
@@ -30,6 +30,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       .eq("event_id", id)
       .order("created_at", { ascending: false }),
     supabase.from("families").select("timezone").eq("id", familyId).maybeSingle(),
+    event.person_user_id
+      ? supabase.from("users").select("id, full_name").eq("id", event.person_user_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
   if (itemsRes.error) throw new Error(`Could not load the checklist: ${itemsRes.error.message}`);
 
@@ -41,6 +44,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       kid={kidRes.data ?? null}
       cards={cardsRes.data ?? []}
       timeZone={famRes.data?.timezone ?? "America/New_York"}
+      person={personRes.data ? { id: personRes.data.id, name: (personRes.data.full_name ?? "Someone").split(" ")[0] } : null}
     />
   );
 }

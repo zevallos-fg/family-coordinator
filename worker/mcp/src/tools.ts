@@ -4,6 +4,8 @@ import { BuildError, bottleFeed, breastFeed, citations, diaper, growth } from ".
 // sourced checklist as one added on the Plan screen.
 import { starterItems } from "../../../lib/plan/events";
 import type { EventKind } from "../../../lib/plan/templates";
+// The same published thresholds and warning signs the app shows on /care.
+import { BP_ACTION, bpBand, checkInWarnings, parseBp, type CheckIn } from "../../../lib/care/rules";
 
 export class ToolError extends Error {}
 
@@ -98,6 +100,18 @@ async function resolveKid(
   throw new ToolError(
     hits.length === 0 ? `no child named "${name}". Children: ${known}` : `"${name}" matches more than one child`
   );
+}
+
+/** A family member by first or full name, case-insensitive. */
+async function resolvePerson(db: UserClient, name: string): Promise<{ id: string; name: string }> {
+  const people = await db.select<{ id: string; full_name: string | null }>("users", "select=id,full_name");
+  const wanted = name.trim().toLowerCase();
+  const full = people.filter((p) => (p.full_name ?? "").trim().toLowerCase() === wanted);
+  const firstName = people.filter((p) => (p.full_name ?? "").trim().toLowerCase().split(/\s+/)[0] === wanted);
+  const hits = full.length ? full : firstName;
+  if (hits.length === 1) return { id: hits[0].id, name: hits[0].full_name ?? name };
+  const known = people.map((p) => p.full_name).filter(Boolean).join(", ") || "(nobody visible)";
+  throw new ToolError(hits.length ? `"${name}" matches more than one person` : `no family member named "${name}". Known: ${known}`);
 }
 
 /** Builders throw BuildError for bad input; the model should see it as a tool error it can fix. */
@@ -457,6 +471,93 @@ export const TOOL_DEFINITIONS = [
         kid: { type: "string", description: "Optional: only this child's events." },
         include_past: { type: "boolean", description: "Also include the last 60 days." },
       },
+    },
+  },
+  {
+    name: "care_status",
+    description:
+      "A grown-up's recovery picture (e.g. Yenny after the birth): days since birth, the last blood pressure " +
+      "readings with the published action for each (Preeclampsia Foundation: 160/110+ get care now, 140-159/90-109 " +
+      "call the OB), medicines with next due times, the latest check-in and any warning signs it matched. Read this " +
+      "before answering a health question about her, and repeat any action it returns plainly. Never interpret beyond it.",
+    inputSchema: { type: "object", properties: { person: { type: "string", description: "First or full name, e.g. 'Yenny'." } }, required: ["person"] },
+  },
+  {
+    name: "log_bp",
+    description:
+      "Record a blood pressure reading. taken_at is when it was measured (ask if unclear). Returns the published action " +
+      "for the reading — tell the person immediately if it is anything other than 'Keep checking'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        systolic: { type: "integer" },
+        diastolic: { type: "integer" },
+        pulse: { type: "integer" },
+        taken_at: { type: "string", description: "ISO-8601 with offset." },
+      },
+      required: ["person", "systolic", "diastolic", "taken_at"],
+    },
+  },
+  {
+    name: "add_care_medication",
+    description:
+      "Track a grown-up's medicine. dose is exactly as on the label or prescription — never compute or suggest one. " +
+      "interval_hours makes the app remind when the next dose is due.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        name: { type: "string" },
+        dose: { type: "string" },
+        interval_hours: { type: "number" },
+        purpose: { type: "string" },
+      },
+      required: ["person", "name"],
+    },
+  },
+  {
+    name: "log_care_dose",
+    description: "Record that a tracked medicine was taken. taken_at is when it was taken.",
+    inputSchema: {
+      type: "object",
+      properties: { person: { type: "string" }, medicine: { type: "string" }, taken_at: { type: "string" } },
+      required: ["person", "medicine", "taken_at"],
+    },
+  },
+  {
+    name: "log_checkin",
+    description:
+      "Record a recovery check-in. Scores are 0-10. Returns any POST-BIRTH warning signs matched (with the latest BP) — " +
+      "relay them plainly and first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        at: { type: "string" },
+        headache: { type: "integer" },
+        headache_lying: { type: "string", enum: ["better", "same", "unsure"] },
+        headache_after_meds: { type: "string", enum: ["better", "not_better"] },
+        vision_changes: { type: "boolean" },
+        pain: { type: "integer" },
+        temp_f: { type: "number" },
+        bleeding: { type: "string", enum: ["light", "moderate", "soaking"] },
+        incision: { type: "string", enum: ["fine", "red", "draining", "not_healing"] },
+        leg: { type: "boolean" },
+        mood: { type: "string", enum: ["good", "ok", "low"] },
+        urgent: { type: "array", items: { type: "string", enum: ["chest_pain", "breathing", "seizure", "harm_thoughts"] } },
+        note: { type: "string" },
+      },
+      required: ["person", "at"],
+    },
+  },
+  {
+    name: "add_care_note",
+    description: "Save a note to a grown-up's care page — a question for the doctor, something to remember, a decision made.",
+    inputSchema: {
+      type: "object",
+      properties: { person: { type: "string" }, text: { type: "string" }, at: { type: "string" } },
+      required: ["person", "text"],
     },
   },
 ];
@@ -835,5 +936,122 @@ export const HANDLERS: Record<string, Handler> = {
         (kid ? `&kid_id=eq.${kid.id}` : "") +
         `&order=starts_at.asc&limit=20`
     );
+  },
+  async care_status(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+    const [profile, logs, meds] = await Promise.all([
+      db.select<{ delivered_on: string | null; delivery_type: string | null }>("care_profiles", `select=delivered_on,delivery_type&person_user_id=eq.${person.id}`),
+      db.select<{ kind: string; at: string; payload: Record<string, unknown> }>(
+        "care_logs",
+        `select=kind,at,payload&person_user_id=eq.${person.id}&family_id=eq.${familyId}&at=gte.${encodeURIComponent(since)}&order=at.desc&limit=200`
+      ),
+      db.select("v_care_medication_status", `select=name,dose,interval_hours,last_dose_at,next_due_at&person_user_id=eq.${person.id}&active=eq.true`),
+    ]);
+    const readings = logs
+      .filter((l) => l.kind === "bp")
+      .slice(0, 10)
+      .map((l) => {
+        const s = Number(l.payload.systolic);
+        const d = Number(l.payload.diastolic);
+        const band = bpBand(s, d);
+        return { at: l.at, reading: `${s}/${d}`, pulse: l.payload.pulse ?? null, band: BP_ACTION[band].label, action: BP_ACTION[band].action };
+      });
+    const checkin = logs.find((l) => l.kind === "checkin");
+    const latest = readings[0] ? parseBp(String(logs.find((l) => l.kind === "bp")!.payload.systolic), String(logs.find((l) => l.kind === "bp")!.payload.diastolic)) : null;
+    return {
+      person: person.name,
+      delivered_on: profile[0]?.delivered_on ?? null,
+      delivery_type: profile[0]?.delivery_type ?? null,
+      bp_readings: readings,
+      medicines: meds,
+      last_checkin: checkin ? { at: checkin.at, answers: checkin.payload } : null,
+      warnings: checkin ? checkInWarnings(checkin.payload as CheckIn, latest) : [],
+      notes: logs.filter((l) => l.kind === "note").slice(0, 10).map((l) => ({ at: l.at, text: l.payload.text })),
+      sources_note: "Thresholds: Preeclampsia Foundation (blood pressure), AWHONN POST-BIRTH warning signs. General guidance, not a diagnosis.",
+    };
+  },
+  async log_bp(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const bp = parseBp(String(args.systolic ?? ""), String(args.diastolic ?? ""));
+    if (!bp) throw new ToolError("systolic and diastolic must be plausible whole numbers (top then bottom)");
+    const pulse = Number.isInteger(args.pulse) ? (args.pulse as number) : null;
+    const row = await db.insert<{ id: string }>("care_logs", {
+      family_id: familyId,
+      person_user_id: person.id,
+      kind: "bp",
+      at: requiredTimestamp(args, "taken_at"),
+      payload: { ...bp, pulse },
+      written_by: WRITTEN_BY,
+    });
+    const band = bpBand(bp.systolic, bp.diastolic);
+    return { recorded: "bp", id: row.id, reading: `${bp.systolic}/${bp.diastolic}`, band: BP_ACTION[band].label, action: BP_ACTION[band].action, source: "https://www.preeclampsia.org/blood-pressure" };
+  },
+  async add_care_medication(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const interval = args.interval_hours === undefined || args.interval_hours === null ? null : Number(args.interval_hours);
+    if (interval !== null && (!Number.isFinite(interval) || interval <= 0 || interval > 168)) throw new ToolError("interval_hours must be between 0 and 168");
+    const row = await db.insert<{ id: string }>("care_medications", {
+      family_id: familyId,
+      person_user_id: person.id,
+      name: str(args, "name"),
+      dose: str(args, "dose", false) || null,
+      interval_hours: interval,
+      purpose: str(args, "purpose", false) || null,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "care_medication", id: row.id };
+  },
+  async log_care_dose(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const wanted = str(args, "medicine").toLowerCase();
+    const meds = await db.select<{ id: string; name: string; dose: string | null }>(
+      "care_medications",
+      `select=id,name,dose&person_user_id=eq.${person.id}&active=eq.true`
+    );
+    const hits = meds.filter((m) => m.name.toLowerCase() === wanted || m.name.toLowerCase().startsWith(wanted));
+    if (hits.length !== 1)
+      throw new ToolError(hits.length ? `"${wanted}" matches more than one medicine` : `no tracked medicine "${wanted}". Tracked: ${meds.map((m) => m.name).join(", ") || "none"} — add it with add_care_medication`);
+    const m = hits[0];
+    const row = await db.insert<{ id: string }>("care_logs", {
+      family_id: familyId,
+      person_user_id: person.id,
+      kind: "dose",
+      at: requiredTimestamp(args, "taken_at"),
+      payload: { medication_id: m.id, name: m.name, ...(m.dose ? { dose: m.dose } : {}) },
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "dose", id: row.id, medicine: m.name };
+  },
+  async log_checkin(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const KEYS = ["headache", "headache_lying", "headache_after_meds", "vision_changes", "pain", "temp_f", "bleeding", "incision", "leg", "mood", "urgent", "note"];
+    const answers = Object.fromEntries(Object.entries(args).filter(([k, v]) => KEYS.includes(k) && v !== undefined && v !== null)) as CheckIn;
+    const row = await db.insert<{ id: string }>("care_logs", {
+      family_id: familyId,
+      person_user_id: person.id,
+      kind: "checkin",
+      at: requiredTimestamp(args, "at"),
+      payload: answers,
+      written_by: WRITTEN_BY,
+    });
+    const last = await db.select<{ payload: Record<string, unknown> }>(
+      "care_logs",
+      `select=payload&person_user_id=eq.${person.id}&kind=eq.bp&order=at.desc&limit=1`
+    );
+    const bp = last[0] ? parseBp(String(last[0].payload.systolic), String(last[0].payload.diastolic)) : null;
+    return { recorded: "checkin", id: row.id, warnings: checkInWarnings(answers, bp) };
+  },
+  async add_care_note(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const row = await db.insert<{ id: string }>("care_logs", {
+      family_id: familyId,
+      person_user_id: person.id,
+      kind: "note",
+      at: optionalTimestamp(args, "at") ?? new Date().toISOString(),
+      payload: { text: str(args, "text") },
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "note", id: row.id };
   },
 };

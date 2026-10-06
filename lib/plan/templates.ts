@@ -9,6 +9,8 @@
  * one number (the fever temperature) is the AAP's, quoted.
  */
 
+import { SOURCES } from "../care/rules";
+
 export type ItemKind = "question" | "bring" | "prep";
 
 export interface TemplateItem {
@@ -353,6 +355,65 @@ export const SCHOOL_MEETING: TemplateItem[] = [
   },
 ];
 
+/** A mother's postpartum checkup (within 12 weeks of birth). */
+export const POSTPARTUM_VISIT: TemplateItem[] = [
+  TOP_QUESTIONS,
+  {
+    key: "pp-bp-log",
+    kind: "bring",
+    body: "The blood pressure log — shown below on this page",
+    detail: "The Preeclampsia Foundation suggests recording numbers twice a day after birth.",
+    // "Record your numbers twice a day"
+    source: SOURCES.pfBp,
+  },
+  BRING_MEDS,
+  {
+    key: "pp-bp-numbers",
+    kind: "question",
+    body: "What blood pressure numbers should make us call you, and how often should I check?",
+    detail: "Preeclampsia can start in the weeks after birth.",
+    // "It can also develop in the weeks after childbirth."
+    source: SOURCES.acogPreeclampsia,
+  },
+  {
+    key: "pp-headache",
+    kind: "question",
+    body: "The headache: what's causing it, and what should we do if it continues?",
+    detail: "A headache after a spinal or epidural can be treated; the anesthesia team decides how.",
+    // "If the healthcare team thinks you have a dural puncture headache and painkillers do not help, you may be offered … an epidural blood patch."
+    source: SOURCES.oaaHeadache,
+  },
+  {
+    key: "pp-ra-meds",
+    kind: "question",
+    body: "Which RA medicines are OK while breastfeeding, and when should they restart or change?",
+    detail: "RA often flares after delivery; review medicines with the rheumatologist and mention breastfeeding.",
+    // "patients often flare after delivery" (ACR) / "be sure to let your doctor know if you are breastfeeding" (Arthritis Foundation)
+    source: SOURCES.arthritisFoundation,
+  },
+  {
+    key: "pp-incision",
+    kind: "question",
+    body: "Is the incision healing as expected, and what activity is OK now?",
+    // "Call your ob-gyn right away if you have: … draining or leakage from your incision"
+    source: SOURCES.acogCesarean,
+  },
+  {
+    key: "pp-mood",
+    kind: "prep",
+    body: "Be ready to talk about mood — sadness or anxiety are worth raising, and don't wait for the visit to do it",
+    // "Do not wait until your postpartum checkup to talk with your ob-gyn."
+    source: SOURCES.acogPpd,
+  },
+  {
+    key: "pp-bp-check",
+    kind: "prep",
+    body: "If blood pressure has been high, ask for a BP check within 7–10 days of birth",
+    // "Blood pressure evaluation is recommended … no later than 7–10 days postpartum"
+    source: SOURCES.acogPostpartumCare,
+  },
+];
+
 export type EventKind = "medical" | "school" | "activity" | "family" | "other";
 
 /**
@@ -374,3 +435,18 @@ export function templateFor(kind: EventKind, ageDaysOnTheDay: number | null): {
 }
 
 export const MILESTONES_INDEX = S.cdcIndex;
+
+/**
+ * A grown-up's doctor visit: the postpartum list within 12 weeks of a birth
+ * (the incision question only after a C-section); otherwise the general list.
+ */
+export function personTemplateFor(
+  kind: EventKind,
+  daysSinceBirth: number | null,
+  cesarean: boolean
+): { name: string; items: TemplateItem[] } | null {
+  if (kind !== "medical") return templateFor(kind, null);
+  if (daysSinceBirth !== null && daysSinceBirth >= 0 && daysSinceBirth <= 84)
+    return { name: "Postpartum visit", items: POSTPARTUM_VISIT.filter((i) => cesarean || i.key !== "pp-incision") };
+  return { name: "Doctor visit", items: MEDICAL_VISIT };
+}

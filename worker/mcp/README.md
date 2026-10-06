@@ -81,6 +81,12 @@ All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 | `add_event` | `family_events` + its starter checklist in `event_items` (same templates as the app: `lib/plan/templates.ts`) |
 | `add_event_item` | `event_items` (question, bring, prep or decision; https sources only) |
 | `list_events` | reads `family_events` with their checklists |
+| `care_status` | reads `care_profiles`, `care_logs`, `v_care_medication_status` — a grown-up's recovery picture with the published BP actions and matched warning signs (`lib/care/rules.ts`) |
+| `log_bp` | `care_logs` (bp); returns the Preeclampsia Foundation action for the reading |
+| `add_care_medication` | `care_medications` (dose as on the label; never computed) |
+| `log_care_dose` | `care_logs` (dose) |
+| `log_checkin` | `care_logs` (checkin); returns matched POST-BIRTH warning signs |
+| `add_care_note` | `care_logs` (note) |
 
 The baby-log tools build their rows with `src/baby.ts`, which is tested against
 the app's own builders (`src/baby.test.ts`, run by the app's vitest): a feed

@@ -3,6 +3,7 @@ import { CalendarDays, ListChecks, UtensilsCrossed } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireFamily } from "@/lib/auth/current-family";
 import { KidsCard } from "@/components/home/KidsCard";
+import { CareCard } from "@/components/home/CareCard";
 import { HomeHeader } from "@/components/home/HomeHeader";
 import { CaptureBar } from "@/components/home/CaptureBar";
 
@@ -131,6 +132,7 @@ export default async function HomePage() {
 
       <div className="space-y-2.5">
         <KidsCard familyId={familyId} />
+        <CareCard familyId={familyId} />
 
         <div className="grid grid-cols-2 gap-2.5">
           <Link href="/now" className="rounded-2xl border border-stone-200 bg-white p-3" data-testid="home-today">

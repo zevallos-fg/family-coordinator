@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/database.types";
 import { formatWhen, relativeDay, startsAtFrom } from "@/lib/plan/events";
 import { VisitNumbers } from "./VisitNumbers";
+import { CareNumbers } from "./CareNumbers";
 
 type Event = Database["public"]["Tables"]["family_events"]["Row"];
 type Item = Database["public"]["Tables"]["event_items"]["Row"];
@@ -127,7 +128,9 @@ export function EventDetail({
   kid,
   cards,
   timeZone,
+  person = null,
 }: {
+  person?: { id: string; name: string } | null;
   timeZone: string;
   familyId: string;
   event: Event;
@@ -245,6 +248,7 @@ export function EventDetail({
 
       <header className="rounded-2xl border border-stone-200 bg-white p-4">
         {kid && <p className="text-xs text-sky-600">{kid.name}</p>}
+        {person && <p className="text-xs text-amber-600">{person.name}</p>}
         <h1 className="text-lg font-medium text-stone-800">{event.title}</h1>
         <p className="mt-0.5 text-sm text-stone-600">
           {formatWhen(event.starts_at, timeZone)} · {event.status === "planned" ? relativeDay(event.starts_at, new Date(nowMs), timeZone) : event.status}
@@ -342,6 +346,7 @@ export function EventDetail({
       </section>
 
       {showNumbers && kid && <VisitNumbers kidId={kid.id} kidName={kid.name} />}
+      {event.kind === "medical" && person && <CareNumbers personId={person.id} name={person.name} />}
 
       {cards.length > 0 && (
         <section className="space-y-1.5">
