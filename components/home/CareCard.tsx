@@ -6,18 +6,26 @@ import { AlertTriangle, HeartPulse } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { BP_ACTION, bpBand, daysSince } from "@/lib/care/rules";
 import { nextDueLabel } from "@/lib/baby/medicine";
+import { exerciseGate, targetsFor, WEEKLY_MINUTES, type Nutrients } from "@/lib/care/nutrition";
 
 type CareBrief = {
   person: string | null;
   delivered_on: string | null;
   bp_recent: Array<{ at: string; systolic: number; diastolic: number }>;
   medicines: Array<{ name: string; next_due_at: string | null }>;
+  lactating?: boolean;
+  delivery_type?: string | null;
+  exercise_cleared_on?: string | null;
+  food_today?: { entries: number; totals: Nutrients } | null;
+  food_goals?: { kcal: number | null; overrides: Nutrients | null } | null;
+  move_minutes_7d?: number;
 };
 
 /**
  * Home's line for each grown-up with a care profile: day after birth, the
  * latest blood pressure (outlined when it's in an action band) and the next
- * medicine due. Reads the same brief Claude reads.
+ * medicine due, then protein, fiber and movement against their targets.
+ * Reads the same brief Claude reads.
  */
 export function CareCard({ familyId }: { familyId: string }) {
   const [care, setCare] = useState<CareBrief[] | null>(null);
@@ -51,6 +59,14 @@ export function CareCard({ familyId }: { familyId: string }) {
           .filter((m) => m.next_due_at)
           .sort((a, b) => Date.parse(a.next_due_at!) - Date.parse(b.next_due_at!))[0];
         const due = next ? nextDueLabel(next.next_due_at, nowMs) : null;
+        const targets = targetsFor(!!c.lactating, c.food_goals ?? {});
+        const totals = c.food_today?.totals ?? {};
+        const gated = exerciseGate(c).gated;
+        const food = [
+          totals.protein_g !== undefined || targets.protein_g ? `Protein ${Math.round(totals.protein_g ?? 0)}${targets.protein_g ? `/${targets.protein_g.value}` : ""} g` : null,
+          totals.fiber_g !== undefined || targets.fiber_g ? `Fiber ${Math.round(totals.fiber_g ?? 0)}${targets.fiber_g ? `/${targets.fiber_g.value}` : ""} g` : null,
+          `Moved ${Math.round(c.move_minutes_7d ?? 0)}${gated ? "" : `/${WEEKLY_MINUTES}`} min/wk`,
+        ].filter(Boolean);
         return (
           <Link
             key={first}
@@ -79,6 +95,9 @@ export function CareCard({ familyId }: { familyId: string }) {
                 <span className="block truncate text-sm text-stone-800">{next ? next.name : "—"}</span>
                 {due && <span className={`block text-[11px] ${due.overdue ? "font-medium text-amber-700" : "text-stone-500"}`}>{due.text}</span>}
               </span>
+            </span>
+            <span className="mt-2 block truncate text-xs text-stone-600" data-testid="home-care-food">
+              {food.join(" · ")}
             </span>
           </Link>
         );

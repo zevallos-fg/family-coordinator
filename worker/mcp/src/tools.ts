@@ -6,6 +6,30 @@ import { starterItems } from "../../../lib/plan/events";
 import type { EventKind } from "../../../lib/plan/templates";
 // The same published thresholds and warning signs the app shows on /care.
 import { BP_ACTION, bpBand, checkInWarnings, parseBp, type CheckIn } from "../../../lib/care/rules";
+// Food and movement: the same sourced breastfeeding targets and the same
+// validation as /care.
+import {
+  CALORIE_GUIDANCE,
+  NUTRIENTS,
+  NutritionError,
+  SEAFOOD,
+  SUPPLEMENT_NOTE,
+  WEEKLY_MINUTES,
+  RA_GUIDANCE,
+  cleanNutrients,
+  dayTotals,
+  exerciseGate,
+  foodPayload,
+  localDate,
+  localDayBounds,
+  minutesSince,
+  movePayload,
+  progress,
+  targetsFor,
+  type FoodPayload,
+  type MovePayload,
+  type Nutrients,
+} from "../../../lib/care/nutrition";
 
 export class ToolError extends Error {}
 
@@ -560,6 +584,89 @@ export const TOOL_DEFINITIONS = [
       required: ["person", "text"],
     },
   },
+  {
+    name: "log_food",
+    description:
+      "Record what a grown-up ate (e.g. Yenny), with nutrient totals for the amount eaten. When you estimate the numbers " +
+      "from a description, set estimated: true — the app marks the entry 'est.'; set false only when the numbers come from " +
+      "a label or the person gave them. Include whichever of these you can: " +
+      NUTRIENTS.map((n) => `${n.key} (${n.unit})`).join(", ") +
+      ". Returns today's totals against her targets — mention what is still short, briefly, without moralizing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string", description: "First or full name, e.g. 'Yenny'." },
+        name: { type: "string", description: "What was eaten, e.g. 'Greek yogurt with berries and granola'." },
+        eaten_at: { type: "string", description: "ISO-8601 with offset. When it was eaten; ask if unclear." },
+        meal: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"] },
+        servings: { type: "number" },
+        nutrients: {
+          type: "object",
+          description: "Totals for what was eaten (already multiplied by servings).",
+          properties: Object.fromEntries(NUTRIENTS.map((n) => [n.key, { type: "number", description: `${n.label}, ${n.unit}` }])),
+        },
+        estimated: { type: "boolean", description: "true when the numbers are your estimate." },
+        seafood_oz: { type: "number", description: "Ounces of fish or shellfish in it, if any." },
+      },
+      required: ["person", "name", "eaten_at", "nutrients", "estimated"],
+    },
+  },
+  {
+    name: "log_activity",
+    description:
+      "Record movement for a grown-up: a walk, stretching, pelvic floor exercises, PT, etc. Minutes are what she did. After " +
+      "a cesarean, do not suggest an exercise target until care_status/nutrition_today shows she's been cleared by her OB.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        activity: { type: "string", enum: ["walk", "stretch", "pelvic_floor", "strength", "pt", "yoga", "swim", "bike", "other"] },
+        minutes: { type: "number" },
+        at: { type: "string", description: "ISO-8601 with offset — when it happened." },
+        steps: { type: "integer" },
+        note: { type: "string" },
+      },
+      required: ["person", "activity", "minutes", "at"],
+    },
+  },
+  {
+    name: "nutrition_today",
+    description:
+      "A grown-up's food for a day against her targets — protein, fiber, calories, vitamins and minerals — with how many " +
+      "foods carried each number (a total from 1 of 5 foods is a floor, say so), seafood this week, movement minutes and " +
+      "whether exercise is cleared, plus the sourced guidance. Targets are the published breastfeeding intakes (NIH/National " +
+      "Academies) when she's breastfeeding; calories have no default because the sources disagree (DGA/CDC +330–400 vs " +
+      "ACOG/MedlinePlus +450–500) — use only a goal she set. Read this before answering a food or movement question about her.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        date: { type: "string", description: "YYYY-MM-DD in the family's time zone; defaults to today." },
+      },
+      required: ["person"],
+    },
+  },
+  {
+    name: "set_food_goal",
+    description:
+      "Save a personal food goal the person stated — a daily calorie goal, or a different target for a nutrient — usually " +
+      "from her OB, rheumatologist or a dietitian. Never propose a calorie number yourself. Takes effect from start_date " +
+      "(default today); earlier goals stay in the history.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        kcal: { type: "integer", description: "Daily calories. Omit to keep the current one; 0 clears it." },
+        targets: {
+          type: "object",
+          description: "Per-nutrient targets that replace the defaults, same keys as log_food nutrients.",
+        },
+        start_date: { type: "string", description: "YYYY-MM-DD." },
+        note: { type: "string", description: "Who set it, e.g. 'from the dietitian'." },
+      },
+      required: ["person"],
+    },
+  },
 ];
 
 type Handler = (
@@ -1054,4 +1161,160 @@ export const HANDLERS: Record<string, Handler> = {
     });
     return { recorded: "note", id: row.id };
   },
+  async log_food(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    if (typeof args.estimated !== "boolean") throw new ToolError("estimated is required: true when you estimated the numbers");
+    const payload = nutrition(() =>
+      foodPayload({
+        name: args.name,
+        meal: args.meal,
+        servings: args.servings,
+        nutrients: args.nutrients,
+        estimated: args.estimated,
+        source: args.estimated ? "claude_estimate" : "label",
+        seafood_oz: args.seafood_oz,
+      })
+    );
+    const eatenAt = requiredTimestamp(args, "eaten_at");
+    const row = await db.insert<{ id: string }>("care_logs", {
+      family_id: familyId,
+      person_user_id: person.id,
+      kind: "food",
+      at: eatenAt,
+      payload,
+      written_by: WRITTEN_BY,
+    });
+    const tz = await familyTz(db, familyId);
+    const summary = await nutritionDay(db, familyId, person, localDate(Date.parse(eatenAt), tz), tz);
+    return { recorded: "food", id: row.id, estimated: payload.estimated === true, today: summary.main, still_short: summary.still_short };
+  },
+  async log_activity(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const payload = nutrition(() =>
+      movePayload({ activity: args.activity, minutes: args.minutes, steps: args.steps, note: args.note, source: "claude_chat" })
+    );
+    const row = await db.insert<{ id: string }>("care_logs", {
+      family_id: familyId,
+      person_user_id: person.id,
+      kind: "move",
+      at: requiredTimestamp(args, "at"),
+      payload,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "activity", id: row.id, minutes: payload.minutes };
+  },
+  async nutrition_today(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const tz = await familyTz(db, familyId);
+    const date = str(args, "date", false) || localDate(Date.now(), tz);
+    return nutritionDay(db, familyId, person, date, tz);
+  },
+  async set_food_goal(db, _userId, familyId, args) {
+    const person = await resolvePerson(db, str(args, "person"));
+    const tz = await familyTz(db, familyId);
+    const startDate = str(args, "start_date", false) || localDate(Date.now(), tz);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ToolError("start_date must be YYYY-MM-DD");
+    const current = await db.select<{ daily_kcal_target: number | null; micronutrient_targets: Nutrients | null }>(
+      "person_nutrition_targets",
+      `select=daily_kcal_target,micronutrient_targets&user_id=eq.${person.id}&start_date=lte.${startDate}&order=start_date.desc,created_at.desc&limit=1`
+    );
+    let kcal = current[0]?.daily_kcal_target ?? null;
+    if (args.kcal !== undefined && args.kcal !== null) {
+      const k = Number(args.kcal);
+      if (k === 0) kcal = null;
+      else if (!Number.isInteger(k) || k < 1000 || k > 5000) throw new ToolError("kcal must be a whole number between 1000 and 5000 (0 clears it)");
+      else kcal = k;
+    }
+    const overrides = { ...(current[0]?.micronutrient_targets ?? {}), ...nutrition(() => cleanNutrients(args.targets)) };
+    delete (overrides as Record<string, unknown>).kcal;
+    const row = await db.insert<{ id: string }>("person_nutrition_targets", {
+      family_id: familyId,
+      user_id: person.id,
+      start_date: startDate,
+      daily_kcal_target: kcal,
+      micronutrient_targets: Object.keys(overrides).length ? overrides : null,
+      notes: str(args, "note", false) || null,
+    });
+    return { recorded: "food_goal", id: row.id, from: startDate, kcal, targets: overrides };
+  },
 };
+
+/** NutritionError is the model's to fix, like any other bad argument. */
+function nutrition<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof NutritionError) throw new ToolError(e.message);
+    throw e;
+  }
+}
+
+async function familyTz(db: UserClient, familyId: string): Promise<string> {
+  const rows = await db.select<{ timezone: string | null }>("families", `select=timezone&id=eq.${familyId}`);
+  return rows[0]?.timezone || "America/New_York";
+}
+
+/** One person's food and movement for a local day, against her targets. */
+async function nutritionDay(db: UserClient, familyId: string, person: { id: string; name: string }, date: string, tz: string) {
+  const [start, end] = nutrition(() => localDayBounds(date, tz));
+  const weekStart = end - 7 * 86_400_000;
+  const [profiles, goals, food, move] = await Promise.all([
+    db.select<{ lactating: boolean; delivery_type: string | null; exercise_cleared_on: string | null; conditions: string[] }>(
+      "care_profiles",
+      `select=lactating,delivery_type,exercise_cleared_on,conditions&person_user_id=eq.${person.id}`
+    ),
+    db.select<{ daily_kcal_target: number | null; micronutrient_targets: Nutrients | null; start_date: string }>(
+      "person_nutrition_targets",
+      `select=daily_kcal_target,micronutrient_targets,start_date&user_id=eq.${person.id}&start_date=lte.${date}&order=start_date.desc,created_at.desc&limit=1`
+    ),
+    db.select<{ at: string; payload: FoodPayload }>(
+      "care_logs",
+      `select=at,payload&family_id=eq.${familyId}&person_user_id=eq.${person.id}&kind=eq.food` +
+        `&at=gte.${encodeURIComponent(new Date(weekStart).toISOString())}&at=lt.${encodeURIComponent(new Date(end).toISOString())}&order=at.asc&limit=500`
+    ),
+    db.select<{ at: string; payload: MovePayload }>(
+      "care_logs",
+      `select=at,payload&family_id=eq.${familyId}&person_user_id=eq.${person.id}&kind=eq.move` +
+        `&at=gte.${encodeURIComponent(new Date(weekStart).toISOString())}&at=lt.${encodeURIComponent(new Date(end).toISOString())}&order=at.asc&limit=500`
+    ),
+  ]);
+  const profile = profiles[0] ?? null;
+  const goal = goals[0];
+  const targets = targetsFor(!!profile?.lactating, { kcal: goal?.daily_kcal_target, overrides: goal?.micronutrient_targets });
+  const today = food.filter((r) => Date.parse(r.at) >= start);
+  const rows = progress(dayTotals(today), targets).map((r) => ({
+    nutrient: r.key,
+    value: r.value,
+    unit: r.unit,
+    target: r.target?.value ?? null,
+    target_from: r.target ? (r.target.from === "goal" ? "her own goal" : "breastfeeding intake (RDA/AI)") : null,
+    percent: r.share === null ? null : Math.round(r.share * 100),
+    from_foods: `${r.covered} of ${r.entries}`,
+  }));
+  const gate = exerciseGate(profile);
+  const seafood = food.reduce((s, r) => s + (Number(r.payload.seafood_oz) || 0), 0);
+  return {
+    person: person.name,
+    date,
+    breastfeeding_targets: !!profile?.lactating,
+    foods: today.map((r) => ({ at: r.at, name: r.payload.name, meal: r.payload.meal ?? null, estimated: r.payload.estimated === true })),
+    main: rows.filter((r) => ["protein_g", "fiber_g", "kcal"].includes(r.nutrient)),
+    vitamins_minerals: rows.filter((r) => !["protein_g", "fiber_g", "kcal"].includes(r.nutrient)),
+    still_short: rows.filter((r) => r.percent !== null && r.percent < 100 && ["protein_g", "fiber_g", "kcal"].includes(r.nutrient)).map((r) => r.nutrient),
+    seafood_oz_last_7_days: profile?.lactating ? { value: seafood, guidance_oz: `${SEAFOOD.minOz}-${SEAFOOD.maxOz}` } : undefined,
+    movement: {
+      minutes_today: minutesSince(move, start, end),
+      minutes_last_7_days: minutesSince(move, weekStart, end),
+      weekly_goal: gate.gated ? null : WEEKLY_MINUTES,
+      exercise_cleared_on: profile?.exercise_cleared_on ?? null,
+      guidance: gate.text,
+    },
+    guidance: {
+      calories: CALORIE_GUIDANCE.map((g) => `${g.text} (${g.source.title})`),
+      seafood: SEAFOOD.text,
+      supplements: SUPPLEMENT_NOTE.text,
+      rheumatoid_arthritis: profile?.conditions?.includes("rheumatoid_arthritis") ? RA_GUIDANCE.map((g) => `${g.text} (${g.strength})`) : undefined,
+    },
+    note: "Published intakes, not a plan for her. Totals only count what was logged; estimated entries are Claude's guesses.",
+  };
+}

@@ -566,27 +566,36 @@ export type Database = {
       care_profiles: {
         Row: {
           bp_reminders: boolean
+          conditions: string[]
           delivered_on: string | null
           delivery_type: string | null
+          exercise_cleared_on: string | null
           family_id: string
+          lactating: boolean
           notes: string | null
           person_user_id: string
           updated_at: string
         }
         Insert: {
           bp_reminders?: boolean
+          conditions?: string[]
           delivered_on?: string | null
           delivery_type?: string | null
+          exercise_cleared_on?: string | null
           family_id: string
+          lactating?: boolean
           notes?: string | null
           person_user_id: string
           updated_at?: string
         }
         Update: {
           bp_reminders?: boolean
+          conditions?: string[]
           delivered_on?: string | null
           delivery_type?: string | null
+          exercise_cleared_on?: string | null
           family_id?: string
+          lactating?: boolean
           notes?: string | null
           person_user_id?: string
           updated_at?: string

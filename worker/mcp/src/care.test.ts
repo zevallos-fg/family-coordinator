@@ -44,3 +44,67 @@ describe("connector care tools", () => {
     await expect(HANDLERS.log_care_dose(db, "u", "fam", { person: "Yenny", medicine: "x", taken_at: "2026-10-05T20:00:00-04:00" })).rejects.toBeInstanceOf(ToolError);
   });
 });
+
+describe("connector food and movement tools", () => {
+  const PROFILE = [{ lactating: true, delivery_type: "cesarean", exercise_cleared_on: null, conditions: ["rheumatoid_arthritis"] }];
+  it("log_food needs an explicit estimated flag and refuses bad numbers", async () => {
+    const { db, inserts } = fakeDb({ users: USERS });
+    const base = { person: "Yenny", name: "Yogurt", eaten_at: "2026-10-05T09:00:00-04:00", nutrients: { protein_g: 17 } };
+    await expect(HANDLERS.log_food(db, "u", "fam", base)).rejects.toThrow(/estimated/);
+    await expect(HANDLERS.log_food(db, "u", "fam", { ...base, estimated: true, nutrients: { protein_g: -3 } })).rejects.toBeInstanceOf(ToolError);
+    await expect(HANDLERS.log_food(db, "u", "fam", { ...base, estimated: true, eaten_at: undefined })).rejects.toBeInstanceOf(ToolError);
+    expect(inserts).toHaveLength(0);
+  });
+  it("log_food marks Claude's numbers as an estimate and returns today against the breastfeeding targets", async () => {
+    const { db, inserts } = fakeDb({
+      users: USERS,
+      families: [{ timezone: "America/New_York" }],
+      care_profiles: PROFILE,
+      care_logs: [{ at: "2026-10-05T13:00:00Z", payload: { name: "Yogurt", nutrients: { protein_g: 17, fiber_g: 0 } } }],
+    });
+    const out = (await HANDLERS.log_food(db, "u", "fam", {
+      person: "yenny",
+      name: "Yogurt",
+      eaten_at: "2026-10-05T09:00:00-04:00",
+      nutrients: { protein_g: 17, fiber_g: 0, made_up: 4 },
+      estimated: true,
+    })) as { estimated: boolean; today: Array<{ nutrient: string; target: number | null; percent: number | null }>; still_short: string[] };
+    expect(inserts[0]).toMatchObject({ table: "care_logs", row: { kind: "food", person_user_id: "y", written_by: "claude_chat", payload: { estimated: true, source: "claude_estimate", nutrients: { protein_g: 17, fiber_g: 0 } } } });
+    expect((inserts[0].row.payload as { nutrients: object }).nutrients).not.toHaveProperty("made_up");
+    expect(out.estimated).toBe(true);
+    expect(out.today.find((r) => r.nutrient === "protein_g")).toMatchObject({ target: 71, percent: 24 });
+    expect(out.today.find((r) => r.nutrient === "kcal")?.target).toBeNull();
+    expect(out.still_short).toEqual(["protein_g", "fiber_g"]);
+  });
+  it("nutrition_today: no exercise goal after a cesarean until cleared; RA guidance when on file", async () => {
+    const { db } = fakeDb({ users: USERS, families: [{ timezone: "America/New_York" }], care_profiles: PROFILE, care_logs: [] });
+    const out = (await HANDLERS.nutrition_today(db, "u", "fam", { person: "Yenny", date: "2026-10-05" })) as {
+      movement: { weekly_goal: number | null; guidance: string };
+      guidance: { rheumatoid_arthritis?: string[] };
+    };
+    expect(out.movement.weekly_goal).toBeNull();
+    expect(out.movement.guidance).toMatch(/ask the OB/);
+    expect(out.guidance.rheumatoid_arthritis?.[0]).toMatch(/Strong/);
+    await expect(HANDLERS.nutrition_today(db, "u", "fam", { person: "Yenny", date: "Oct 5" })).rejects.toBeInstanceOf(ToolError);
+  });
+  it("log_activity validates", async () => {
+    const { db, inserts } = fakeDb({ users: USERS });
+    await expect(HANDLERS.log_activity(db, "u", "fam", { person: "Yenny", activity: "sprint", minutes: 10, at: "2026-10-05T09:00:00-04:00" })).rejects.toBeInstanceOf(ToolError);
+    await expect(HANDLERS.log_activity(db, "u", "fam", { person: "Yenny", activity: "walk", minutes: 0, at: "2026-10-05T09:00:00-04:00" })).rejects.toBeInstanceOf(ToolError);
+    await HANDLERS.log_activity(db, "u", "fam", { person: "Yenny", activity: "walk", minutes: 12, at: "2026-10-05T09:00:00-04:00" });
+    expect(inserts[0].row).toMatchObject({ kind: "move", payload: { activity: "walk", minutes: 12, source: "claude_chat" } });
+  });
+  it("set_food_goal refuses an implausible calorie goal and keeps earlier targets", async () => {
+    const { db, inserts } = fakeDb({
+      users: USERS,
+      families: [{ timezone: "America/New_York" }],
+      person_nutrition_targets: [{ daily_kcal_target: null, micronutrient_targets: { protein_g: 85 } }],
+    });
+    await expect(HANDLERS.set_food_goal(db, "u", "fam", { person: "Yenny", kcal: 800 })).rejects.toBeInstanceOf(ToolError);
+    await HANDLERS.set_food_goal(db, "u", "fam", { person: "Yenny", kcal: 2400, targets: { fiber_g: 32 }, start_date: "2026-10-05", note: "dietitian" });
+    expect(inserts[0]).toMatchObject({
+      table: "person_nutrition_targets",
+      row: { user_id: "y", start_date: "2026-10-05", daily_kcal_target: 2400, micronutrient_targets: { protein_g: 85, fiber_g: 32 }, notes: "dietitian" },
+    });
+  });
+});

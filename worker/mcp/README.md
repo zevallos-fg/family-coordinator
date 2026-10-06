@@ -87,6 +87,10 @@ All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 | `log_care_dose` | `care_logs` (dose) |
 | `log_checkin` | `care_logs` (checkin); returns matched POST-BIRTH warning signs |
 | `add_care_note` | `care_logs` (note) |
+| `log_food` | `care_logs` (food); nutrients validated by `lib/care/nutrition.ts`; Claude's numbers carry `estimated: true` |
+| `log_activity` | `care_logs` (move) |
+| `nutrition_today` | reads `care_profiles`, `person_nutrition_targets`, `care_logs` — a day's food against the sourced breastfeeding intakes, plus movement and the exercise-clearance gate |
+| `set_food_goal` | `person_nutrition_targets` (append; latest start_date in effect wins) |
 
 The baby-log tools build their rows with `src/baby.ts`, which is tested against
 the app's own builders (`src/baby.test.ts`, run by the app's vitest): a feed

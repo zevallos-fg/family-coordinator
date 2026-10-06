@@ -13,6 +13,8 @@ import { BpSection, readingsOf } from "./BpSection";
 import { MedsSection } from "./MedsSection";
 import { CheckInSection } from "./CheckInSection";
 import { NotesSection } from "./NotesSection";
+import { FoodSection } from "./FoodSection";
+import { MoveSection, WeekTable } from "./MoveSection";
 import { SupportLines, WarningSigns } from "./WarningSigns";
 
 type Person = { id: string; name: string };
@@ -74,7 +76,8 @@ function useVisits(personId: string | null) {
  * /care — a grown-up's recovery and health, starting with Yenny after birth:
  * blood pressure against the published action thresholds, medicines with
  * reminders, a quick check-in that knows the warning signs, notes, her visits,
- * and today's nursing from the baby log. Everything here is also what Claude
+ * today's nursing from the baby log, food against the breastfeeding intakes,
+ * and movement. Everything here is also what Claude
  * reads (family_brief → care) before answering her questions in chat.
  */
 export function CarePage({ familyId, people, defaultPersonId }: { familyId: string; people: Person[]; defaultPersonId: string }) {
@@ -86,6 +89,8 @@ export function CarePage({ familyId, people, defaultPersonId }: { familyId: stri
   const [editing, setEditing] = useState(false);
   const [delivered, setDelivered] = useState("");
   const [type, setType] = useState<"cesarean" | "vaginal" | "">("");
+  const [lactating, setLactating] = useState(false);
+  const [ra, setRa] = useState(false);
 
   useEffect(() => {
     const tick = () => startTransition(() => setNowMs(Date.now()));
@@ -119,6 +124,8 @@ export function CarePage({ familyId, people, defaultPersonId }: { familyId: stri
         family_id: familyId,
         delivered_on: delivered || null,
         delivery_type: type || null,
+        lactating,
+        conditions: ra ? ["rheumatoid_arthritis"] : [],
         bp_reminders: profile?.bp_reminders ?? false,
         updated_at: new Date().toISOString(),
       });
@@ -170,6 +177,8 @@ export function CarePage({ familyId, people, defaultPersonId }: { familyId: stri
             onClick={() => {
               setDelivered(profile?.delivered_on ?? "");
               setType((profile?.delivery_type as "cesarean" | "vaginal" | null) ?? "");
+              setLactating(!!profile?.lactating);
+              setRa(!!profile?.conditions?.includes("rheumatoid_arthritis"));
               setEditing(true);
             }}
             className="text-left text-sm text-stone-600"
@@ -186,6 +195,12 @@ export function CarePage({ familyId, people, defaultPersonId }: { familyId: stri
               <option value="cesarean">C-section</option>
               <option value="vaginal">Vaginal</option>
             </select>
+            <label className="flex items-center gap-1.5 text-xs text-stone-700">
+              <input type="checkbox" checked={lactating} onChange={(e) => setLactating(e.target.checked)} className="h-4 w-4 accent-violet-600" /> Breastfeeding
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-stone-700">
+              <input type="checkbox" checked={ra} onChange={(e) => setRa(e.target.checked)} className="h-4 w-4 accent-violet-600" /> Rheumatoid arthritis
+            </label>
             <button type="button" onClick={() => void saveProfile()} className="rounded-lg bg-violet-600 px-3 py-1.5 text-sm text-white">
               Save
             </button>
@@ -238,6 +253,20 @@ export function CarePage({ familyId, people, defaultPersonId }: { familyId: stri
           </span>
         </Link>
       )}
+
+      <FoodSection
+        familyId={familyId}
+        personId={personId}
+        first={first}
+        logs={care.logs}
+        profile={profile}
+        goals={care.goals}
+        nowMs={nowMs}
+        onSaved={care.refresh}
+      />
+      <MoveSection familyId={familyId} personId={personId} first={first} logs={care.logs} profile={profile} nowMs={nowMs} onSaved={care.refresh} />
+      <WeekTable logs={care.logs} profile={profile} goals={care.goals} nowMs={nowMs} />
+
 
       <section className="space-y-2">
         <h2 className="text-xs uppercase tracking-wide text-stone-400">{first}&apos;s visits</h2>
