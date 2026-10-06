@@ -21,6 +21,8 @@ import {
   type MoveRow,
 } from "@/lib/care/nutrition";
 import { foodRows } from "./FoodSection";
+import { NoteItem } from "./ExpertFood";
+import { AFTER_CLEARANCE, BEFORE_CLEARANCE, STRENGTH_ACTIVITIES, STRENGTH_START_PER_WEEK } from "@/lib/care/experts";
 import type { CareLog, CareProfile, FoodGoals } from "./useCare";
 
 const field =
@@ -74,6 +76,7 @@ export function MoveSection({
   const weekMin = minutesSince(rows, nowMs - 7 * 86_400_000);
   const gate = exerciseGate(profile);
   const ra = profile?.conditions?.includes("rheumatoid_arthritis");
+  const strengthWeek = rows.filter((r) => STRENGTH_ACTIVITIES.includes(r.payload?.activity) && Date.parse(r.at) >= nowMs - 7 * 86_400_000).length;
 
   async function log(payload: MovePayload) {
     const { error } = await createClient()
@@ -142,6 +145,12 @@ export function MoveSection({
           )}
         </div>
 
+        {!gate.gated && (
+          <p className="text-xs text-stone-600" data-testid="move-strength">
+            Strength sessions, last 7 days: <span className="tabular-nums text-stone-800">{strengthWeek}</span> · Dr. Lyon starts at{" "}
+            {STRENGTH_START_PER_WEEK} a week
+          </p>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {QUICK.map((q) => (
             <button
@@ -227,6 +236,12 @@ export function MoveSection({
             <p className="pt-1">{BREASTFEEDING_EXERCISE.text}</p>
           </>
         )}
+        <div className="space-y-1.5 pt-1.5" data-testid="move-experts">
+          <p className="font-medium text-stone-700">{gate.gated ? "Dr. Lyon & Dr. Sims, until she's cleared" : "Dr. Lyon & Dr. Sims, building back"}</p>
+          {(gate.gated ? BEFORE_CLEARANCE : AFTER_CLEARANCE).map((n, i) => (
+            <NoteItem key={i} n={n} />
+          ))}
+        </div>
         {ra && (
           <div className="space-y-1.5 pt-1.5" data-testid="move-ra">
             <p className="font-medium text-stone-700">Rheumatoid arthritis</p>

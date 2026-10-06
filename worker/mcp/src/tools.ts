@@ -30,6 +30,16 @@ import {
   type MovePayload,
   type Nutrients,
 } from "../../../lib/care/nutrition";
+// Dr. Lyon and Dr. Sims, quoted from their own pages, kept apart from the defaults.
+import {
+  AFTER_CLEARANCE,
+  BEFORE_CLEARANCE,
+  NOT_APPLIED,
+  PER_MEAL_NOTES,
+  PER_MEAL_PROTEIN,
+  PROTEIN_METHODS,
+  proteinByMeal,
+} from "../../../lib/care/experts";
 
 export class ToolError extends Error {}
 
@@ -650,8 +660,10 @@ export const TOOL_DEFINITIONS = [
     name: "set_food_goal",
     description:
       "Save a personal food goal the person stated — a daily calorie goal, or a different target for a nutrient — usually " +
-      "from her OB, rheumatologist or a dietitian. Never propose a calorie number yourself. Takes effect from start_date " +
-      "(default today); earlier goals stay in the history.",
+      "from her OB, rheumatologist or a dietitian, or a protein goal she chose from Dr. Lyon's or Dr. Sims's method " +
+      "(nutrition_today lists both; ask for the weight each one needs). Never propose a calorie number yourself. Put where " +
+      "it came from in note, starting 'Protein — ' for a protein goal, e.g. 'Protein — Dr. Lyon: 1 g/lb × 140 lb goal weight'. " +
+      "Takes effect from start_date (default today); earlier goals stay in the history.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1263,9 +1275,9 @@ async function nutritionDay(db: UserClient, familyId: string, person: { id: stri
       "care_profiles",
       `select=lactating,delivery_type,exercise_cleared_on,conditions&person_user_id=eq.${person.id}`
     ),
-    db.select<{ daily_kcal_target: number | null; micronutrient_targets: Nutrients | null; start_date: string }>(
+    db.select<{ daily_kcal_target: number | null; micronutrient_targets: Nutrients | null; start_date: string; notes: string | null }>(
       "person_nutrition_targets",
-      `select=daily_kcal_target,micronutrient_targets,start_date&user_id=eq.${person.id}&start_date=lte.${date}&order=start_date.desc,created_at.desc&limit=1`
+      `select=daily_kcal_target,micronutrient_targets,start_date,notes&user_id=eq.${person.id}&start_date=lte.${date}&order=start_date.desc,created_at.desc&limit=1`
     ),
     db.select<{ at: string; payload: FoodPayload }>(
       "care_logs",
@@ -1314,6 +1326,23 @@ async function nutritionDay(db: UserClient, familyId: string, person: { id: stri
       seafood: SEAFOOD.text,
       supplements: SUPPLEMENT_NOTE.text,
       rheumatoid_arthritis: profile?.conditions?.includes("rheumatoid_arthritis") ? RA_GUIDANCE.map((g) => `${g.text} (${g.strength})`) : undefined,
+    },
+    goal_note: goal?.notes ?? null,
+    expert_practice: {
+      note:
+        "Dr. Gabrielle Lyon and Dr. Stacy Sims, quoted from their own pages. Neither has published guidance for breastfeeding, " +
+        "post-cesarean recovery or RA; present these as their general practice, attributed, alongside — not instead of — the published intakes.",
+      protein_by_meal: proteinByMeal(today).map((m) => ({ ...m, reaches_30g: m.meal !== "snack" ? m.grams >= PER_MEAL_PROTEIN : null })),
+      per_meal: PER_MEAL_NOTES.map((n) => ({ who: n.who, says: n.quote, source: n.source.url })),
+      protein_goal_methods: Object.values(PROTEIN_METHODS).map((m) => ({
+        who: m.id,
+        rule: m.summary,
+        weight: m.weightBasis === "goal" ? "her goal weight — ask her; never assume one" : "her current weight — ask her",
+        says: m.quote,
+        source: m.source.url,
+      })),
+      movement: (gate.gated ? BEFORE_CLEARANCE : AFTER_CLEARANCE).map((n) => ({ who: n.who, says: n.quote, source: n.source.url })),
+      not_applied_here: NOT_APPLIED.map((n) => n.text),
     },
     note: "Published intakes, not a plan for her. Totals only count what was logged; estimated entries are Claude's guesses.",
   };

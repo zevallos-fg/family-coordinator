@@ -29,6 +29,7 @@ import {
   type ProgressRow,
 } from "@/lib/care/nutrition";
 import type { CareLog, CareProfile, FoodGoals } from "./useCare";
+import { ExpertFoodDetails, MealProteinRow, ProteinGoalPicker, proteinGoalSource } from "./ExpertFood";
 
 const field =
   "w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-violet-600";
@@ -112,6 +113,7 @@ export function FoodSection({
   const [guess, setGuess] = useState(false);
   const [busy, setBusy] = useState(false);
   const [kcalGoal, setKcalGoal] = useState<string | null>(null);
+  const [pickingProtein, setPickingProtein] = useState(false);
 
   const all = foodRows(logs);
   const dayStart = startOfDay(nowMs);
@@ -187,6 +189,7 @@ export function FoodSection({
         start_date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
         daily_kcal_target: v,
         micronutrient_targets: (goals.overrides ?? null) as never,
+        notes: goals.note ?? null,
       });
     if (error) toast.error("That didn't save.");
     else {
@@ -220,6 +223,19 @@ export function FoodSection({
                   </button>
                 )}
               </span>
+            </div>
+          ) : r.key === "protein_g" ? (
+            <div key={r.key} className="space-y-2">
+              <Bar row={r} big />
+              {!pickingProtein && (
+                <button type="button" onClick={() => setPickingProtein(true)} className="-mt-1 text-[11px] text-stone-500" data-testid="protein-goal-open">
+                  Goal: {proteinGoalSource(goals) ?? (lactating ? "breastfeeding RDA" : "none set")} · change
+                </button>
+              )}
+              {pickingProtein && (
+                <ProteinGoalPicker familyId={familyId} personId={personId} goals={goals} onSaved={onSaved} onClose={() => setPickingProtein(false)} />
+              )}
+              <MealProteinRow today={today} />
             </div>
           ) : (
             <Bar key={r.key} row={r} big />
@@ -398,6 +414,8 @@ export function FoodSection({
         </button>
       )}
       <p className="text-xs text-stone-500">Or tell Claude what {first} ate — it estimates the numbers, logs them here, and marks them est.</p>
+
+      <ExpertFoodDetails />
 
       <details className="rounded-xl bg-stone-100 px-3 py-2.5 text-xs text-stone-600">
         <summary className="cursor-pointer list-none text-stone-700">Where these come from</summary>

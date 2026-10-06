@@ -108,3 +108,27 @@ describe("connector food and movement tools", () => {
     });
   });
 });
+
+describe("connector expert practice", () => {
+  it("nutrition_today attributes Dr. Lyon and Dr. Sims and says where they don't reach", async () => {
+    const { db } = fakeDb({
+      users: USERS,
+      families: [{ timezone: "America/New_York" }],
+      care_profiles: [{ lactating: true, delivery_type: "cesarean", exercise_cleared_on: null, conditions: [] }],
+      care_logs: [{ at: "2026-10-05T13:00:00Z", payload: { name: "Eggs", meal: "breakfast", nutrients: { protein_g: 31 } } }],
+    });
+    const out = (await HANDLERS.nutrition_today(db, "u", "fam", { person: "Yenny", date: "2026-10-05" })) as {
+      expert_practice: {
+        protein_by_meal: Array<{ meal: string; grams: number; reaches_30g: boolean | null }>;
+        movement: Array<{ who: string; says: string }>;
+        protein_goal_methods: Array<{ who: string; weight: string }>;
+        not_applied_here: string[];
+      };
+    };
+    const e = out.expert_practice;
+    expect(e.protein_by_meal[0]).toMatchObject({ meal: "breakfast", grams: 31, reaches_30g: true });
+    expect(e.movement.find((m) => m.who === "lyon")?.says).toMatch(/doctor/);
+    expect(e.protein_goal_methods.find((m) => m.who === "lyon")?.weight).toMatch(/goal weight/);
+    expect(e.not_applied_here[0]).toMatch(/breastfeeding/);
+  });
+});

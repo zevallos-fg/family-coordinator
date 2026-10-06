@@ -8,7 +8,7 @@ import type { Nutrients } from "@/lib/care/nutrition";
 export type CareLog = Database["public"]["Tables"]["care_logs"]["Row"];
 export type CareMed = Database["public"]["Views"]["v_care_medication_status"]["Row"];
 export type CareProfile = Database["public"]["Tables"]["care_profiles"]["Row"];
-export type FoodGoals = { kcal: number | null; overrides: Nutrients | null };
+export type FoodGoals = { kcal: number | null; overrides: Nutrients | null; note?: string | null };
 
 const NO_GOALS: FoodGoals = { kcal: null, overrides: null };
 
@@ -39,7 +39,7 @@ export function useCare(personId: string | null) {
         // Goals are appended with a start date; the latest one in effect wins.
         supabase
           .from("person_nutrition_targets")
-          .select("daily_kcal_target, micronutrient_targets")
+          .select("daily_kcal_target, micronutrient_targets, notes")
           .eq("user_id", personId)
           .lte("start_date", localToday)
           .order("start_date", { ascending: false })
@@ -53,7 +53,7 @@ export function useCare(personId: string | null) {
         logs: (logs.data ?? []) as CareLog[],
         meds: (meds.data ?? []) as CareMed[],
         profile: (profile.data ?? null) as CareProfile | null,
-        goals: g ? { kcal: g.daily_kcal_target, overrides: (g.micronutrient_targets ?? null) as Nutrients | null } : NO_GOALS,
+        goals: g ? { kcal: g.daily_kcal_target, overrides: (g.micronutrient_targets ?? null) as Nutrients | null, note: g.notes } : NO_GOALS,
         failed: !!(logs.error || meds.error || profile.error || goals.error),
       });
     })();
