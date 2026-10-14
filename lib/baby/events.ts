@@ -1,4 +1,7 @@
 import type { Database } from "@/lib/supabase/database.types";
+import { SLEEP_LOCATIONS } from "./locations";
+
+export { SLEEP_LOCATIONS };
 
 export type BabyEvent = Database["public"]["Tables"]["baby_events"]["Row"];
 export type ContractionRow = Database["public"]["Views"]["v_contractions_recent"]["Row"];
@@ -104,7 +107,7 @@ export const DETAIL_CHIPS: Record<BabyEventType, ChipGroup[]> = {
     },
   ],
   pump: [{ key: "side", label: "Side", options: ["left", "right", "both"] }],
-  sleep: [{ key: "location", label: "Where", options: ["crib", "bassinet", "arms", "stroller", "car"] }],
+  sleep: [{ key: "location", label: "Where", options: SLEEP_LOCATIONS }],
 };
 
 export const EVENT_LABEL: Record<string, string> = {

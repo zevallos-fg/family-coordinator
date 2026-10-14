@@ -12,6 +12,7 @@ import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 import { logCompleted, toggleTimer, updateEvent } from "@/lib/baby/write";
 import { visibleChipGroups, type BabyEventType } from "@/lib/baby/events";
 import { formatClock, secondsBetween } from "@/lib/baby/format";
+import { AAP_SAFE_SLEEP } from "@/lib/baby/glance";
 import type { Json } from "@/lib/supabase/database.types";
 
 /**
@@ -156,13 +157,21 @@ export function TimerPage({
                           : "bg-white text-stone-600 ring-1 ring-stone-200"
                       }`}
                     >
-                      {option}
+                      {group.optionLabels?.[option] ?? option}
                     </button>
                   ))}
                 </div>
               </div>
             );
           })}
+          {type === "sleep" && payload.location === "co-sleep" && (
+            <p className="text-xs text-stone-500" data-testid="co-sleep-note">
+              If that means the same bed: the AAP advises the same room, not the same bed, for at least the first six months.{" "}
+              <a href={AAP_SAFE_SLEEP.url} target="_blank" rel="noreferrer" className="text-amber-700 underline underline-offset-2">
+                AAP safe sleep
+              </a>
+            </p>
+          )}
         </section>
       )}
       <EventHistory

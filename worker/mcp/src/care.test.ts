@@ -132,3 +132,17 @@ describe("connector expert practice", () => {
     expect(e.not_applied_here[0]).toMatch(/breastfeeding/);
   });
 });
+
+describe("log_sleep location", () => {
+  const KIDS = [{ id: "e", name: "Evaluna", birth_date: "2026-09-30" }];
+  it("records co-sleep and refuses an unknown place", async () => {
+    const { db, inserts } = fakeDb({ users: USERS, kids: KIDS, baby_events: [] });
+    await HANDLERS.log_sleep(db, "u", "fam", { kid: "Evaluna", started_at: "2026-10-13T01:00:00-04:00", ended_at: "2026-10-13T03:00:00-04:00", location: "co-sleep" });
+    expect(inserts[0].row).toMatchObject({ event_type: "sleep", payload: { location: "co-sleep" } });
+    await expect(
+      HANDLERS.log_sleep(db, "u", "fam", { kid: "Evaluna", started_at: "2026-10-13T01:00:00-04:00", ended_at: "2026-10-13T03:00:00-04:00", location: "sofa" })
+    ).rejects.toBeInstanceOf(ToolError);
+    await HANDLERS.log_sleep(db, "u", "fam", { kid: "Evaluna", started_at: "2026-10-13T04:00:00-04:00", ended_at: "2026-10-13T05:00:00-04:00" });
+    expect(inserts[1].row.payload).toEqual({});
+  });
+});

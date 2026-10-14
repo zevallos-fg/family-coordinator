@@ -44,6 +44,7 @@ describe("visibleChipGroups — diaper", () => {
 describe("visibleChipGroups — other types", () => {
   it("passes through groups that have no condition", () => {
     expect(visibleChipGroups("sleep", {})).toEqual(DETAIL_CHIPS.sleep);
+    expect(DETAIL_CHIPS.sleep[0].options).toContain("co-sleep");
     expect(visibleChipGroups("feed", {})).toEqual(DETAIL_CHIPS.feed);
   });
 

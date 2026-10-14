@@ -1,5 +1,6 @@
 import { UserClient } from "./supabase";
 import { BuildError, bottleFeed, breastFeed, citations, diaper, growth } from "./baby";
+import { SLEEP_LOCATIONS } from "../../../lib/baby/locations";
 // Shared with the app so an event booked in chat starts with exactly the same
 // sourced checklist as one added on the Plan screen.
 import { starterItems } from "../../../lib/plan/events";
@@ -365,6 +366,7 @@ export const TOOL_DEFINITIONS = [
         kid: KID,
         started_at: WHEN("When the sleep started."),
         ended_at: { type: "string", description: "ISO-8601. When they woke. Omit if still asleep." },
+        location: { type: "string", enum: SLEEP_LOCATIONS, description: "Where they slept, if said. 'co-sleep' = with a parent." },
         note: { type: "string" },
       },
       required: ["kid", "started_at"],
@@ -899,7 +901,7 @@ export const HANDLERS: Record<string, Handler> = {
       event_type: "sleep",
       started_at: startedAt,
       ended_at: endedAt,
-      payload: {},
+      payload: args.location === undefined || args.location === null || args.location === "" ? {} : { location: oneOf(args, "location", SLEEP_LOCATIONS) },
       note: str(args, "note", false) || null,
       logged_by_user_id: userId,
       written_by: WRITTEN_BY,
