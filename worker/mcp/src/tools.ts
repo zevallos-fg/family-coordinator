@@ -1,6 +1,7 @@
 import { UserClient } from "./supabase";
 import { BuildError, bottleFeed, breastFeed, citations, diaper, growth } from "./baby";
 import { SLEEP_LOCATIONS } from "../../../lib/baby/locations";
+import { spanProblem, startProblem } from "../../../lib/baby/plausible";
 // Shared with the app so an event booked in chat starts with exactly the same
 // sourced checklist as one added on the Plan screen.
 import { starterItems } from "../../../lib/plan/events";
@@ -887,6 +888,9 @@ export const HANDLERS: Record<string, Handler> = {
     if (endedAt && Date.parse(endedAt) < Date.parse(startedAt)) {
       throw new ToolError("ended_at is before started_at");
     }
+    // Same plausibility rule as the app (lib/baby/plausible.ts): no sleep runs past 16 hours.
+    const implausible = endedAt ? spanProblem(startedAt, endedAt) : startProblem(startedAt, Date.now());
+    if (implausible) throw new ToolError(implausible);
     if (!endedAt) {
       // An open sleep is a running timer; a second one would stack on the first.
       const open = await db.select<{ id: string }>(

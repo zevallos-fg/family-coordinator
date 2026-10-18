@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { startProblem } from "@/lib/baby/plausible";
 import { createClient } from "@/lib/supabase/client";
 import { BabyPageShell } from "./BabyPageShell";
 import { EventHistory, laneKey } from "./EventHistory";
@@ -96,6 +97,12 @@ export function FeedPage({ familyId }: { familyId: string }) {
     const supabase = createClient();
 
     if (!open) {
+      const problem = startProblem(start.instant(), new Date().getTime());
+      if (problem) {
+        setPending(false);
+        toast.error(problem);
+        return;
+      }
       const { error } = await supabase.rpc("fn_baby_log", {
         p_family_id: familyId,
         p_event_type: "feed",

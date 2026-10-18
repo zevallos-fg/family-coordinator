@@ -13,6 +13,8 @@
  * Counts are a rolling 24 hours, because that is how every source states them.
  */
 
+import { tooLong } from "./plausible";
+
 export interface GuideSource {
   title: string;
   url: string;
@@ -265,6 +267,8 @@ export function rolling24h(
     const start = Date.parse(e.started_at);
     if (!Number.isFinite(start)) continue;
     if (e.event_type === "sleep") {
+      // A finished sleep longer than any real one is a wrong date, not sleep.
+      if (e.ended_at && tooLong(Date.parse(e.ended_at) - start)) continue;
       const end = Math.min(e.ended_at ? Date.parse(e.ended_at) : nowMs, nowMs);
       const clipped = Math.max(start, from);
       if (end > clipped) sleeps.push([clipped, end]);

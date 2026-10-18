@@ -12,6 +12,7 @@ import { RangeTiles } from "./RangeTiles";
 import { GuideSheet } from "../GuideSheet";
 import { rangeTiles, type Tile } from "@/lib/baby/rangeTiles";
 import { guidesFor } from "@/lib/baby/glance";
+import { MAX_SPAN_HOURS, describeLong, implausible } from "@/lib/baby/plausible";
 import { eventDuration, eventSummary } from "@/lib/baby/summary";
 import { formatTimeOfDay } from "@/lib/baby/format";
 import {
@@ -121,7 +122,14 @@ export function ReportsPage({ familyId }: { familyId: string }) {
     today === null || selectedDay === null || weekEnd === null
       ? null
       : Math.min(addDays(weekEnd, -7), addDays(selectedDay, -1), addDays(today, -(view === "summary" ? range.days : 7) - 1));
-  const { events, failed } = useKidEvents(lane.kidId, since);
+  const { events: rawEvents, failed } = useKidEvents(lane.kidId, since);
+  // A sleep longer than any real one (a wrong start date) is left out of every
+  // total and chart, and named in a banner so it can be fixed.
+  const suspect = useMemo(() => (rawEvents && nowMs !== null ? implausible(rawEvents, nowMs) : []), [rawEvents, nowMs]);
+  const events = useMemo(
+    () => (rawEvents ? rawEvents.filter((e) => !suspect.some((x) => x.id === e.id)) : rawEvents),
+    [rawEvents, suspect]
+  );
 
   // The strip and the week view show the 7 days ending at weekEnd; picking a day
   // inside it doesn't move it.
@@ -300,6 +308,23 @@ export function ReportsPage({ familyId }: { familyId: string }) {
           >
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
+        </div>
+      )}
+
+      {suspect.length > 0 && (
+        <div className="space-y-1 rounded-xl bg-white px-3 py-2.5 text-xs text-stone-700 ring-2 ring-amber-600" data-testid="reports-suspect">
+          <p className="font-medium text-stone-800">
+            {suspect.length === 1 ? "One sleep is" : `${suspect.length} sleeps are`} longer than {MAX_SPAN_HOURS} hours, so{" "}
+            {suspect.length === 1 ? "it's" : "they're"} left out of these totals:
+          </p>
+          {suspect.map((e) => (
+            <p key={e.id} className="tabular-nums">
+              {describeLong(e, nowMs)}
+            </p>
+          ))}
+          <Link href="/baby/sleep" className="inline-block text-amber-700 underline underline-offset-2">
+            Fix the start time in Sleep history
+          </Link>
         </div>
       )}
 

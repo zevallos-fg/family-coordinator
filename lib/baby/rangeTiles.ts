@@ -8,6 +8,8 @@ export type Tile = {
   range: string | null;
   status: RangeStatus | null;
   guide: Guide | null;
+  /** What the count is made of, e.g. "4 pee + 3 mixed": mixed counts as wet and dirty. */
+  detail?: string;
 };
 
 const H = 3_600_000;
@@ -29,6 +31,16 @@ export function rangeTiles(
   guideAt: (dayStart: number) => Guides,
   opts: { partial: boolean; average: boolean }
 ): Tile[] {
+  const usedFor = (key: keyof Guides) => {
+    const g = current[key];
+    return opts.average && g ? days.filter((d) => guideAt(d.dayStart)[key]?.range === g.range) : days;
+  };
+  const sum = (key: keyof Guides, f: (d: DayStats) => number) => {
+    const use = usedFor(key);
+    if (!use.length) return 0;
+    const total = use.reduce((a, d) => a + f(d), 0);
+    return opts.average ? total / use.length : total;
+  };
   const pick = (key: keyof Guides, f: (d: DayStats) => number, scale = 1) => {
     const g = current[key];
     const use = opts.average && g ? days.filter((d) => guideAt(d.dayStart)[key]?.range === g.range) : days;
@@ -42,11 +54,13 @@ export function rangeTiles(
   const feeds = pick("feeds", (d) => d.feeds);
   const wet = pick("wet", (d) => d.wet);
   const dirty = pick("stools", (d) => d.dirty);
+  const wetDetail = `${fmt(sum("wet", (d) => d.peeOnly))} pee + ${fmt(sum("wet", (d) => d.mixed))} mixed`;
+  const dirtyDetail = `${fmt(sum("stools", (d) => d.pooOnly))} poo + ${fmt(sum("stools", (d) => d.mixed))} mixed`;
   return [
     { key: "sleep", label: "Sleep", value: hm(sleep.v * H), range: current.sleep?.range ?? null, status: sleep.status, guide: current.sleep ?? null },
     { key: "feeds", label: "Feeds", value: fmt(feeds.v), range: current.feeds?.range ?? null, status: feeds.status, guide: current.feeds ?? null },
-    { key: "wet", label: "Wet diapers", value: fmt(wet.v), range: current.wet?.range ?? null, status: wet.status, guide: current.wet ?? null },
-    { key: "dirty", label: "Dirty diapers", value: fmt(dirty.v), range: current.stools?.range ?? null, status: dirty.status, guide: current.stools ?? null },
+    { key: "wet", label: "Wet diapers", value: fmt(wet.v), range: current.wet?.range ?? null, status: wet.status, guide: current.wet ?? null, detail: wetDetail },
+    { key: "dirty", label: "Dirty diapers", value: fmt(dirty.v), range: current.stools?.range ?? null, status: dirty.status, guide: current.stools ?? null, detail: dirtyDetail },
   ];
 }
 

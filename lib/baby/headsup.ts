@@ -10,6 +10,7 @@
  */
 
 import { ageInDays } from "./glance";
+import { MAX_SPAN_HOURS, spanMs, tooLong } from "./plausible";
 
 export type Note = {
   key: string;
@@ -124,6 +125,20 @@ export function headsUp(input: {
     } else if (e.event_type === "pump" && nowMs - started > 60 * 60_000) {
       out.push({ key: "open-pump", tone: "raise", title: `Pump timer running since ${clock(e.started_at)}`, href: "/baby/pump" });
     }
+  }
+
+  // ── Raise: a finished entry longer than any real one (a wrong start date) ──
+  for (const e of mine) {
+    if (e.ended_at === null || !["sleep", "feed", "pump"].includes(e.event_type)) continue;
+    const ms = spanMs(e, nowMs);
+    if (!tooLong(ms) || nowMs - Date.parse(e.ended_at) > 7 * 86_400_000) continue;
+    out.push({
+      key: `long-${e.event_type}-${e.started_at}`,
+      tone: "raise",
+      title: `A ${e.event_type} logged as ${Math.round(ms / 3_600_000)} hours`,
+      detail: `Started ${clock(e.started_at)} on ${new Date(e.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}. Longer than ${MAX_SPAN_HOURS} hours, so it's left out of the reports — fix the start time.`,
+      href: `/baby/${e.event_type}`,
+    });
   }
 
   // ── Raise: medicine due ────────────────────────────────────────────────────

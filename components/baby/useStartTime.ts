@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
 
 /**
@@ -18,6 +18,22 @@ import { fromLocalInputValue, toLocalInputValue } from "@/lib/baby/time-input";
  */
 export function useStartTime() {
   const [edited, setEdited] = useState<string | null>(null);
+  // Re-render on a timer and whenever the app comes back to the front, so the
+  // untouched control always shows today. Without this, a page left open since
+  // Thursday showed Thursday's date, and picking just the time on Sunday kept
+  // it: a sleep started at 3:19 am was stored as three days earlier.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    const id = setInterval(bump, 30_000);
+    document.addEventListener("visibilitychange", bump);
+    window.addEventListener("focus", bump);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", bump);
+      window.removeEventListener("focus", bump);
+    };
+  }, []);
 
   const set = useCallback((value: string) => {
     // Picking the current minute (or tapping "now") is the same as not editing.

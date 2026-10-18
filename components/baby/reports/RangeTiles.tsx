@@ -48,6 +48,7 @@ export function RangeTiles({
             >
               <span className="block text-[11px] text-stone-500">{t.label}</span>
               <span className="block text-xl tabular-nums text-stone-800">{t.value}</span>
+              {t.detail && <span className="block text-[11px] tabular-nums text-stone-600">{t.detail}</span>}
               <span className="block text-[11px] text-stone-500">{t.range ? `typ. ${t.range}` : "no range for this age"}</span>
               {s && (
                 <span className={`mt-1 flex items-center gap-1 text-[11px] ${out ? "font-medium text-amber-700" : "text-stone-500"}`}>

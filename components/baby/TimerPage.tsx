@@ -13,6 +13,7 @@ import { logCompleted, toggleTimer, updateEvent } from "@/lib/baby/write";
 import { visibleChipGroups, type BabyEventType } from "@/lib/baby/events";
 import { formatClock, secondsBetween } from "@/lib/baby/format";
 import { AAP_SAFE_SLEEP } from "@/lib/baby/glance";
+import { spanProblem, startProblem } from "@/lib/baby/plausible";
 import type { Json } from "@/lib/supabase/database.types";
 
 /**
@@ -63,6 +64,13 @@ export function TimerPage({
 
   async function toggle() {
     if (blocked || !lane.kidId) return;
+    if (!open) {
+      const problem = startProblem(start.instant(), Date.now());
+      if (problem) {
+        toast.error(problem);
+        return;
+      }
+    }
     setPending(true);
     const result = await toggleTimer({
       familyId,
@@ -203,12 +211,9 @@ function ManualTimerEntry({
   async function save() {
     const startIso = fromLocalInputValue(from);
     const endIso = fromLocalInputValue(to);
-    if (!startIso || !endIso) {
-      toast.error("Both times are needed.");
-      return;
-    }
-    if (new Date(endIso) <= new Date(startIso)) {
-      toast.error("The end has to be after the start.");
+    const problem = !startIso || !endIso ? "Both times are needed." : spanProblem(startIso, endIso);
+    if (problem || !startIso || !endIso) {
+      toast.error(problem ?? "Both times are needed.");
       return;
     }
     setSaving(true);
