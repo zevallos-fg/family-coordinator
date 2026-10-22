@@ -11,7 +11,7 @@ export type Kid = { id: string; name: string; birth_date: string | null };
  * forever, so asking whether one is "open" would light up a timer that never
  * stops.
  */
-const OPEN_TYPES = ["feed", "sleep", "pump", "contraction"];
+const OPEN_TYPES = ["feed", "sleep", "pump", "contraction", "settle"];
 
 export interface BabyLane {
   loading: boolean;

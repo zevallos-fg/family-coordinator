@@ -5,15 +5,17 @@ import { createClient } from "@/lib/supabase/client";
 import type { ReportEvent } from "@/lib/baby/reports";
 
 const PAGE = 1000;
+const DEFAULT_TYPES = ["sleep", "feed", "diaper"];
 
 /**
  * Sleep, feed and diaper entries for one child since `sinceMs`, fetched in
  * pages: PostgREST returns at most 1,000 rows a request, and a year of a
  * newborn's log is several thousand.
  */
-export function useKidEvents(kidId: string | null, sinceMs: number | null) {
+export function useKidEvents(kidId: string | null, sinceMs: number | null, types: string[] = DEFAULT_TYPES) {
   const [state, setState] = useState<{ key: string; events: ReportEvent[]; failed: boolean } | null>(null);
-  const key = `${kidId}:${sinceMs}`;
+  const typeKey = types.join(",");
+  const key = `${kidId}:${sinceMs}:${typeKey}`;
 
   useEffect(() => {
     if (!kidId || sinceMs === null) return;
@@ -27,7 +29,7 @@ export function useKidEvents(kidId: string | null, sinceMs: number | null) {
           .from("baby_events")
           .select("id, event_type, started_at, ended_at, payload")
           .eq("kid_id", kidId)
-          .in("event_type", ["sleep", "feed", "diaper"])
+          .in("event_type", typeKey.split(","))
           .gte("started_at", since)
           .order("started_at", { ascending: true })
           .range(from, from + PAGE - 1);
@@ -44,7 +46,7 @@ export function useKidEvents(kidId: string | null, sinceMs: number | null) {
     return () => {
       cancelled = true;
     };
-  }, [kidId, sinceMs, key]);
+  }, [kidId, sinceMs, key, typeKey]);
 
   const ready = state?.key === key;
   return { events: ready ? state.events : null, failed: ready ? state.failed : false };

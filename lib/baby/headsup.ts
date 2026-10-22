@@ -122,6 +122,8 @@ export function headsUp(input: {
       }
     } else if (e.event_type === "sleep" && nowMs - started > 8 * 3600_000) {
       out.push({ key: "open-sleep", tone: "raise", title: `Sleep timer running since ${clock(e.started_at)}`, detail: "Still asleep? If not, stop it.", href: "/baby/sleep" });
+    } else if (e.event_type === "settle" && nowMs - started > 60 * 60_000) {
+      out.push({ key: "open-settle", tone: "raise", title: `Settling since ${clock(e.started_at)}`, detail: "Asleep, or stopped? Tap one so the times stay right.", href: "/baby/sleep" });
     } else if (e.event_type === "pump" && nowMs - started > 60 * 60_000) {
       out.push({ key: "open-pump", tone: "raise", title: `Pump timer running since ${clock(e.started_at)}`, href: "/baby/pump" });
     }

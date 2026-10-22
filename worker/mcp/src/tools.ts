@@ -2,6 +2,18 @@ import { UserClient } from "./supabase";
 import { BuildError, bottleFeed, breastFeed, citations, diaper, growth } from "./baby";
 import { SLEEP_LOCATIONS } from "../../../lib/baby/locations";
 import { spanProblem, startProblem } from "../../../lib/baby/plausible";
+// Settling (Yenny's sleep log): same validation and pattern math as /baby/sleep/patterns.
+import {
+  METHOD_VALUES,
+  MOOD_VALUES,
+  SettleError,
+  WORKED_VALUES,
+  byMethod,
+  byNap,
+  methodLabel,
+  sleepRows,
+  sleepSettleFields,
+} from "../../../lib/baby/settle";
 // Shared with the app so an event booked in chat starts with exactly the same
 // sourced checklist as one added on the Plan screen.
 import { starterItems } from "../../../lib/plan/events";
@@ -368,9 +380,47 @@ export const TOOL_DEFINITIONS = [
         started_at: WHEN("When the sleep started."),
         ended_at: { type: "string", description: "ISO-8601. When they woke. Omit if still asleep." },
         location: { type: "string", enum: SLEEP_LOCATIONS, description: "Where they slept, if said. 'co-sleep' = with a parent." },
+        settle_started_at: {
+          type: "string",
+          description: "ISO-8601. When settling began (started trying to put them down). started_at is when they actually fell asleep.",
+        },
+        tried: { type: "array", items: { type: "string", enum: METHOD_VALUES }, description: "Everything tried to settle them, in order." },
+        worked: { type: "string", enum: WORKED_VALUES, description: "What finally worked; 'own' = fell asleep on their own." },
+        mood: { type: "string", enum: MOOD_VALUES, description: "How they went down." },
         note: { type: "string" },
       },
       required: ["kid", "started_at"],
+    },
+  },
+  {
+    name: "log_settle_attempt",
+    description:
+      "Record a settling attempt that was stopped without sleep (they didn't go down). Successful settling goes on log_sleep " +
+      "(settle_started_at, tried, worked, mood) instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kid: KID,
+        started_at: WHEN("When settling began."),
+        ended_at: { type: "string", description: "ISO-8601. When they stopped trying." },
+        tried: { type: "array", items: { type: "string", enum: METHOD_VALUES } },
+        mood: { type: "string", enum: MOOD_VALUES },
+      },
+      required: ["kid", "started_at", "ended_at"],
+    },
+  },
+  {
+    name: "sleep_patterns",
+    description:
+      "A child's settling and nap patterns over the last N days (default 14): each sleep with its nap number (Nap 1 = first " +
+      "sleep starting 7am-7pm), awake window before (from the last wake to the start of settling), minutes to settle, length, " +
+      "what was tried and what worked, and mood; medians by nap and by method; stopped attempts; and the family's own " +
+      "reference notes (e.g. from Leo's sleep plan). Read this before answering any question about naps, settling or " +
+      "sleep associations. Describe what the log shows and how much data it rests on; these are observations, not advice.",
+    inputSchema: {
+      type: "object",
+      properties: { kid: KID, days: { type: "integer", minimum: 1, maximum: 60 } },
+      required: ["kid"],
     },
   },
   {
@@ -905,12 +955,111 @@ export const HANDLERS: Record<string, Handler> = {
       event_type: "sleep",
       started_at: startedAt,
       ended_at: endedAt,
-      payload: args.location === undefined || args.location === null || args.location === "" ? {} : { location: oneOf(args, "location", SLEEP_LOCATIONS) },
+      payload: {
+        ...(args.location === undefined || args.location === null || args.location === "" ? {} : { location: oneOf(args, "location", SLEEP_LOCATIONS) }),
+        ...settleFields(() =>
+          sleepSettleFields({
+            settleStartedAt: optionalTimestamp(args, "settle_started_at"),
+            asleepAt: startedAt,
+            tried: args.tried,
+            worked: args.worked ?? (Array.isArray(args.tried) && args.tried.length ? args.tried[args.tried.length - 1] : undefined),
+            mood: args.mood,
+          })
+        ),
+      },
       note: str(args, "note", false) || null,
       logged_by_user_id: userId,
       written_by: WRITTEN_BY,
     });
     return { recorded: "sleep", id: row.id, kid: kid.name, running: !endedAt };
+  },
+
+  async log_settle_attempt(db, userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const startedAt = requiredTimestamp(args, "started_at");
+    const endedAt = requiredTimestamp(args, "ended_at");
+    const problem = spanProblem(startedAt, endedAt);
+    if (problem) throw new ToolError(problem);
+    const fields = settleFields(() => sleepSettleFields({ asleepAt: endedAt, tried: args.tried, mood: args.mood }));
+    const tried = ((fields.tried as string[] | undefined) ?? []).map((method) => ({ method, at: startedAt }));
+    const row = await db.insert<{ id: string }>("baby_events", {
+      family_id: familyId,
+      kid_id: kid.id,
+      event_type: "settle",
+      started_at: startedAt,
+      ended_at: endedAt,
+      payload: { tried, ...(fields.mood ? { mood: fields.mood } : {}), outcome: "stopped" },
+      logged_by_user_id: userId,
+      written_by: WRITTEN_BY,
+    });
+    return { recorded: "settle_attempt", id: row.id, kid: kid.name };
+  },
+
+  async sleep_patterns(db, _userId, familyId, args) {
+    const kid = await resolveKid(db, familyId, str(args, "kid"));
+    const days = Number.isInteger(args.days) ? Math.min(60, Math.max(1, args.days as number)) : 14;
+    const tz = await familyTz(db, familyId);
+    const now = Date.now();
+    const from = now - days * 86_400_000;
+    const [events, notes] = await Promise.all([
+      db.select<{ id: string; event_type: string; started_at: string; ended_at: string | null; payload: unknown }>(
+        "baby_events",
+        `select=id,event_type,started_at,ended_at,payload&kid_id=eq.${kid.id}&event_type=in.(sleep,settle)` +
+          `&started_at=gte.${encodeURIComponent(new Date(from - 86_400_000).toISOString())}&order=started_at.asc&limit=3000`
+      ),
+      db.select<{ payload: { category?: string; text?: string; detail?: string | null; source?: string; position?: number } }>(
+        "baby_events",
+        `select=payload&family_id=eq.${familyId}&event_type=eq.note&payload->>kind=eq.reference&payload->>topic=eq.sleep`
+      ),
+    ]);
+    const all = sleepRows(events, now, tz);
+    const rows = all.rows.filter((r) => r.asleepAt >= from);
+    const failed = all.failed.filter((f) => f.at >= from);
+    const clock = (ms: number | null) =>
+      ms === null ? null : new Date(ms).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+    return {
+      kid: kid.name,
+      days,
+      timezone: tz,
+      sleeps_logged: rows.length,
+      with_settling: rows.filter((r) => r.settleMin !== null).length,
+      by_nap: byNap(rows).map((n) => ({
+        nap: n.label,
+        sleeps: n.sleeps,
+        with_settling: n.settled,
+        median_awake_before_min: n.awakeMed,
+        median_minutes_to_settle: n.settleMed,
+        median_slept_min: n.durationMed,
+        moods: n.moods,
+      })),
+      by_method: byMethod(rows, failed).map((m) => ({
+        method: methodLabel(m.method),
+        worked: m.worked,
+        tried: m.tried,
+        median_minutes_to_settle_when_it_worked: m.settleMedWhenWorked,
+      })),
+      sleeps: rows.map((r) => ({
+        date: r.date,
+        nap: r.label,
+        settling_from: clock(r.settleStart),
+        asleep: clock(r.asleepAt),
+        woke: clock(r.wokeAt),
+        awake_before_min: r.awakeBeforeMin,
+        minutes_to_settle: r.settleMin,
+        slept_min: r.durationMin,
+        tried: r.tried.map(methodLabel),
+        worked: r.worked ? methodLabel(r.worked) : null,
+        mood: r.mood,
+        location: r.location,
+      })),
+      stopped_attempts: failed.map((f) => ({ at: new Date(f.at).toISOString(), minutes: f.minutes, tried: f.tried.map(methodLabel), mood: f.mood })),
+      reference_notes: notes
+        .sort((a, b) => (a.payload.position ?? 0) - (b.payload.position ?? 0))
+        .map((n) => ({ category: n.payload.category, text: n.payload.text, detail: n.payload.detail ?? null, source: n.payload.source })),
+      definitions:
+        "Awake before = from the previous wake to when settling began (to asleep if no settling was logged). Gaps over 12h are left " +
+        "blank. Sleeps over 16h are excluded as entry errors. Reference notes were written for Leo at 7-15 months.",
+    };
   },
 
   async log_growth(db, userId, familyId, args) {
@@ -1256,6 +1405,16 @@ export const HANDLERS: Record<string, Handler> = {
     return { recorded: "food_goal", id: row.id, from: startDate, kcal, targets: overrides };
   },
 };
+
+/** SettleError is the model's to fix, like any other bad argument. */
+function settleFields<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof SettleError) throw new ToolError(e.message);
+    throw e;
+  }
+}
 
 /** NutritionError is the model's to fix, like any other bad argument. */
 function nutrition<T>(fn: () => T): T {

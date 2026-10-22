@@ -36,6 +36,10 @@
     {
       "version": "20261006100000",
       "name": "food_move"
+    },
+    {
+      "version": "20261022150000",
+      "name": "settle"
     }
   ]
 }

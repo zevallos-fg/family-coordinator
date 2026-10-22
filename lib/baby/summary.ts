@@ -1,4 +1,5 @@
 import { formatDuration } from "./format";
+import { methodLabel, moodLabel } from "./settle";
 import { bottleAmountLabel, isBottle } from "./bottle";
 import { growthSummary } from "./growth";
 import { SIZE_LABELS } from "./events";
@@ -128,7 +129,9 @@ export function eventSummary(
     case "growth":
       return growthSummary(p);
     case "sleep":
-      return str(p, "location");
+      return [str(p, "location"), str(p, "worked") ? methodLabel(str(p, "worked")) : null, str(p, "mood") ? moodLabel(str(p, "mood")) : null]
+        .filter(Boolean)
+        .join(" · ") || null;
     case "pump": {
       const side = str(p, "side");
       const ml = num(p, "volume_ml");

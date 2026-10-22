@@ -142,7 +142,8 @@ test("each page explains itself and writes nothing while there is no child recor
 
   await page.goto("/baby/sleep");
   await expect(page.getByTestId("baby-blocked")).toBeVisible();
-  await expect(page.getByTestId("sleep-toggle")).toBeDisabled();
+  await expect(page.getByTestId("settle-start")).toBeDisabled();
+  await expect(page.getByTestId("sleep-direct")).toBeDisabled();
 
   const { count } = await admin
     .from("baby_events")
@@ -206,13 +207,13 @@ test("one tap logs a diaper and one tap starts a feed once the baby exists", asy
     })
     .toBe("medium");
 
-  // Sleep is a timer, on its own page, and one tap starts it.
+  // Sleep is a timer, on its own page. Already asleep: one tap starts it.
   await page.goto("/baby/sleep");
+  await page.getByTestId("sleep-direct").click();
   const sleep = page.getByTestId("sleep-toggle");
-  await sleep.click();
   await expect(sleep).toHaveAttribute("data-running", "true");
   await sleep.click();
-  await expect(sleep).toHaveAttribute("data-running", "false");
+  await expect(page.getByTestId("settle-start")).toBeVisible();
 
   const sleeps = await admin
     .from("baby_events")
@@ -221,6 +222,33 @@ test("one tap logs a diaper and one tap starts a feed once the baby exists", asy
     .eq("event_type", "sleep");
   expect(sleeps.data).toHaveLength(1);
   expect(sleeps.data![0].ended_at).not.toBeNull();
+
+  // Settling first: what was tried, in order, and the sleep starts at Asleep.
+  await page.getByTestId("settle-start").click();
+  await expect(page.getByTestId("settle-open")).toBeVisible();
+  await page.getByTestId("settle-try-breastfeed").click();
+  await expect(page.getByTestId("settle-try-breastfeed")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("settle-try-walk").click();
+  await expect(page.getByTestId("settle-try-walk")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("settle-mood-fussy").click();
+  await expect(page.getByTestId("settle-mood-fussy")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("settle-asleep").click();
+  // Two tried: it asks which worked, with the last one preselected.
+  await page.getByTestId("settle-worked-save").click();
+  await expect(page.getByTestId("sleep-toggle")).toHaveAttribute("data-running", "true");
+  await expect(page.getByTestId("sleep-settled")).toContainText("Walk");
+
+  const settled = await admin
+    .from("baby_events")
+    .select("id, started_at, payload")
+    .eq("family_id", familyId)
+    .eq("event_type", "sleep")
+    .is("ended_at", null)
+    .single();
+  expect(settled.data!.payload).toMatchObject({ tried: ["breastfeed", "walk"], worked: "walk", mood: "fussy" });
+  const settle = await admin.from("baby_events").select("ended_at, payload").eq("family_id", familyId).eq("event_type", "settle").single();
+  expect(settle.data!.payload).toMatchObject({ outcome: "asleep", sleep_id: settled.data!.id });
+  expect(new Date(settle.data!.ended_at!).getTime()).toBe(new Date(settled.data!.started_at).getTime());
 });
 
 test("a share link reads anonymously, shows its URL once, and dies on revoke", async ({
@@ -354,7 +382,7 @@ test("a start time can be corrected while the timer is still running", async ({ 
   expect(error).toBeNull();
 
   await page.goto("/baby/sleep");
-  await page.getByTestId("sleep-toggle").click();
+  await page.getByTestId("sleep-direct").click();
   await expect(page.getByTestId("sleep-toggle")).toHaveAttribute("data-running", "true");
 
   const before = await admin

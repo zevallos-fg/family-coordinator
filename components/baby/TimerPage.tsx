@@ -14,6 +14,8 @@ import { visibleChipGroups, type BabyEventType } from "@/lib/baby/events";
 import { formatClock, secondsBetween } from "@/lib/baby/format";
 import { AAP_SAFE_SLEEP } from "@/lib/baby/glance";
 import { spanProblem, startProblem } from "@/lib/baby/plausible";
+import { MOODS, SOOTHE_METHODS, ON_HER_OWN, SettleError, fmtMin, methodLabel, moodLabel, sleepSettleFields } from "@/lib/baby/settle";
+import { SettlePanel } from "./SettlePanel";
 import type { Json } from "@/lib/supabase/database.types";
 
 /**
@@ -123,6 +125,18 @@ export function TimerPage({
         <ManualTimerEntry familyId={familyId} type={type} kidId={lane.kidId} onSaved={lane.refresh} />
       }
     >
+      {type === "sleep" && !open ? (
+        <SettlePanel
+          familyId={familyId}
+          kidId={lane.kidId}
+          events={lane.events}
+          startInstant={start.instant}
+          onStartUsed={start.reset}
+          onStartSleep={() => void toggle()}
+          disabled={pending || !!blocked || !lane.kidId}
+          onChanged={lane.refresh}
+        />
+      ) : (
       <button
         type="button"
         onClick={toggle}
@@ -144,6 +158,20 @@ export function TimerPage({
           {open ? "tap to stop" : `tap to start ${title.toLowerCase()}`}
         </span>
       </button>
+      )}
+      {type === "sleep" && open && typeof payload.settle_started_at === "string" && (
+        <p className="text-center text-sm text-stone-600" data-testid="sleep-settled">
+          Settled in {fmtMin(Math.round((Date.parse(open.started_at) - Date.parse(payload.settle_started_at)) / 60_000))}
+          {typeof payload.worked === "string" ? ` · ${methodLabel(payload.worked)}` : ""}
+          {typeof payload.mood === "string" ? ` · ${moodLabel(payload.mood)}` : ""}
+        </p>
+      )}
+
+      {type === "sleep" && (
+        <Link href="/baby/sleep/patterns" className="block text-center text-sm text-violet-600" data-testid="sleep-patterns-link">
+          Settling patterns →
+        </Link>
+      )}
 
       {latest && groups.length > 0 && (
         <section className="space-y-3 rounded-2xl border border-stone-200 bg-white p-4">
@@ -207,6 +235,12 @@ function ManualTimerEntry({
   const [from, setFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 60 * 60_000)));
   const [to, setTo] = useState(() => toLocalInputValue());
   const [saving, setSaving] = useState(false);
+  // Sleep only: the settling that came before it, entered after the fact.
+  const [settleFrom, setSettleFrom] = useState<string | null>(null);
+  const [tried, setTried] = useState<string[]>([]);
+  const [worked, setWorked] = useState<string | null>(null);
+  const [mood, setMood] = useState<string | null>(null);
+  const isSleep = type === "sleep";
 
   async function save() {
     const startIso = fromLocalInputValue(from);
@@ -216,8 +250,23 @@ function ManualTimerEntry({
       toast.error(problem ?? "Both times are needed.");
       return;
     }
+    let payload: Record<string, Json> | undefined;
+    if (isSleep) {
+      try {
+        payload = sleepSettleFields({
+          settleStartedAt: settleFrom ? fromLocalInputValue(settleFrom) : null,
+          asleepAt: startIso,
+          tried,
+          worked: worked ?? (tried.length ? tried[tried.length - 1] : null),
+          mood,
+        });
+      } catch (e) {
+        toast.error(e instanceof SettleError ? e.message : "Check the settling times.");
+        return;
+      }
+    }
     setSaving(true);
-    const result = await logCompleted({ familyId, type, kidId, startIso, endIso });
+    const result = await logCompleted({ familyId, type, kidId, startIso, endIso, payload });
     setSaving(false);
     if (!result.ok) {
       toast.error(result.message);
@@ -225,12 +274,79 @@ function ManualTimerEntry({
     }
     await onSaved();
     toast.success("Logged");
+    setSettleFrom(null);
+    setTried([]);
+    setWorked(null);
+    setMood(null);
   }
+
+  const small = (on: boolean) => `rounded-full px-3 py-1.5 text-xs ${on ? "bg-violet-600 text-white" : "bg-stone-100 text-stone-700"}`;
 
   return (
     <div className="space-y-3 rounded-2xl border border-stone-200 bg-white p-4">
-      <ManualRow label="From" value={from} onChange={setFrom} testId="manual-from" />
-      <ManualRow label="To" value={to} onChange={setTo} testId="manual-to" />
+      {isSleep && settleFrom !== null && (
+        <ManualRow label="Started settling" value={settleFrom} onChange={setSettleFrom} testId="manual-settle-from" />
+      )}
+      <ManualRow label={isSleep ? "Asleep at" : "From"} value={from} onChange={setFrom} testId="manual-from" />
+      <ManualRow label={isSleep ? "Woke at" : "To"} value={to} onChange={setTo} testId="manual-to" />
+      {isSleep && settleFrom === null && (
+        <button
+          type="button"
+          onClick={() => setSettleFrom(toLocalInputValue(new Date((Date.parse(fromLocalInputValue(from) ?? "") || Date.now()) - 15 * 60_000)))}
+          className="text-xs text-violet-600"
+          data-testid="manual-settle-add"
+        >
+          + Add settling (when you started, what you tried)
+        </button>
+      )}
+      {isSleep && settleFrom !== null && (
+        <div className="space-y-2">
+          <p className="text-[11px] uppercase tracking-wide text-stone-400">Tried, in order</p>
+          <div className="flex flex-wrap gap-1.5">
+            {SOOTHE_METHODS.map((m) => {
+              const i = tried.indexOf(m.value);
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  aria-pressed={i >= 0}
+                  onClick={() => setTried((t) => (t.includes(m.value) ? t.filter((x) => x !== m.value) : [...t, m.value]))}
+                  className={small(i >= 0)}
+                >
+                  {i >= 0 ? `${i + 1}. ` : ""}
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+          {tried.length > 0 && (
+            <>
+              <p className="text-[11px] uppercase tracking-wide text-stone-400">What worked</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[...tried, ON_HER_OWN].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={(worked ?? tried[tried.length - 1]) === v}
+                    onClick={() => setWorked(v)}
+                    className={small((worked ?? tried[tried.length - 1]) === v)}
+                  >
+                    {methodLabel(v)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <p className="text-[11px] uppercase tracking-wide text-stone-400">Going down</p>
+          <div className="flex gap-1.5">
+            {MOODS.map((m) => (
+              <button key={m.value} type="button" aria-pressed={mood === m.value} onClick={() => setMood(mood === m.value ? null : m.value)} className={small(mood === m.value)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <button
         type="button"
         onClick={save}

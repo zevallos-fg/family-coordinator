@@ -72,7 +72,7 @@ All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 | `family_brief` | reads `fn_family_brief` — the whole family's current state, computed by the database |
 | `log_feed` | `baby_events` (feed; breast sides or bottle in ml/oz/g) |
 | `log_diaper` | `baby_events` (diaper) |
-| `log_sleep` | `baby_events` (sleep) |
+| `log_sleep` | `baby_events` (sleep); optional settling: settle_started_at, tried, worked, mood |
 | `log_growth` | `baby_events` (growth, lb/oz and inches) |
 | `add_medication` | `medications` |
 | `log_medicine_dose` | `baby_events` (medicine) |
@@ -91,6 +91,8 @@ All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
 | `log_activity` | `care_logs` (move) |
 | `nutrition_today` | reads `care_profiles`, `person_nutrition_targets`, `care_logs` — a day's food against the sourced breastfeeding intakes, plus movement and the exercise-clearance gate |
 | `set_food_goal` | `person_nutrition_targets` (append; latest start_date in effect wins) |
+| `log_settle_attempt` | `baby_events` (settle, outcome stopped) — a settling attempt that didn't end in sleep |
+| `sleep_patterns` | reads `baby_events` (sleep, settle, reference notes) — naps by number, awake window before, minutes to settle, what was tried and what worked (`lib/baby/settle.ts`) |
 
 The baby-log tools build their rows with `src/baby.ts`, which is tested against
 the app's own builders (`src/baby.test.ts`, run by the app's vitest): a feed

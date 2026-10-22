@@ -130,7 +130,7 @@ export function BabyIndex({ familyId }: { familyId: string }) {
 
   const kid = lane.kids.find((k) => k.id === lane.kidId) ?? null;
   const name = kid?.name ?? "your child";
-  const visibleForKid = lane.events.filter((e) => e.event_type !== "contraction" && (lane.kidId === null || e.kid_id === lane.kidId));
+  const visibleForKid = lane.events.filter((e) => !["contraction", "settle", "note"].includes(e.event_type) && (lane.kidId === null || e.kid_id === lane.kidId));
   const at = new Date(nowMs);
   const guides = guidesFor(kid?.birth_date, at);
   const days = ageInDays(kid?.birth_date, at);

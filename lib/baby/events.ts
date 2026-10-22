@@ -1,5 +1,6 @@
 import type { Database } from "@/lib/supabase/database.types";
 import { SLEEP_LOCATIONS } from "./locations";
+import { MOODS, MOOD_VALUES, ON_HER_OWN, SOOTHE_METHODS, WORKED_VALUES } from "./settle";
 
 export { SLEEP_LOCATIONS };
 
@@ -107,7 +108,22 @@ export const DETAIL_CHIPS: Record<BabyEventType, ChipGroup[]> = {
     },
   ],
   pump: [{ key: "side", label: "Side", options: ["left", "right", "both"] }],
-  sleep: [{ key: "location", label: "Where", options: SLEEP_LOCATIONS }],
+  sleep: [
+    { key: "location", label: "Where", options: SLEEP_LOCATIONS },
+    // Settling (lib/baby/settle.ts): filled in by the settle flow, and editable here.
+    {
+      key: "mood",
+      label: "Going down",
+      options: MOOD_VALUES,
+      optionLabels: Object.fromEntries(MOODS.map((m) => [m.value, m.label])),
+    },
+    {
+      key: "worked",
+      label: "What worked",
+      options: WORKED_VALUES,
+      optionLabels: { ...Object.fromEntries(SOOTHE_METHODS.map((m) => [m.value, m.label])), [ON_HER_OWN]: "On their own" },
+    },
+  ],
 };
 
 export const EVENT_LABEL: Record<string, string> = {
@@ -119,6 +135,7 @@ export const EVENT_LABEL: Record<string, string> = {
   growth: "Growth",
   medicine: "Medicine",
   note: "Note",
+  settle: "Settling",
 };
 
 /** Local midnight, as an ISO string PostgREST will accept. */
