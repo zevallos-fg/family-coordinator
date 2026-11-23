@@ -56,10 +56,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 ## Tools
 
-All append-only. No UPDATE, no DELETE, no SQL passthrough, no schema access.
+Append-only, with one exception: `mark_done` calls the same two RPCs the Now
+screen's tick calls (`fn_chore_done`, `fn_task_done`), which update a chore's
+last-done date or a task's status. Both are SECURITY INVOKER, so RLS binds them to
+the connector's user. No DELETE, no SQL passthrough, no schema access.
 
 | Tool | Writes to / reads |
 |---|---|
+| `mark_done` | `fn_chore_done` / `fn_task_done`; a decision gets a superseding `done` row in `memory_decisions` |
 | `remember_fact` | `memory_facts` |
 | `remember_decision` | `memory_decisions` |
 | `remember_task` | `tasks` (optional `remind_at` sends a phone notification) |

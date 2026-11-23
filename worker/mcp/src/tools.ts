@@ -320,6 +320,29 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "mark_done",
+    description:
+      "Tick off something on the family's list when someone says it is done: a chore " +
+      "(schedules the next one), a task, or a dated decision. The same action as tapping " +
+      "it on the Now screen. Name it with `item` (matched against what is due, e.g. " +
+      "'R2D2 dirty water') or pass `id` (source_id from whats_due). If more than one " +
+      "thing matches, nothing is changed and the matches are returned — ask which.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        item: { type: "string", description: "Words from the item's name, e.g. 'dirty water'." },
+        id: { type: "string", description: "source_id from whats_due. Use instead of item when known." },
+        done_at: {
+          type: "string",
+          description:
+            "ISO-8601 with offset. When it was actually done — a chore's next due date counts " +
+            "from this. 'Done!' in the moment means the time they said it.",
+        },
+      },
+      required: ["done_at"],
+    },
+  },
+  {
     name: "family_brief",
     description:
       "The family's current state in one read: each child's age, last-24h feeds/diapers/sleep, " +
@@ -880,6 +903,60 @@ export const HANDLERS: Record<string, Handler> = {
     });
     return { recorded: "chore", id: row.id, next_due_at: row.next_due_at };
   },
+
+  // Ticking something off from chat. Each kind is closed exactly the way the
+  // Now screen closes it (components/now/ChoreRow.tsx): fn_chore_done and
+  // fn_task_done are SECURITY INVOKER, so RLS binds them to this user; a
+  // decision is closed append-only, by a superseding 'done' row (lib/decisions.ts).
+  async mark_done(db, userId, familyId, args) {
+    const doneAt = requiredTimestamp(args, "done_at");
+    if (Date.parse(doneAt) > Date.now() + 5 * 60_000) {
+      throw new ToolError("done_at is in the future — mark it done once it has actually been done");
+    }
+    const target = await findDoneTarget(db, familyId, str(args, "id", false), str(args, "item", false));
+    if ("matches" in target) return target;
+
+    if (target.kind === "chore") {
+      const tz = await familyTz(db, familyId);
+      const doneOn = localDate(Date.parse(doneAt), tz);
+      const rows = await db.rpc<{ item: string; done_on: string; next_due_at: string }[]>("fn_chore_done", {
+        p_chore_id: target.id,
+        p_done_on: doneOn,
+      });
+      const r = rows[0];
+      return { done: "chore", id: target.id, item: r?.item ?? target.item, done_on: r?.done_on ?? doneOn, next_due_on: r?.next_due_at ?? null };
+    }
+
+    if (target.kind === "task") {
+      // fn_task_done stamps completed_at itself; it has no backdating argument.
+      const rows = await db.rpc<{ title: string; completed_at: string }[]>("fn_task_done", { p_task_id: target.id });
+      return { done: "task", id: target.id, item: rows[0]?.title ?? target.item, completed_at: rows[0]?.completed_at ?? null };
+    }
+
+    const originals = await db.select<{
+      id: string;
+      decision: string;
+      context: string | null;
+      owner_user_id: string | null;
+    }>("memory_decisions", `select=id,decision,context,owner_user_id&id=eq.${target.id}&family_id=eq.${familyId}`);
+    const original = originals[0];
+    if (!original) throw new ToolError(`decision ${target.id} not found or not visible to you`);
+    const row = await db.insert<{ id: string }>("memory_decisions", {
+      family_id: familyId,
+      decision: original.decision,
+      context: original.context,
+      owner_user_id: original.owner_user_id,
+      decided_at: new Date().toISOString(),
+      lifecycle_state: "done",
+      lifecycle_at: doneAt,
+      supersedes_decision_id: original.id,
+      decided_by_user_id: userId,
+      written_by: WRITTEN_BY,
+      source: "chat",
+    });
+    return { done: "decision", id: original.id, item: original.decision, closed_by: row.id };
+  },
+
   async family_brief(db, _userId, familyId) {
     return db.rpc("fn_family_brief", { p_family_id: familyId });
   },
@@ -1424,6 +1501,80 @@ function nutrition<T>(fn: () => T): T {
     if (e instanceof NutritionError) throw new ToolError(e.message);
     throw e;
   }
+}
+
+type DoneKind = "chore" | "task" | "decision";
+type DoneCandidate = { id: string; kind: DoneKind; item: string; due_on: string | null };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MATCH_STOPWORDS = new Set(["the", "a", "an", "to", "of", "and", "is", "it", "done"]);
+
+export function normalizeItem(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Which open items a free-text name points at. Every meaningful word of the
+ * query must appear in the item; an exact name wins outright. Pure, so it is
+ * unit-tested without a database.
+ */
+export function matchDoneCandidates(query: string, pool: DoneCandidate[]): DoneCandidate[] {
+  const q = normalizeItem(query);
+  if (!q) return [];
+  const exact = pool.filter((c) => normalizeItem(c.item) === q);
+  if (exact.length > 0) return exact;
+  const words = q.split(" ").filter((w) => !MATCH_STOPWORDS.has(w));
+  if (words.length === 0) return [];
+  return pool.filter((c) => {
+    const name = normalizeItem(c.item);
+    return words.every((w) => name.includes(w));
+  });
+}
+
+/** Everything that can be ticked off: what is due, plus undated open decisions. */
+async function donePool(db: UserClient, familyId: string): Promise<DoneCandidate[]> {
+  const [due, decisions] = await Promise.all([
+    db.select<{ kind: DoneKind; source_id: string; item: string; due_on: string | null }>(
+      "v_whats_due",
+      `select=kind,source_id,item,due_on&family_id=eq.${familyId}&order=due_on.asc`
+    ),
+    db.select<{ id: string; decision: string }>(
+      "v_memory_decisions_open",
+      `select=id,decision&family_id=eq.${familyId}&due_at=is.null`
+    ),
+  ]);
+  return [
+    ...due.map((r) => ({ id: r.source_id, kind: r.kind, item: r.item, due_on: r.due_on })),
+    ...decisions.map((d) => ({ id: d.id, kind: "decision" as const, item: d.decision, due_on: null })),
+  ];
+}
+
+async function findDoneTarget(
+  db: UserClient,
+  familyId: string,
+  id: string,
+  item: string
+): Promise<DoneCandidate | { changed: false; matches: DoneCandidate[]; note: string }> {
+  if (!id && !item) throw new ToolError("give item (its name) or id (source_id from whats_due)");
+  if (id && !UUID_RE.test(id)) throw new ToolError(`id must be a source_id uuid from whats_due (got "${id}")`);
+  const pool = await donePool(db, familyId);
+
+  if (id) {
+    const hit = pool.find((c) => c.id === id);
+    if (!hit) throw new ToolError(`nothing open with id ${id} — it may already be done. Check whats_due.`);
+    return hit;
+  }
+
+  const matches = matchDoneCandidates(item, pool);
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) {
+    throw new ToolError(`nothing open matches "${item}". Check whats_due for the exact name, or add it first.`);
+  }
+  return {
+    changed: false,
+    matches: matches.slice(0, 10),
+    note: "More than one item matches, so nothing was marked done. Ask which one, then call again with its id.",
+  };
 }
 
 async function familyTz(db: UserClient, familyId: string): Promise<string> {
