@@ -13,6 +13,29 @@ export default async function RecipesPage() {
     .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
+  // Holiday recipes are the ones we bookmark for guests who haven't had them yet.
+  // They get their own section at the top, oldest first so the first one saved
+  // stays the first card.
+  type RecipeRow = NonNullable<typeof recipes>[number];
+  const isHoliday = (r: RecipeRow) => (r.tags ?? []).includes("holiday");
+  const holidayRecipes = (recipes ?? []).filter(isHoliday).reverse();
+  const otherRecipes = (recipes ?? []).filter(r => !isHoliday(r));
+
+  const renderCard = (r: RecipeRow) => (
+    <RecipeCard
+      key={r.id}
+      id={r.id}
+      title={r.title}
+      description={r.description}
+      servings={r.servings}
+      prepTimeMin={r.prep_time_min}
+      cookTimeMin={r.cook_time_min}
+      tags={r.tags}
+      sourceUrl={r.source_url}
+      ingredientCount={r.recipe_ingredients?.length ?? 0}
+    />
+  );
+
   return (
     <main className="min-h-screen bg-amber-50/30">
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
@@ -46,22 +69,26 @@ export default async function RecipesPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {recipes.map(r => (
-              <RecipeCard
-                key={r.id}
-                id={r.id}
-                title={r.title}
-                description={r.description}
-                servings={r.servings}
-                prepTimeMin={r.prep_time_min}
-                cookTimeMin={r.cook_time_min}
-                tags={r.tags}
-                sourceUrl={r.source_url}
-                ingredientCount={r.recipe_ingredients?.length ?? 0}
-              />
-            ))}
-          </div>
+          <>
+            {holidayRecipes.length > 0 && (
+              <section className="space-y-3">
+                <h2 className="text-lg font-semibold text-gray-900">🦃 Holiday</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {holidayRecipes.map(renderCard)}
+                </div>
+              </section>
+            )}
+            {otherRecipes.length > 0 && (
+              <section className="space-y-3">
+                {holidayRecipes.length > 0 && (
+                  <h2 className="text-lg font-semibold text-gray-900">Everyday</h2>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {otherRecipes.map(renderCard)}
+                </div>
+              </section>
+            )}
+          </>
         )}
       </div>
     </main>
